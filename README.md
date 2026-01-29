@@ -1,0 +1,2 @@
+# autoFetchStock
+autoFetchStock
