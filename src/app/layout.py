@@ -1,0 +1,470 @@
+"""
+Dash layout module for autoFetchStock.
+
+This module defines the web application layout structure:
+- Stock search input field
+- Stock info display area
+- Dual-tab interface (intraday/K-line)
+- Chart containers
+- Control components (period selector, interval)
+"""
+
+from dash import html, dcc
+
+from src.models import KlinePeriod
+
+
+def create_layout() -> html.Div:
+    """
+    Create the main application layout.
+
+    Layout structure:
+    - Header with stock search
+    - Main content area with:
+      - Left sidebar (favorites list)
+      - Right content (stock info, tabs, charts)
+    - Status bar
+
+    Returns:
+        Dash html.Div containing the complete layout
+    """
+    return html.Div(
+        id="main-container",
+        className="main-container",
+        children=[
+            # Hidden stores and intervals
+            _create_hidden_components(),
+
+            # Header with search
+            _create_header(),
+
+            # Main content area (sidebar + content)
+            html.Div(
+                className="content-wrapper",
+                children=[
+                    # Left sidebar - Favorites
+                    _create_favorites_sidebar(),
+
+                    # Center content area
+                    html.Div(
+                        className="main-content",
+                        children=[
+                            # Stock info display
+                            _create_stock_info_section(),
+
+                            # Main tabs
+                            _create_tabs_section(),
+                        ]
+                    ),
+
+                    # Right sidebar - Big Orders
+                    _create_big_orders_sidebar(),
+                ]
+            ),
+
+            # Error message display
+            _create_error_display(),
+
+            # System status bar
+            _create_status_bar(),
+        ]
+    )
+
+
+def _create_hidden_components() -> html.Div:
+    """Create hidden components for state management."""
+    return html.Div(
+        style={"display": "none"},
+        children=[
+            # App state store
+            dcc.Store(
+                id="app-state-store",
+                data={
+                    "current_stock": None,
+                    "current_tab": "intraday",
+                    "current_period": "daily",
+                    "favorites": [],  # List of {id, name}
+                }
+            ),
+
+            # Auto-update interval (5 seconds during market hours)
+            dcc.Interval(
+                id="auto-update-interval",
+                interval=5 * 1000,  # 5 seconds
+                n_intervals=0,
+                disabled=True,  # Start disabled, enable when stock selected
+            ),
+        ]
+    )
+
+
+def _create_header() -> html.Div:
+    """Create header with stock search input."""
+    return html.Div(
+        id="header-section",
+        className="header-section",
+        children=[
+            html.H1(
+                "台股即時資料系統",
+                className="app-title"
+            ),
+            html.Div(
+                style={"position": "relative", "flex": "1", "max-width": "400px"},
+                children=[
+                    html.Div(
+                        className="search-container",
+                        children=[
+                            dcc.Input(
+                                id="stock-search-input",
+                                type="text",
+                                placeholder="輸入股票代號或名稱...",
+                                className="search-input",
+                            ),
+                            html.Button(
+                                "搜尋",
+                                id="stock-search-button",
+                                className="search-button",
+                            ),
+                        ]
+                    ),
+                    # Search results dropdown
+                    html.Div(
+                        id="stock-match-list",
+                        className="match-list",
+                        children=[],
+                    ),
+                ]
+            ),
+        ]
+    )
+
+
+def _create_favorites_sidebar() -> html.Div:
+    """Create favorites sidebar section."""
+    return html.Div(
+        id="favorites-sidebar",
+        className="favorites-sidebar",
+        children=[
+            html.H3("我的最愛", className="sidebar-title"),
+            html.Div(
+                id="favorites-list",
+                className="favorites-list",
+                children=[
+                    html.Div("尚未加入最愛", className="no-favorites")
+                ]
+            ),
+        ]
+    )
+
+
+def _create_big_orders_sidebar() -> html.Div:
+    """Create big orders monitoring sidebar."""
+    return html.Div(
+        id="big-orders-sidebar",
+        className="big-orders-sidebar",
+        children=[
+            html.H3("大戶即時監控", className="sidebar-title"),
+            html.Div(
+                className="big-orders-header",
+                children=[
+                    html.Span("時間", className="header-time"),
+                    html.Span("張數", className="header-volume"),
+                ]
+            ),
+            html.Div(
+                id="big-orders-list",
+                className="big-orders-list",
+                children=[
+                    html.Div("尚無大戶資料", className="no-data")
+                ]
+            ),
+        ]
+    )
+
+
+def _create_stock_info_section() -> html.Div:
+    """Create stock information display section."""
+    return html.Div(
+        id="stock-info-section",
+        className="stock-info-section",
+        children=[
+            # Stock name and ID with Star toggle
+            html.Div(
+                className="stock-header",
+                children=[
+                    html.Button(
+                        "★",
+                        id="stock-star-toggle",
+                        className="star-button",
+                        title="加入/移除最愛",
+                    ),
+                    html.Span(
+                        id="stock-name-display",
+                        className="stock-name",
+                        children="--",
+                    ),
+                    html.Span(
+                        id="stock-id-display",
+                        className="stock-id",
+                        children="",
+                    ),
+                ]
+            ),
+            # Price info
+            html.Div(
+                className="price-container",
+                children=[
+                    html.Span(
+                        id="stock-price-display",
+                        className="stock-price",
+                        children="--",
+                    ),
+                    html.Span(
+                        id="stock-change-display",
+                        className="stock-change",
+                        children="",
+                    ),
+                ]
+            ),
+            # Volume info
+            html.Div(
+                className="volume-container",
+                children=[
+                    html.Span("成交量：", className="label"),
+                    html.Span(
+                        id="stock-volume-display",
+                        className="stock-volume",
+                        children="--",
+                    ),
+                ]
+            ),
+            # Last update time
+            html.Div(
+                className="update-time-container",
+                children=[
+                    html.Span("更新時間：", className="label"),
+                    html.Span(
+                        id="last-update-display",
+                        className="last-update",
+                        children="--",
+                    ),
+                ]
+            ),
+        ]
+    )
+
+
+def _create_tabs_section() -> html.Div:
+    """Create main tabs section (Intraday / K-line)."""
+    return html.Div(
+        id="tabs-section",
+        className="tabs-section",
+        children=[
+            dcc.Tabs(
+                id="main-tabs",
+                value="intraday",
+                className="main-tabs",
+                children=[
+                    # Intraday tab
+                    dcc.Tab(
+                        label="分時資料",
+                        value="intraday",
+                        className="tab",
+                        selected_className="tab-selected",
+                        children=_create_intraday_tab_content(),
+                    ),
+                    # K-line tab
+                    dcc.Tab(
+                        label="K 線圖",
+                        value="kline",
+                        className="tab",
+                        selected_className="tab-selected",
+                        children=_create_kline_tab_content(),
+                    ),
+                ]
+            ),
+        ]
+    )
+
+
+def _create_intraday_tab_content() -> html.Div:
+    """Create intraday tab content."""
+    return html.Div(
+        id="intraday-tab-content",
+        className="tab-content",
+        children=[
+            # Intraday chart
+            dcc.Graph(
+                id="intraday-chart",
+                className="chart",
+                config={
+                    "displayModeBar": True,
+                    "scrollZoom": True,
+                    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+                },
+            ),
+        ]
+    )
+
+
+def _create_kline_tab_content() -> html.Div:
+    """Create K-line tab content."""
+    return html.Div(
+        id="kline-tab-content",
+        className="tab-content",
+        children=[
+            # Period selector
+            html.Div(
+                className="period-selector-container",
+                children=[
+                    html.Span("時間週期：", className="label"),
+                    dcc.RadioItems(
+                        id="period-selector",
+                        className="period-selector",
+                        options=[
+                            {"label": "日K", "value": "daily"},
+                            {"label": "週K", "value": "weekly"},
+                            {"label": "月K", "value": "monthly"},
+                            {"label": "1分", "value": "min_1"},
+                            {"label": "5分", "value": "min_5"},
+                            {"label": "15分", "value": "min_15"},
+                            {"label": "30分", "value": "min_30"},
+                            {"label": "60分", "value": "min_60"},
+                        ],
+                        value="daily",
+                        inline=True,
+                    ),
+                ]
+            ),
+            # OHLC info display (for hover)
+            html.Div(
+                id="ohlc-display",
+                className="ohlc-display",
+                children=[
+                    html.Span("開：", className="label"),
+                    html.Span(id="ohlc-open", className="ohlc-value", children="--"),
+                    html.Span("高：", className="label"),
+                    html.Span(id="ohlc-high", className="ohlc-value", children="--"),
+                    html.Span("低：", className="label"),
+                    html.Span(id="ohlc-low", className="ohlc-value", children="--"),
+                    html.Span("收：", className="label"),
+                    html.Span(id="ohlc-close", className="ohlc-value", children="--"),
+                    html.Span("量：", className="label"),
+                    html.Span(id="ohlc-volume", className="ohlc-value", children="--"),
+                ]
+            ),
+            # K-line chart
+            dcc.Graph(
+                id="kline-chart",
+                className="chart",
+                config={
+                    "displayModeBar": True,
+                    "scrollZoom": True,
+                    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+                },
+            ),
+        ]
+    )
+
+
+def _create_error_display() -> html.Div:
+    """Create error message display area."""
+    return html.Div(
+        id="error-message-display",
+        className="error-message-display",
+        style={"display": "none"},  # Hidden by default
+        children=[
+            html.Span(
+                id="error-icon",
+                className="error-icon",
+                children="⚠️"
+            ),
+            html.Span(
+                id="error-text",
+                className="error-text",
+                children=""
+            ),
+            html.Button(
+                "×",
+                id="error-close-button",
+                className="error-close-button"
+            ),
+        ]
+    )
+
+
+def _create_status_bar() -> html.Div:
+    """Create system status bar."""
+    return html.Div(
+        id="system-status-bar",
+        className="status-bar",
+        children=[
+            html.Span(
+                id="connection-status",
+                className="status-item",
+                children="● 連線狀態：正常"
+            ),
+            html.Span(
+                id="market-status",
+                className="status-item",
+                children="● 市場狀態：--"
+            ),
+            html.Span(
+                id="scheduler-status",
+                className="status-item",
+                children="● 排程狀態：--"
+            ),
+        ]
+    )
+
+
+# Component IDs for reference in callbacks
+COMPONENT_IDS = {
+    # Search components
+    "search_input": "stock-search-input",
+    "search_button": "stock-search-button",
+    "match_list": "stock-match-list",
+
+    # Stock info displays
+    "stock_star": "stock-star-toggle",
+    "stock_name": "stock-name-display",
+    "stock_id": "stock-id-display",
+    "stock_price": "stock-price-display",
+    "stock_change": "stock-change-display",
+    "stock_volume": "stock-volume-display",
+    "last_update": "last-update-display",
+
+    # Sidebar
+    "favorites_sidebar": "favorites-sidebar",
+    "favorites_list": "favorites-list",
+
+    # Tab components
+    "main_tabs": "main-tabs",
+    "intraday_tab": "intraday-tab-content",
+    "kline_tab": "kline-tab-content",
+
+    # Charts
+    "intraday_chart": "intraday-chart",
+    "kline_chart": "kline-chart",
+
+    # K-line controls
+    "period_selector": "period-selector",
+    "ohlc_display": "ohlc-display",
+    "ohlc_open": "ohlc-open",
+    "ohlc_high": "ohlc-high",
+    "ohlc_low": "ohlc-low",
+    "ohlc_close": "ohlc-close",
+    "ohlc_volume": "ohlc-volume",
+
+    # Hidden components
+    "app_state": "app-state-store",
+    "auto_update": "auto-update-interval",
+
+    # Error and status
+    "error_display": "error-message-display",
+    "error_text": "error-text",
+    "error_close": "error-close-button",
+    "connection_status": "connection-status",
+    "market_status": "market-status",
+    "scheduler_status": "scheduler-status",
+}
