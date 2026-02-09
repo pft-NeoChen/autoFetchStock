@@ -20,9 +20,36 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### API 設定 (Shioaji 永豐金)
+本系統支援永豐金 Shioaji API 提供即時串流資料。請依照以下步驟設定環境變數：
+
+1. **建立設定檔**: 複製範本檔案並重新命名為 `config.env`。
+   ```bash
+   cp config.env.example config.env
+   ```
+2. **編輯金鑰**: 開啟 `config.env` 並填入您的 API Key、Secret 與憑證資訊。
+   - `SHIOAJI_API_KEY_SIM`: 模擬環境金鑰。
+   - `SHIOAJI_API_KEY_PROD`: 正式環境金鑰。
+   - `SHIOAJI_CERT_PATH`: 憑證路徑 (例如 `./cert/Sinopac.pfx`)。
+   - `SHIOAJI_PERSON_ID`: 身分證字號。
+3. **安全提醒**: `config.env` 與 `cert/` 目錄已被加入 `.gitignore`，確保私密資訊不會上傳至 GitHub。
+
 ### 啟動應用
+系統支援兩種運行模式：
+
+- **模擬模式 (預設)**: 使用模擬環境金鑰與虛擬交易環境。
+  ```bash
+  python -m src.main
+  ```
+- **正式環境模式**: 連接真實市場資料。
+  ```bash
+  python -m src.main --production
+  ```
+
+### 驗證連線
+您可以使用內建腳本測試 API 連線狀態：
 ```bash
-python -m src.main
+python3 scripts/test_shioaji_login.py
 ```
 
 ### 執行測試
