@@ -50,6 +50,26 @@ class AppConfig:
     # Storage settings
     min_disk_space_mb: int = 100  # minimum free disk space in MB
 
+    # Shioaji API settings (Sinopac)
+    shioaji_api_key_sim: str = field(default_factory=lambda: os.getenv("SHIOAJI_API_KEY_SIM", ""))
+    shioaji_secret_key_sim: str = field(default_factory=lambda: os.getenv("SHIOAJI_SECRET_KEY_SIM", ""))
+    shioaji_api_key_prod: str = field(default_factory=lambda: os.getenv("SHIOAJI_API_KEY_PROD", ""))
+    shioaji_secret_key_prod: str = field(default_factory=lambda: os.getenv("SHIOAJI_SECRET_KEY_PROD", ""))
+    
+    shioaji_cert_path: str = field(default_factory=lambda: os.getenv("SHIOAJI_CERT_PATH", ""))
+    shioaji_cert_password: str = field(default_factory=lambda: os.getenv("SHIOAJI_CERT_PASSWORD", ""))
+    shioaji_person_id: str = field(default_factory=lambda: os.getenv("SHIOAJI_PERSON_ID", ""))
+    
+    shioaji_simulation: bool = field(
+        default_factory=lambda: os.getenv("SHIOAJI_SIMULATION", "true").lower() == "true"
+    )
+
+    def get_shioaji_credentials(self) -> tuple[str, str]:
+        """根據目前的模擬狀態回傳對應的 API Key 與 Secret."""
+        if self.shioaji_simulation:
+            return self.shioaji_api_key_sim, self.shioaji_secret_key_sim
+        return self.shioaji_api_key_prod, self.shioaji_secret_key_prod
+
     def __post_init__(self):
         """Ensure directories exist after initialization."""
         # Create data directories

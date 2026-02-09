@@ -87,10 +87,10 @@ def _create_hidden_components() -> html.Div:
                 }
             ),
 
-            # Auto-update interval (5 seconds during market hours)
+            # Auto-update interval (1 second for real-time feel)
             dcc.Interval(
                 id="auto-update-interval",
-                interval=5 * 1000,  # 5 seconds
+                interval=1 * 1000,  # 1 second
                 n_intervals=0,
                 disabled=True,  # Start disabled, enable when stock selected
             ),

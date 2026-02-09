@@ -48,6 +48,12 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--production",
+        action="store_true",
+        help="Run in production mode (connect to real market)"
+    )
+
+    parser.add_argument(
         "--data-dir",
         type=str,
         default="data",
@@ -74,7 +80,7 @@ def parse_args() -> argparse.Namespace:
 
 def create_config(args: argparse.Namespace) -> AppConfig:
     """Create AppConfig from command line arguments."""
-    return AppConfig(
+    config = AppConfig(
         host=args.host,
         port=args.port,
         debug=args.debug,
@@ -82,6 +88,12 @@ def create_config(args: argparse.Namespace) -> AppConfig:
         fetch_interval=args.fetch_interval,
         log_level=args.log_level,
     )
+    
+    # Override simulation mode if --production flag is used
+    if args.production:
+        config.shioaji_simulation = False
+        
+    return config
 
 
 def main() -> int:
@@ -91,6 +103,10 @@ def main() -> int:
     Returns:
         Exit code (0 for success, non-zero for error)
     """
+    # Load environment variables
+    from dotenv import load_dotenv
+    load_dotenv("config.env")
+
     # Parse arguments
     args = parse_args()
 

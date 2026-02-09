@@ -12,6 +12,7 @@ from dash import Dash
 
 from src.config import AppConfig, setup_logging
 from src.fetcher import DataFetcher
+from src.fetcher.shioaji_fetcher import ShioajiFetcher
 from src.storage import DataStorage
 from src.processor.data_processor import DataProcessor
 from src.renderer.chart_renderer import ChartRenderer
@@ -71,6 +72,17 @@ class AppController:
         # Data fetcher with storage for cache
         self.fetcher = DataFetcher(storage=self.storage)
         logger.debug("DataFetcher initialized")
+
+        # Shioaji fetcher
+        self.shioaji_fetcher = ShioajiFetcher(config=self.config)
+        if self.shioaji_fetcher.login():
+            logger.info("ShioajiFetcher logged in and ready")
+            self.shioaji_fetcher.set_callbacks(
+                on_quote=self._handle_shioaji_quote,
+                on_tick=self._handle_shioaji_tick
+            )
+        else:
+            logger.warning("ShioajiFetcher failed to login, fallback to TWSE only")
         
         # Pre-load stock list for search (in background ideally)
         try:
@@ -114,6 +126,7 @@ class AppController:
         self.callback_manager = CallbackManager(
             app=self.app,
             fetcher=self.fetcher,
+            shioaji_fetcher=self.shioaji_fetcher,
             storage=self.storage,
             processor=self.processor,
             renderer=self.renderer,
@@ -269,11 +282,53 @@ class AppController:
         if self.scheduler:
             self.scheduler.stop()
 
+        # Logout shioaji
+        if hasattr(self, 'shioaji_fetcher'):
+            self.shioaji_fetcher.logout()
+
         # Close fetcher session
         if self.fetcher:
             self.fetcher.close()
 
         logger.info("AppController shutdown complete")
+
+    def _handle_shioaji_quote(self, quote) -> None:
+        """Handle real-time quote from Shioaji."""
+        # Update storage or cache if needed
+        # For now, we mainly rely on ticks for chart data
+        pass
+
+    def _handle_shioaji_tick(self, tick) -> None:
+        """Handle real-time tick from Shioaji and save to storage."""
+        from datetime import date
+        from src.models import IntradayTick
+        
+        try:
+            # Extract metadata attached by ShioajiFetcher
+            stock_name = getattr(tick, "stock_name", "")
+            reference = getattr(tick, "reference", 0)
+
+            # Shioaji ticks provide direct volume and side
+            internal_tick = IntradayTick(
+                time=tick.timestamp.time(),
+                price=tick.price,
+                volume=tick.volume,
+                buy_volume=tick.volume if tick.tick_type == "buy" else 0,
+                sell_volume=tick.volume if tick.tick_type == "sell" else 0,
+                accumulated_volume=0, # Will be calculated by processor if needed
+                timestamp=tick.timestamp
+            )
+            
+            # Save to storage
+            self.storage.save_intraday_data(
+                stock_id=tick.stock_id,
+                stock_name=stock_name,
+                trade_date=date.today(),
+                previous_close=reference,
+                ticks=[internal_tick]
+            )
+        except Exception as e:
+            logger.error(f"Error saving Shioaji tick: {e}")
 
     @property
     def server(self):

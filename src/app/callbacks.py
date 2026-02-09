@@ -38,7 +38,7 @@ class CallbackManager:
     registers all callbacks with the Dash app.
     """
 
-    def __init__(self, app, fetcher, storage, processor, renderer, scheduler):
+    def __init__(self, app, fetcher, storage, processor, renderer, scheduler, shioaji_fetcher=None):
         """
         Initialize callback manager.
 
@@ -49,9 +49,11 @@ class CallbackManager:
             processor: DataProcessor instance
             renderer: ChartRenderer instance
             scheduler: Scheduler instance
+            shioaji_fetcher: ShioajiFetcher instance (optional)
         """
         self.app = app
         self.fetcher = fetcher
+        self.shioaji_fetcher = shioaji_fetcher
         self.storage = storage
         self.processor = processor
         self.renderer = renderer
@@ -289,6 +291,14 @@ class CallbackManager:
 
                 # Try to get realtime quote
                 quote = self.fetcher.fetch_realtime_quote(stock_id)
+
+                # Subscribe to Shioaji streaming if available
+                if self.shioaji_fetcher and self.shioaji_fetcher.is_connected:
+                    # Unsubscribe previous if changed
+                    if self._current_stock_id and self._current_stock_id != stock_id:
+                        self.shioaji_fetcher.unsubscribe(self._current_stock_id)
+                    
+                    self.shioaji_fetcher.subscribe(stock_id)
 
                 # Update internal state
                 self._current_stock_id = stock_id
