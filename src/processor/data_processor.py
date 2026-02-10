@@ -365,10 +365,6 @@ class DataProcessor:
         if "sell_volume" not in result_df.columns:
             result_df["sell_volume"] = 0
 
-        # Per-tick display
-        result_df["buy_volume_display"] = result_df["buy_volume"].abs()
-        result_df["sell_volume_display"] = -result_df["sell_volume"].abs()
-
         # Net cumulative volume (Buy - Sell)
         # Represents the overall buying/selling strength
         result_df["net_cum_volume"] = (result_df["buy_volume"] - result_df["sell_volume"]).cumsum()
@@ -494,6 +490,7 @@ class DataProcessor:
                 "buy_volume": tick.buy_volume,
                 "sell_volume": tick.sell_volume,
                 "accumulated_volume": tick.accumulated_volume,
+                "is_odd": getattr(tick, "is_odd", False),
             }
             for tick in ticks
         ])
@@ -511,24 +508,50 @@ class DataProcessor:
         if df.empty:
             return df
 
-        # Calculate actual tick volume from accumulated volume
-        # This is the total volume traded between the previous and current poll
-        df["tick_vol_calc"] = df["accumulated_volume"].diff().fillna(0)
+        # Fix sawtooth pattern in accumulated volume (Shioaji ticks have acc=0)
+        # We replace 0 with NaN and forward fill to propagate the last known total volume
+        if "accumulated_volume" in df.columns:
+            df["accumulated_volume"] = df["accumulated_volume"].replace(0, np.nan).ffill().fillna(0)
+
+        # Calculate actual tick volume from accumulated volume or use provided volume
+        # Primary source: 'volume' column (should be per-tick volume)
+        df["tick_vol_calc"] = df["volume"]
         
-        # If the first record has accumulated volume, use it as the first tick volume
-        if not df.empty:
-            df.loc[0, "tick_vol_calc"] = df.loc[0, "accumulated_volume"]
+        # If volume is 0 but accumulated volume exists, try to recover from diff
+        # (This handles legacy data or potential sync issues)
+        if (df["tick_vol_calc"] == 0).all() and "accumulated_volume" in df.columns:
+             df["tick_vol_calc"] = df["accumulated_volume"].diff().fillna(0)
+             if not df.empty:
+                 df.loc[0, "tick_vol_calc"] = df.loc[0, "accumulated_volume"]
 
         # Heuristic for buy/sell volume attribution
         df["price_diff"] = df["price"].diff().fillna(0)
         
         # Cast to float to avoid FutureWarning
-        df["buy_volume"] = 0.0
-        df["sell_volume"] = 0.0
+        if "buy_volume" not in df.columns:
+            df["buy_volume"] = 0.0
+        if "sell_volume" not in df.columns:
+            df["sell_volume"] = 0.0
+            
+        df["buy_volume"] = df["buy_volume"].astype(float)
+        df["sell_volume"] = df["sell_volume"].astype(float)
+        
+        # Normalize Odd Lots (Shares) to Board Lots (1 Lot = 1000 Shares)
+        # This ensures all volume units are consistent (Lots) for charts and calculations
+        if "is_odd" in df.columns:
+            odd_mask = df["is_odd"] == True
+            if odd_mask.any():
+                df.loc[odd_mask, "tick_vol_calc"] = df.loc[odd_mask, "tick_vol_calc"] / 1000.0
+                df.loc[odd_mask, "buy_volume"] = df.loc[odd_mask, "buy_volume"] / 1000.0
+                df.loc[odd_mask, "sell_volume"] = df.loc[odd_mask, "sell_volume"] / 1000.0
         
         # Attribute the calculated tick volume based on price movement
-        # If price went up, attribute to buy. If down, to sell. If same, split.
+        # ONLY if explicit buy/sell volume is missing (e.g. from TWSE fallback)
         for idx, row in df.iterrows():
+            # If explicit data exists (from Shioaji), skip heuristic
+            if row["buy_volume"] > 0 or row["sell_volume"] > 0:
+                continue
+                
             vol = row["tick_vol_calc"]
             if row["price_diff"] > 0:
                 df.at[idx, "buy_volume"] = vol
@@ -541,9 +564,16 @@ class DataProcessor:
 
         # Identify Big Orders (REQ-BigPlayer)
         # Criteria: Volume >= 499 OR Amount >= 10,000,000
-        # Amount = Price * Volume * 1000 (shares per lot)
+        # Amount = Price * Volume (Lots) * 1000 (Shares/Lot)
+        # Since we normalized tick_vol_calc to Lots, this formula works for both Board and Odd lots
         tick_amount = df["price"] * df["tick_vol_calc"] * 1000
+        
         is_big_volume = df["tick_vol_calc"] >= 499
+        # Filter out odd lots from big volume check (redundant if normalized, 499 shares = 0.499 lots < 499)
+        # But kept for safety
+        if "is_odd" in df.columns:
+            is_big_volume = is_big_volume & (~df["is_odd"])
+        
         is_big_amount = tick_amount >= 10000000
         
         is_big_order = is_big_volume | is_big_amount
@@ -556,6 +586,10 @@ class DataProcessor:
 
         # Separate buy/sell volume for visualization (calculates net_cum_volume)
         df = self.separate_buy_sell_volume(df)
+        
+        # Debug logging for volume investigation
+        # if not df.empty:
+        #     logger.info(f"Intraday Volume Sample (Tail):\\n{df[['time', 'tick_vol_calc', 'buy_volume', 'sell_volume', 'net_cum_volume']].tail()}")
 
         # Resample to minute bars if period specified
         if period and period.minutes:

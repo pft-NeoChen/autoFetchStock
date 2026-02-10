@@ -184,10 +184,11 @@ class IntradayTick:
     time: time                  # Transaction time
     price: float                # Transaction price
     volume: int                 # Transaction volume (in lots/張)
-    buy_volume: int             # Buy volume (positive, upward)
-    sell_volume: int            # Sell volume (positive, shown downward as negative)
+    buy_volume: float           # Buy volume (positive, upward)
+    sell_volume: float          # Sell volume (positive, shown downward as negative)
     accumulated_volume: int     # Accumulated volume for the day
     timestamp: datetime = field(default_factory=datetime.now)  # Record timestamp
+    is_odd: bool = False        # Whether this is an odd lot trade (volume in shares)
 
     def __post_init__(self):
         """Validate tick data."""
@@ -212,6 +213,7 @@ class IntradayTick:
             "sell_volume": self.sell_volume,
             "accumulated_volume": self.accumulated_volume,
             "timestamp": self.timestamp.isoformat(),
+            "is_odd": self.is_odd,
         }
 
     @classmethod
@@ -221,10 +223,11 @@ class IntradayTick:
             time=time.fromisoformat(data["time"]),
             price=float(data["price"]),
             volume=int(data["volume"]),
-            buy_volume=int(data["buy_volume"]),
-            sell_volume=int(data["sell_volume"]),
+            buy_volume=float(data["buy_volume"]),
+            sell_volume=float(data["sell_volume"]),
             accumulated_volume=int(data["accumulated_volume"]),
             timestamp=datetime.fromisoformat(data["timestamp"]) if "timestamp" in data else datetime.now(),
+            is_odd=data.get("is_odd", False),
         )
 
 

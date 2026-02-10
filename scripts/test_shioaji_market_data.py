@@ -7,9 +7,16 @@ from datetime import datetime, timedelta
 def test_market_data():
     load_dotenv("config.env")
     
-    api_key = os.getenv("SHIOAJI_API_KEY")
-    secret_key = os.getenv("SHIOAJI_SECRET_KEY")
     is_simulation = os.getenv("SHIOAJI_SIMULATION", "true").lower() == "true"
+    
+    if is_simulation:
+        api_key = os.getenv("SHIOAJI_API_KEY_SIM")
+        secret_key = os.getenv("SHIOAJI_SECRET_KEY_SIM")
+        print("模式: 模擬環境 (Simulation)")
+    else:
+        api_key = os.getenv("SHIOAJI_API_KEY_PROD")
+        secret_key = os.getenv("SHIOAJI_SECRET_KEY_PROD")
+        print("模式: 正式環境 (Production)")
 
     api = sj.Shioaji(simulation=is_simulation)
     

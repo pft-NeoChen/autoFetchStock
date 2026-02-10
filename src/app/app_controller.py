@@ -69,20 +69,23 @@ class AppController:
         self.storage = DataStorage(data_dir=self.config.data_dir)
         logger.debug("DataStorage initialized")
 
-        # Data fetcher with storage for cache
-        self.fetcher = DataFetcher(storage=self.storage)
-        logger.debug("DataFetcher initialized")
-
         # Shioaji fetcher
         self.shioaji_fetcher = ShioajiFetcher(config=self.config)
         if self.shioaji_fetcher.login():
             logger.info("ShioajiFetcher logged in and ready")
             self.shioaji_fetcher.set_callbacks(
                 on_quote=self._handle_shioaji_quote,
-                on_tick=self._handle_shioaji_tick
+                on_tick=self._handle_shioaji_tick  # Re-enable raw ticks for accurate big orders
             )
         else:
             logger.warning("ShioajiFetcher failed to login, fallback to TWSE only")
+
+        # Data fetcher with storage for cache and Shioaji fetcher
+        self.fetcher = DataFetcher(
+            storage=self.storage,
+            shioaji_fetcher=self.shioaji_fetcher
+        )
+        logger.debug("DataFetcher initialized")
         
         # Pre-load stock list for search (in background ideally)
         try:
@@ -161,6 +164,11 @@ class AppController:
         Args:
             stock_id: Stock ID to fetch
         """
+        # Skip if Shioaji is handling this stock
+        if self.shioaji_fetcher and self.shioaji_fetcher.is_subscribed(stock_id):
+            logger.debug(f"Skipping scheduled fetch for {stock_id} (Shioaji active)")
+            return
+
         try:
             # Fetch realtime quote
             quote = self.fetcher.fetch_realtime_quote(stock_id)
@@ -185,40 +193,60 @@ class AppController:
             last_price = quote.previous_close # Default
             
             existing_data = self.storage.load_intraday_data(quote.stock_id, date.today())
+            stream_sum = 0
+            
             if existing_data and existing_data.ticks:
                 last_tick = existing_data.ticks[-1]
-                last_accumulated_volume = last_tick.accumulated_volume
                 last_price = last_tick.price
+                
+                # Search backwards for last non-zero accumulated volume
+                for t in reversed(existing_data.ticks):
+                    if t.accumulated_volume > 0:
+                        last_accumulated_volume = t.accumulated_volume
+                        break
+                    
+                    # Skip odd lots for stream sum (they are shares, but quote.total_volume is lots)
+                    if getattr(t, 'is_odd', False):
+                        continue
+                        
+                    stream_sum += t.volume
 
             # Calculate actual volume since last poll
             if quote.total_volume >= last_accumulated_volume:
-                tick_volume = quote.total_volume - last_accumulated_volume
+                delta = quote.total_volume - last_accumulated_volume
+                # Deduplicate: Subtract volume already captured by stream ticks
+                tick_volume = max(0, delta - stream_sum)
             else:
                 tick_volume = getattr(quote, "tick_volume", 0)
 
             # Determine buy/sell volume based on Price Trend (Primary)
-            buy_volume = 0
-            sell_volume = 0
+            buy_volume = 0.0
+            sell_volume = 0.0
             
             if quote.current_price > last_price:
                 # Price Up -> Dominant Buy
-                buy_volume = tick_volume
+                buy_volume = float(tick_volume)
             elif quote.current_price < last_price:
                 # Price Down -> Dominant Sell
-                sell_volume = tick_volume
+                sell_volume = float(tick_volume)
             else:
                 # Price Unchanged -> Check Bid/Ask
                 best_ask = getattr(quote, "best_ask", 0)
                 best_bid = getattr(quote, "best_bid", 0)
                 
                 if best_ask and quote.current_price >= best_ask:
-                    buy_volume = tick_volume
+                    buy_volume = float(tick_volume)
                 elif best_bid and quote.current_price <= best_bid:
-                    sell_volume = tick_volume
+                    sell_volume = float(tick_volume)
                 else:
                     # Indeterminate -> Split
-                    buy_volume = tick_volume / 2
-                    sell_volume = tick_volume / 2
+                    buy_volume = tick_volume / 2.0
+                    sell_volume = tick_volume / 2.0
+
+            # If this is the first data point (gap fill from 0 to Current Total), do not bias Buy/Sell power
+            if last_accumulated_volume == 0:
+                buy_volume = 0.0
+                sell_volume = 0.0
 
             tick = IntradayTick(
                 time=quote.timestamp.time() if quote.timestamp else datetime.now().time(),
@@ -301,31 +329,24 @@ class AppController:
     def _handle_shioaji_tick(self, tick) -> None:
         """Handle real-time tick from Shioaji and save to storage."""
         from datetime import date
-        from src.models import IntradayTick
         
         try:
-            # Extract metadata attached by ShioajiFetcher
+            # tick is already an IntradayTick instance with metadata attached by ShioajiFetcher
             stock_name = getattr(tick, "stock_name", "")
             reference = getattr(tick, "reference", 0)
-
-            # Shioaji ticks provide direct volume and side
-            internal_tick = IntradayTick(
-                time=tick.timestamp.time(),
-                price=tick.price,
-                volume=tick.volume,
-                buy_volume=tick.volume if tick.tick_type == "buy" else 0,
-                sell_volume=tick.volume if tick.tick_type == "sell" else 0,
-                accumulated_volume=0, # Will be calculated by processor if needed
-                timestamp=tick.timestamp
-            )
+            stock_id = getattr(tick, "stock_id", "")
             
+            if not stock_id:
+                logger.warning("Received Shioaji tick without stock_id")
+                return
+
             # Save to storage
             self.storage.save_intraday_data(
-                stock_id=tick.stock_id,
+                stock_id=stock_id,
                 stock_name=stock_name,
                 trade_date=date.today(),
                 previous_close=reference,
-                ticks=[internal_tick]
+                ticks=[tick]
             )
         except Exception as e:
             logger.error(f"Error saving Shioaji tick: {e}")

@@ -39,6 +39,7 @@ class ShioajiFetcher:
         self.api = sj.Shioaji(simulation=self.config.shioaji_simulation)
         self.is_connected = False
         self._subscriptions: Dict[str, Any] = {}
+        self._last_quotes: Dict[str, RealtimeQuote] = {}  # Cache for latest quotes
         self._on_quote_callback: Optional[Callable[[RealtimeQuote], None]] = None
         self._on_tick_callback: Optional[Callable[[IntradayTick], None]] = None
         
@@ -65,9 +66,10 @@ class ShioajiFetcher:
                 )
                 logger.info("Shioaji CA activated.")
             
-            # Note: Using attribute assignment instead of set_callback based on testing
-            self.api.on_quote_stkv1_callback = self._handle_quote
-            self.api.on_tick_stkv1_callback = self._handle_tick
+            # Note: Using set_on_quote_stk_v1_callback explicitly
+            logger.info("Setting Shioaji callbacks...")
+            self.api.quote.set_on_quote_stk_v1_callback(self._handle_quote)
+            self.api.quote.set_on_tick_stk_v1_callback(self._handle_tick)
             
             self.is_connected = True
             return True
@@ -102,6 +104,8 @@ class ShioajiFetcher:
                 "reference": getattr(contract, "reference", 0)
             }
             
+            # Subscribe to Quote and Tick
+            logger.info(f"Subscribing to {stock_id} ({contract.name})...")
             self.api.quote.subscribe(contract, quote_type=sj.constant.QuoteType.Quote, version=QuoteVersion.v1)
             self.api.quote.subscribe(contract, quote_type=sj.constant.QuoteType.Tick, version=QuoteVersion.v1)
             
@@ -116,21 +120,75 @@ class ShioajiFetcher:
             contract = sub_info["contract"]
             self.api.quote.unsubscribe(contract, quote_type=sj.constant.QuoteType.Quote)
             self.api.quote.unsubscribe(contract, quote_type=sj.constant.QuoteType.Tick)
+            
+            # Remove from cache
+            self._last_quotes.pop(stock_id, None)
+            
             logger.info(f"Unsubscribed from {stock_id}")
+
+    def get_last_quote(self, stock_id: str) -> Optional[RealtimeQuote]:
+        """Get the last received quote for a stock."""
+        return self._last_quotes.get(stock_id)
+        
+    def is_subscribed(self, stock_id: str) -> bool:
+        """Check if stock is currently subscribed."""
+        return stock_id in self._subscriptions
 
     def _handle_quote(self, exchange, quote):
         """Callback handler for Shioaji Quote updates."""
+        # logger.debug(f"Received quote for {quote.code}: simtrade={quote.simtrade}, price={quote.close}, vol_sum={getattr(quote, 'vol_sum', 'N/A')}")
+        
+        # filter out simtrade
+        if quote.simtrade:
+            return
+
         try:
-            sub_info = self._subscriptions.get(quote.code, {})
+            from src.models import PriceDirection, PriceChange
+
+            stock_id = quote.code
+            sub_info = self._subscriptions.get(stock_id, {})
+            stock_name = sub_info.get("name", "")
+            reference = sub_info.get("reference", 0)
+            
+            current_price = float(quote.close)
+            
+            # Calculate change and direction
+            if reference > 0:
+                change = current_price - reference
+                change_percent = (change / reference) * 100
+                if change > 0:
+                    direction = PriceDirection.UP
+                elif change < 0:
+                    direction = PriceDirection.DOWN
+                else:
+                    direction = PriceDirection.FLAT
+            else:
+                change = 0.0
+                change_percent = 0.0
+                direction = PriceDirection.FLAT
+            
+            # Shioaji quote object fields mapping
             rt_quote = RealtimeQuote(
-                stock_id=quote.code,
-                name=sub_info.get("name", ""),
-                current_price=float(quote.close),
-                change=float(quote.diff),
-                change_percent=float(quote.diff_rate),
-                volume=int(quote.vol_sum),
-                timestamp=datetime.now()
+                stock_id=stock_id,
+                stock_name=stock_name,
+                current_price=current_price,
+                open_price=float(quote.open) if hasattr(quote, 'open') else current_price,
+                high_price=float(quote.high) if hasattr(quote, 'high') else current_price,
+                low_price=float(quote.low) if hasattr(quote, 'low') else current_price,
+                previous_close=reference,
+                change_amount=change,
+                change_percent=change_percent,
+                direction=direction,
+                total_volume=int(quote.total_volume) if hasattr(quote, 'total_volume') else 0, # Reverted to total_volume based on log
+                tick_volume=int(quote.volume) if hasattr(quote, 'volume') else 0,
+                best_bid=float(quote.bid_price[0]) if hasattr(quote, 'bid_price') and quote.bid_price else 0.0,
+                best_ask=float(quote.ask_price[0]) if hasattr(quote, 'ask_price') and quote.ask_price else 0.0,
+                timestamp=datetime.now() # Use local time as quote.datetime might be offset
             )
+            
+            # Update cache
+            self._last_quotes[stock_id] = rt_quote
+            
             if self._on_quote_callback:
                 self._on_quote_callback(rt_quote)
         except Exception as e:
@@ -138,6 +196,8 @@ class ShioajiFetcher:
 
     def _handle_tick(self, exchange, tick):
         """Callback handler for Shioaji Tick updates."""
+        # logger.info(f"Raw Tick: code={tick.code}, type={tick.tick_type}, vol={tick.volume}, odd={tick.intraday_odd}")
+        
         # filter out simtrade (trial trades before market open/during pauses)
         if tick.simtrade:
             return
@@ -145,20 +205,27 @@ class ShioajiFetcher:
         try:
             sub_info = self._subscriptions.get(tick.code, {})
             # Convert Shioaji Tick to IntradayTick
+            # TickSTKv1 doesn't have bid/ask/total_volume
+            # tick_type: 1=Buy, 2=Sell
+            buy_vol = int(tick.volume) if tick.tick_type == 1 else 0
+            sell_vol = int(tick.volume) if tick.tick_type == 2 else 0
+            
+            # if sell_vol > 0:
+            #     logger.info(f"SELL DETECTED: {tick.code}, vol={sell_vol}")
+            
             it_tick = IntradayTick(
-                stock_id=tick.code,
+                time=tick.datetime.time(),
                 price=float(tick.close),
                 volume=int(tick.volume),
-                timestamp=datetime.fromtimestamp(tick.datetime.timestamp()),
-                bid_price=float(tick.bid_price[0]) if tick.bid_price else 0.0,
-                ask_price=float(tick.ask_price[0]) if tick.ask_price else 0.0,
-                tick_type="buy" if tick.tick_type == 1 else "sell" if tick.tick_type == 2 else "neutral"
+                buy_volume=buy_vol,
+                sell_volume=sell_vol,
+                accumulated_volume=0, # Tick doesn't have accumulated volume
+                timestamp=tick.datetime,
+                is_odd=getattr(tick, 'intraday_odd', False)
             )
             
-            # Attach metadata for storage use
-            # Use dictionary if it_tick doesn't support setattr on all fields
-            # or just rely on AppController to extract it.
-            # Here we use it as a custom property on the object.
+            # Attach metadata for storage use (AppController expects these)
+            it_tick.stock_id = tick.code
             it_tick.stock_name = sub_info.get("name", "")
             it_tick.reference = sub_info.get("reference", 0)
 

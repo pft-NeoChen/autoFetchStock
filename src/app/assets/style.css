@@ -296,6 +296,9 @@ body {
 }
 
 .favorite-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     padding: var(--spacing-sm) var(--spacing-md);
     background-color: var(--bg-tertiary);
     border-radius: 4px;
@@ -319,6 +322,13 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     display: block;
+    margin-right: var(--spacing-sm);
+}
+
+.favorite-item-price {
+    font-weight: 500;
+    min-width: 60px;
+    text-align: right;
 }
 
 /* Star Button */

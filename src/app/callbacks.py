@@ -79,7 +79,7 @@ class CallbackManager:
             Output("app-state-store", "data", allow_duplicate=True),
             Input("main-container", "id"),
             State("app-state-store", "data"),
-            prevent_initial_call=True
+            prevent_initial_call='initial_duplicate'
         )
         def load_initial_favorites(_, current_state: dict):
             """Load favorites from storage on initial load."""
@@ -90,7 +90,12 @@ class CallbackManager:
             new_state = current_state.copy()
             new_state["favorites"] = favorites
             
-            # Also add all favorites to scheduler for background fetching
+            # Subscribe to Shioaji for all favorites
+            if self.shioaji_fetcher and self.shioaji_fetcher.is_connected:
+                for fav in favorites:
+                    self.shioaji_fetcher.subscribe(fav["id"])
+            
+            # Also add all favorites to scheduler for background fetching (fallback)
             for fav in favorites:
                 self.scheduler.add_stock_job(fav["id"])
                 
@@ -122,6 +127,11 @@ class CallbackManager:
                 # Remove from favorites
                 favorites = [f for f in favorites if f["id"] != stock_id]
                 star_class = "star-button"
+                # Unsubscribe from Shioaji if not current stock
+                # (But current_stock IS stock_id here, so we might want to keep subscription for main view)
+                # Ideally, main view manages its own subscription.
+                # If we remove from favorites, we just let it be. 
+                # If user navigates away, main view subscription logic handles it.
                 logger.info(f"Removed {stock_id} from favorites")
             else:
                 # Add to favorites
@@ -130,6 +140,9 @@ class CallbackManager:
                     "name": self._current_stock_name or stock_id
                 })
                 star_class = "star-button active"
+                # Subscribe to Shioaji
+                if self.shioaji_fetcher and self.shioaji_fetcher.is_connected:
+                    self.shioaji_fetcher.subscribe(stock_id)
                 logger.info(f"Added {stock_id} to favorites")
 
             # Update state and save to storage
@@ -142,8 +155,9 @@ class CallbackManager:
         @self.app.callback(
             Output("favorites-list", "children"),
             Input("app-state-store", "data"),
+            Input("auto-update-interval", "n_intervals")
         )
-        def render_favorites_list(app_state: dict):
+        def render_favorites_list(app_state: dict, n_intervals: int):
             """Render the favorites list sidebar."""
             favorites = app_state.get("favorites", [])
             current_stock = app_state.get("current_stock")
@@ -153,13 +167,34 @@ class CallbackManager:
 
             items = []
             for fav in favorites:
-                is_active = fav["id"] == current_stock
+                stock_id = fav["id"]
+                is_active = stock_id == current_stock
+                
+                # Fetch real-time price (non-blocking)
+                price_text = "--"
+                price_class = "favorite-item-price"
+                
+                try:
+                    # Using blocking=False to avoid UI freeze if many favorites use TWSE
+                    quote = self.fetcher.fetch_realtime_quote(stock_id, blocking=False)
+                    if quote:
+                        price_text = f"{quote.current_price:.2f}"
+                        if quote.change_amount > 0:
+                            price_class += " price-up"
+                        elif quote.change_amount < 0:
+                            price_class += " price-down"
+                        else:
+                            price_class += " price-flat"
+                except Exception:
+                    pass
+
                 items.append(
                     html.Div(
-                        id={"type": "favorite-item", "index": fav["id"]},
+                        id={"type": "favorite-item", "index": stock_id},
                         className=f"favorite-item{' active' if is_active else ''}",
                         children=[
-                            html.Span(f"{fav['name']} ({fav['id']})", className="favorite-item-text"),
+                            html.Span(f"{fav['name']} ({stock_id})", className="favorite-item-text"),
+                            html.Span(price_text, className=price_class),
                         ],
                         n_clicks=0,
                     )
@@ -289,28 +324,37 @@ class CallbackManager:
                 # Try to fetch by exact ID first, then search
                 stock_id = search_value.strip().upper()
 
-                # Try to get realtime quote
+                # Fetch realtime quote (blocking is fine for search submit)
                 quote = self.fetcher.fetch_realtime_quote(stock_id)
 
+                # Check if in favorites (Needed for unsubscription logic)
+                favorites = current_state.get("favorites", [])
+                fav_ids = [f["id"] for f in favorites]
+
                 # Subscribe to Shioaji streaming if available
+                is_using_shioaji = False
                 if self.shioaji_fetcher and self.shioaji_fetcher.is_connected:
-                    # Unsubscribe previous if changed
+                    # Unsubscribe previous if changed AND not in favorites
                     if self._current_stock_id and self._current_stock_id != stock_id:
-                        self.shioaji_fetcher.unsubscribe(self._current_stock_id)
+                        # If previous stock is a favorite, keep subscription!
+                        if self._current_stock_id not in fav_ids:
+                            self.shioaji_fetcher.unsubscribe(self._current_stock_id)
                     
                     self.shioaji_fetcher.subscribe(stock_id)
+                    is_using_shioaji = True
 
                 # Update internal state
                 self._current_stock_id = stock_id
                 self._current_stock_name = quote.stock_name
 
-                # Check if in favorites
-                favorites = current_state.get("favorites", [])
+                # Check if in favorites (for star button)
                 is_favorite = any(f["id"] == stock_id for f in favorites)
                 star_class = "star-button active" if is_favorite else "star-button"
 
                 # Save as intraday tick for chart (Immediate update)
-                self._save_quote_as_tick(quote)
+                # Skip if using Shioaji (AppController handles streaming ticks)
+                if not is_using_shioaji:
+                    self._save_quote_as_tick(quote)
 
                 # Add to scheduler for background updates
                 self.scheduler.add_stock_job(stock_id)
@@ -753,86 +797,105 @@ class CallbackManager:
                 )
 
             try:
-                quote = self.fetcher.fetch_realtime_quote(stock_id)
+                # Fetch realtime quote (non-blocking)
+                # If Shioaji has data, it returns immediately.
+                # If falling back to TWSE, it returns None if rate limit hit.
+                quote = self.fetcher.fetch_realtime_quote(stock_id, blocking=False)
+                
+                if quote is None:
+                    # Rate limit hit (TWSE) or no data available yet
+                    return (
+                        no_update, no_update, no_update, no_update,
+                        no_update, no_update, market_text, scheduler_text, no_update, no_update, no_update
+                    )
+
                 direction_class = self._get_direction_class(quote.direction)
                 change_text = f"{'+' if quote.change_amount >= 0 else ''}{quote.change_amount:.2f} ({'+' if quote.change_percent >= 0 else ''}{quote.change_percent:.2f}%)"
 
                 # Save as intraday tick
+                # Always save quote as tick to ensure continuous chart data.
+                # Ideally, this handles both TWSE and Shioaji Quote snapshots.
                 self._save_quote_as_tick(quote)
 
-                # Update intraday chart if on intraday tab
+                # OPTIMIZATION: Update charts every 2 seconds (n_intervals % 2 == 0)
+                # Text updates (price, time) happen every second.
                 intraday_figure = no_update
                 big_orders_items = no_update
-                
-                # Always load intraday data to update Big Orders list, even if tab not active?
-                # The user wants "realtime monitoring", usually implies visible.
-                # Let's update it if we have data.
-                intraday_data = self.storage.load_intraday_data(stock_id, date.today())
-                
-                if intraday_data and intraday_data.ticks:
-                    df = self.processor.prepare_intraday_data(intraday_data.ticks)
-                    
-                    if active_tab == "intraday":
-                        intraday_figure = self.renderer.render_intraday_chart(
-                            df,
-                            f"{quote.stock_name} ({stock_id})",
-                            quote.previous_close
-                        )
-                    
-                    # Generate Big Orders List (Newest at Top)
-                    big_orders_items = []
-                    if "is_big_buy" in df.columns:
-                        big_orders = df[df["is_big_buy"] | df["is_big_sell"]]
-                        # Reverse iteration to show newest first
-                        for _, row in big_orders.iloc[::-1].iterrows():
-                            is_buy = row["is_big_buy"]
-                            vol_class = "big-order-volume big-buy" if is_buy else "big-order-volume big-sell"
-                            time_str = row["time"].strftime("%H:%M:%S") if isinstance(row["time"], datetime) else str(row["time"])
-                            
-                            big_orders_items.append(
-                                html.Div(
-                                    className="big-order-item",
-                                    children=[
-                                        html.Span(time_str, className="big-order-time"),
-                                        html.Span(f"{row['tick_vol_calc']:.0f}", className=vol_class),
-                                    ]
-                                )
-                            )
-                        if not big_orders_items:
-                            big_orders_items = [html.Div("尚無大戶資料", className="no-data")]
-                else:
-                    if active_tab == "intraday":
-                        intraday_figure = self.renderer.render_empty_chart("載入中...")
-                    big_orders_items = [html.Div("尚無大戶資料", className="no-data")]
-
-                # Update K-line chart if on K-line tab
                 kline_figure = no_update
-                if active_tab == "kline":
-                    daily_file = self.storage.load_daily_data(stock_id)
-                    if daily_file:
-                        period_map = {
-                            "daily": KlinePeriod.DAILY,
-                            "weekly": KlinePeriod.WEEKLY,
-                            "monthly": KlinePeriod.MONTHLY,
-                            "min_1": KlinePeriod.MIN_1,
-                            "min_5": KlinePeriod.MIN_5,
-                            "min_15": KlinePeriod.MIN_15,
-                            "min_30": KlinePeriod.MIN_30,
-                            "min_60": KlinePeriod.MIN_60,
-                        }
-                        period = period_map.get(period_value, KlinePeriod.DAILY)
+                
+                if n_intervals % 2 == 0:
+                    # Update intraday chart if on intraday tab OR if we need Big Orders (which needs intraday data)
+                    # Note: Big Orders list is always visible, so we usually need to load this.
+                    # Optimization: Only load if we are on intraday tab OR (it's time to update big orders and we want them)
+                    # Let's keep loading it every 2s for Big Orders.
+                    
+                    intraday_data = self.storage.load_intraday_data(stock_id, date.today())
+                    
+                    if intraday_data and intraday_data.ticks:
+                        df = self.processor.prepare_intraday_data(intraday_data.ticks)
                         
-                        # Merge live quote into K-line
-                        kline_df = self.processor.prepare_kline_data(
-                            daily_file.daily_data, 
-                            period,
-                            realtime_quote=quote
-                        )
-                        kline_figure = self.renderer.render_kline_chart(
-                            kline_df,
-                            f"{quote.stock_name} ({stock_id})",
-                            period.display_name
-                        )
+                        # Only render intraday chart if tab is active
+                        if active_tab == "intraday":
+                            intraday_figure = self.renderer.render_intraday_chart(
+                                df,
+                                f"{quote.stock_name} ({stock_id})",
+                                quote.previous_close
+                            )
+                        
+                        # Generate Big Orders List (Newest at Top)
+                        big_orders_items = []
+                        
+                        if "is_big_buy" in df.columns:
+                            big_orders = df[df["is_big_buy"] | df["is_big_sell"]]
+                            # Reverse iteration to show newest first
+                            for _, row in big_orders.iloc[::-1].iterrows():
+                                is_buy = row["is_big_buy"]
+                                vol_class = "big-order-volume big-buy" if is_buy else "big-order-volume big-sell"
+                                time_str = row["time"].strftime("%H:%M:%S") if isinstance(row["time"], datetime) else str(row["time"])
+                                
+                                big_orders_items.append(
+                                    html.Div(
+                                        className="big-order-item",
+                                        children=[
+                                            html.Span(time_str, className="big-order-time"),
+                                            html.Span(f"{row['tick_vol_calc']:.0f}", className=vol_class),
+                                        ]
+                                    )
+                                )
+                            if not big_orders_items:
+                                big_orders_items = [html.Div("尚無大戶資料", className="no-data")]
+                    else:
+                        if active_tab == "intraday":
+                            intraday_figure = self.renderer.render_empty_chart("載入中...")
+                        big_orders_items = [html.Div("尚無大戶資料", className="no-data")]
+
+                    # Update K-line chart if on K-line tab
+                    if active_tab == "kline":
+                        daily_file = self.storage.load_daily_data(stock_id)
+                        if daily_file:
+                            period_map = {
+                                "daily": KlinePeriod.DAILY,
+                                "weekly": KlinePeriod.WEEKLY,
+                                "monthly": KlinePeriod.MONTHLY,
+                                "min_1": KlinePeriod.MIN_1,
+                                "min_5": KlinePeriod.MIN_5,
+                                "min_15": KlinePeriod.MIN_15,
+                                "min_30": KlinePeriod.MIN_30,
+                                "min_60": KlinePeriod.MIN_60,
+                            }
+                            period = period_map.get(period_value, KlinePeriod.DAILY)
+                            
+                            # Merge live quote into K-line
+                            kline_df = self.processor.prepare_kline_data(
+                                daily_file.daily_data, 
+                                period,
+                                realtime_quote=quote
+                            )
+                            kline_figure = self.renderer.render_kline_chart(
+                                kline_df,
+                                f"{quote.stock_name} ({stock_id})",
+                                period.display_name
+                            )
 
                 return (
                     f"{quote.current_price:.2f}",
@@ -936,37 +999,59 @@ class CallbackManager:
             last_price = quote.previous_close # Default to prev close if no ticks
             
             existing_data = self.storage.load_intraday_data(quote.stock_id, date.today())
+            stream_sum = 0
+            
             if existing_data and existing_data.ticks:
                 last_tick = existing_data.ticks[-1]
-                last_accumulated_volume = last_tick.accumulated_volume
                 last_price = last_tick.price
+                
+                # Search backwards for last non-zero accumulated volume
+                # And sum up the volume of Shioaji ticks (acc=0) in between
+                for t in reversed(existing_data.ticks):
+                    if t.accumulated_volume > 0:
+                        last_accumulated_volume = t.accumulated_volume
+                        break
+                    
+                    # Skip odd lots for stream sum (they are shares, but quote.total_volume is lots)
+                    if getattr(t, 'is_odd', False):
+                        continue
+                        
+                    stream_sum += t.volume
 
             # Calculate actual volume since last poll
             if quote.total_volume >= last_accumulated_volume:
-                tick_volume = quote.total_volume - last_accumulated_volume
+                delta = quote.total_volume - last_accumulated_volume
+                # Deduplicate: Subtract volume already captured by stream ticks
+                tick_volume = max(0, delta - stream_sum)
             else:
                 tick_volume = quote.tick_volume
 
             # Determine buy/sell volume based on Price Trend (Primary) -> Bid/Ask (Secondary)
-            buy_volume = 0
-            sell_volume = 0
+            buy_volume = 0.0
+            sell_volume = 0.0
             
             if quote.current_price > last_price:
                 # Price Up -> Dominant Buy
-                buy_volume = tick_volume
+                buy_volume = float(tick_volume)
             elif quote.current_price < last_price:
                 # Price Down -> Dominant Sell
-                sell_volume = tick_volume
+                sell_volume = float(tick_volume)
             else:
                 # Price Unchanged -> Check Bid/Ask
                 if quote.best_ask and quote.current_price >= quote.best_ask:
-                    buy_volume = tick_volume
+                    buy_volume = float(tick_volume)
                 elif quote.best_bid and quote.current_price <= quote.best_bid:
-                    sell_volume = tick_volume
+                    sell_volume = float(tick_volume)
                 else:
                     # Indeterminate -> Split
-                    buy_volume = tick_volume / 2
-                    sell_volume = tick_volume / 2
+                    buy_volume = tick_volume / 2.0
+                    sell_volume = tick_volume / 2.0
+
+            # If this is the first data point (gap fill from 0 to Current Total), do not bias Buy/Sell power
+            # We preserve tick_volume for the Total Volume chart, but neutralize Buy/Sell Power
+            if last_accumulated_volume == 0:
+                buy_volume = 0.0
+                sell_volume = 0.0
 
             tick = IntradayTick(
                 time=quote.timestamp.time() if quote.timestamp else datetime.now().time(),

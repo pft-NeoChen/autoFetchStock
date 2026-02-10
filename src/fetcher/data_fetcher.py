@@ -65,7 +65,7 @@ class DataFetcher:
         "Referer": "https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/stk_quote.php"
     }
 
-    def __init__(self, storage=None):
+    def __init__(self, storage=None, shioaji_fetcher=None):
         """Initialize HTTP session and tracking variables."""
         self._session = requests.Session()
         self._session.headers.update(self.DEFAULT_HEADERS)
@@ -75,6 +75,7 @@ class DataFetcher:
         self._stock_list_cache_time: Optional[datetime] = None
         self._is_fetching_list: bool = False
         self.storage = storage # Optional storage for persistent cache
+        self.shioaji_fetcher = shioaji_fetcher # Optional Shioaji fetcher for cached quotes
         logger.info("DataFetcher initialized")
         
         # Try to pre-load stock list in background or early
@@ -82,15 +83,17 @@ class DataFetcher:
         # but for now we'll just let the first search handle it or call it here.
         # self._get_stock_list() 
 
-    def fetch_realtime_quote(self, stock_id: str) -> RealtimeQuote:
+    def fetch_realtime_quote(self, stock_id: str, blocking: bool = True) -> Optional[RealtimeQuote]:
         """
         Fetch real-time quote for a stock (REQ-002).
 
         Args:
             stock_id: Stock ID (e.g., "2330")
+            blocking: Whether to block/sleep if rate limit is hit.
 
         Returns:
             RealtimeQuote with current price, change, volume, etc.
+            Returns None if blocking=False and rate limit is hit.
 
         Raises:
             ConnectionTimeoutError: Connection timeout (REQ-100)
@@ -98,6 +101,13 @@ class DataFetcher:
             StockNotFoundError: Stock not found (REQ-102)
             ServiceUnavailableError: Too many consecutive failures (REQ-104)
         """
+        # Check Shioaji cache first (bypass TWSE API if available)
+        if self.shioaji_fetcher:
+            cached_quote = self.shioaji_fetcher.get_last_quote(stock_id)
+            if cached_quote:
+                logger.debug(f"Using cached Shioaji quote for {stock_id}: {cached_quote.current_price}")
+                return cached_quote
+
         self._check_consecutive_failures()
 
         # Determine if it's TSE or OTC
@@ -117,12 +127,16 @@ class DataFetcher:
         }
 
         try:
-            data = self._make_request(self.REALTIME_URL, params)
+            data = self._make_request(self.REALTIME_URL, params, blocking=blocking)
             quote = TWSEParser.parse_realtime_quote(data, stock_id)
             self._reset_failure_count()
             logger.info(f"Fetched realtime quote for {stock_id}: {quote.current_price}")
             return quote
 
+        except BlockingIOError:
+            # Rate limit hit in non-blocking mode
+            return None
+            
         except (InvalidDataError, StockNotFoundError):
             self._increment_failure_count()
             raise
@@ -316,7 +330,8 @@ class DataFetcher:
         url: str,
         params: dict = None,
         expect_json: bool = True,
-        bypass_limit: bool = False
+        bypass_limit: bool = False,
+        blocking: bool = True
     ):
         """
         Make HTTP request with rate limiting, timeout, and retry.
@@ -326,6 +341,7 @@ class DataFetcher:
             params: Query parameters
             expect_json: Whether to parse response as JSON
             bypass_limit: Whether to skip rate limiting (for non-API calls)
+            blocking: Whether to block if rate limit is hit
 
         Returns:
             Parsed JSON dict or raw text response
@@ -333,10 +349,12 @@ class DataFetcher:
         Raises:
             ConnectionTimeoutError: Connection timeout after retry
             InvalidDataError: Invalid response format
+            BlockingIOError: If non-blocking and rate limit hit
         """
         # Rate limiting (REQ-060)
         if not bypass_limit:
-            self._enforce_rate_limit()
+            if not self._enforce_rate_limit(blocking=blocking):
+                raise BlockingIOError("Rate limit exceeded")
 
         # First attempt
         try:
@@ -412,18 +430,29 @@ class DataFetcher:
                 timeout=self.CONNECTION_TIMEOUT
             )
 
-    def _enforce_rate_limit(self) -> None:
+    def _enforce_rate_limit(self, blocking: bool = True) -> bool:
         """
         Enforce minimum interval between requests.
 
         Implements rate limiting per TWSE API requirements.
+
+        Args:
+            blocking: Whether to sleep if rate limit is hit.
+
+        Returns:
+            True if request can proceed (either waited or didn't need to).
+            False if rate limit hit and blocking=False.
         """
         if self._last_request_time > 0:
             elapsed = time.time() - self._last_request_time
             if elapsed < self.REQUEST_INTERVAL:
+                if not blocking:
+                    return False
+                
                 sleep_time = self.REQUEST_INTERVAL - elapsed
                 logger.debug(f"Rate limiting: sleeping {sleep_time:.2f}s")
                 time.sleep(sleep_time)
+        return True
 
     def _check_consecutive_failures(self) -> None:
         """
