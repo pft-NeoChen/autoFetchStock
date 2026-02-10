@@ -244,7 +244,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-xs);
-    max-height: 400px; /* Limit height */
+    max-height: 160px; /* Show ~5 items */
 }
 
 .big-order-item {
@@ -278,6 +278,129 @@ body {
     text-align: center;
     padding: var(--spacing-md);
     font-size: var(--font-sm);
+}
+
+/* === Best Five Prices (最佳五檔) === */
+
+.best-five-section {
+    border-top: 1px solid var(--border-color);
+    margin-top: var(--spacing-sm);
+    padding-top: var(--spacing-sm);
+}
+
+.bidask-ratio-container {
+    margin-bottom: var(--spacing-sm);
+}
+
+.bidask-ratio-bar {
+    position: relative;
+    height: 20px;
+    background-color: var(--color-up);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.bidask-ratio-inner {
+    height: 100%;
+    background-color: var(--color-down);
+    transition: width 0.3s ease;
+}
+
+.bidask-ratio-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 11px;
+    color: #fff;
+    font-weight: 500;
+    text-shadow: 0 0 3px rgba(0,0,0,0.5);
+}
+
+.bidask-ratio-values {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 2px;
+    font-size: var(--font-sm);
+}
+
+.ask-total-val {
+    color: var(--color-down);
+}
+
+.bid-total-val {
+    color: var(--color-up);
+}
+
+.five-prices-header {
+    display: flex;
+    padding: var(--spacing-xs) 0;
+    border-bottom: 1px solid var(--border-color);
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+}
+
+.five-header-buy {
+    flex: 1;
+    text-align: center;
+}
+
+.five-header-sell {
+    flex: 1;
+    text-align: center;
+}
+
+.five-prices-body {
+    display: flex;
+    flex-direction: column;
+}
+
+.five-price-row {
+    display: flex;
+    padding: 3px 0;
+    font-size: var(--font-sm);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.five-bid-vol,
+.five-ask-vol {
+    width: 25%;
+    text-align: right;
+    color: var(--text-primary);
+}
+
+.five-bid-price {
+    width: 25%;
+    text-align: right;
+    color: var(--color-up);
+    padding-right: 4px;
+}
+
+.five-ask-price {
+    width: 25%;
+    text-align: left;
+    color: var(--color-down);
+    padding-left: 4px;
+}
+
+.five-subtotal-row {
+    display: flex;
+    padding: 4px 0;
+    font-size: var(--font-sm);
+    font-weight: 600;
+    border-top: 2px solid var(--border-color);
+}
+
+.five-subtotal-vol {
+    width: 25%;
+    text-align: right;
+    color: var(--text-primary);
+}
+
+.five-subtotal-label {
+    width: 50%;
+    text-align: center;
+    color: var(--text-secondary);
 }
 
 .favorites-list {

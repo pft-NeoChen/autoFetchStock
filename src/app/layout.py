@@ -158,7 +158,7 @@ def _create_favorites_sidebar() -> html.Div:
 
 
 def _create_big_orders_sidebar() -> html.Div:
-    """Create big orders monitoring sidebar."""
+    """Create big orders monitoring sidebar with best five prices."""
     return html.Div(
         id="big-orders-sidebar",
         className="big-orders-sidebar",
@@ -176,6 +176,63 @@ def _create_big_orders_sidebar() -> html.Div:
                 className="big-orders-list",
                 children=[
                     html.Div("尚無大戶資料", className="no-data")
+                ]
+            ),
+
+            # Best Five Prices section
+            _create_best_five_prices(),
+        ]
+    )
+
+
+def _create_best_five_prices() -> html.Div:
+    """Create best five prices (最佳五檔) section."""
+    return html.Div(
+        id="best-five-prices-section",
+        className="best-five-section",
+        children=[
+            html.H3("最佳五檔", className="sidebar-title"),
+
+            # Bid/Ask ratio bar
+            html.Div(
+                className="bidask-ratio-container",
+                children=[
+                    html.Div(
+                        className="bidask-ratio-bar",
+                        children=[
+                            html.Div(
+                                id="bidask-ratio-inner",
+                                className="bidask-ratio-inner",
+                                style={"width": "50%"},
+                            ),
+                            html.Span("內外盤比", className="bidask-ratio-label"),
+                        ]
+                    ),
+                    html.Div(
+                        className="bidask-ratio-values",
+                        children=[
+                            html.Span(id="ask-total-vol", className="ask-total-val", children="--"),
+                            html.Span(id="bid-total-vol", className="bid-total-val", children="--"),
+                        ]
+                    ),
+                ]
+            ),
+
+            # Table header
+            html.Div(
+                className="five-prices-header",
+                children=[
+                    html.Span("買進", className="five-header-buy"),
+                    html.Span("賣出", className="five-header-sell"),
+                ]
+            ),
+
+            # Five-level rows
+            html.Div(
+                id="best-five-prices-body",
+                className="five-prices-body",
+                children=[
+                    html.Div("等待五檔資料...", className="no-data")
                 ]
             ),
         ]

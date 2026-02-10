@@ -40,6 +40,7 @@ class ShioajiFetcher:
         self.is_connected = False
         self._subscriptions: Dict[str, Any] = {}
         self._last_quotes: Dict[str, RealtimeQuote] = {}  # Cache for latest quotes
+        self._last_bidask: Dict[str, dict] = {}  # Cache for latest bid/ask five-level data
         self._on_quote_callback: Optional[Callable[[RealtimeQuote], None]] = None
         self._on_tick_callback: Optional[Callable[[IntradayTick], None]] = None
         
@@ -123,12 +124,17 @@ class ShioajiFetcher:
             
             # Remove from cache
             self._last_quotes.pop(stock_id, None)
+            self._last_bidask.pop(stock_id, None)
             
             logger.info(f"Unsubscribed from {stock_id}")
 
     def get_last_quote(self, stock_id: str) -> Optional[RealtimeQuote]:
         """Get the last received quote for a stock."""
         return self._last_quotes.get(stock_id)
+
+    def get_last_bidask(self, stock_id: str) -> Optional[dict]:
+        """Get the last received bid/ask five-level data for a stock."""
+        return self._last_bidask.get(stock_id)
         
     def is_subscribed(self, stock_id: str) -> bool:
         """Check if stock is currently subscribed."""
@@ -188,7 +194,26 @@ class ShioajiFetcher:
             
             # Update cache
             self._last_quotes[stock_id] = rt_quote
-            
+
+            # Extract and cache five-level bid/ask data
+            try:
+                bid_prices = [float(p) for p in quote.bid_price] if hasattr(quote, 'bid_price') and quote.bid_price else []
+                bid_volumes = [int(v) for v in quote.bid_volume] if hasattr(quote, 'bid_volume') and quote.bid_volume else []
+                ask_prices = [float(p) for p in quote.ask_price] if hasattr(quote, 'ask_price') and quote.ask_price else []
+                ask_volumes = [int(v) for v in quote.ask_volume] if hasattr(quote, 'ask_volume') and quote.ask_volume else []
+
+                if bid_prices and ask_prices:
+                    self._last_bidask[stock_id] = {
+                        "bid_price": bid_prices,
+                        "bid_volume": bid_volumes,
+                        "ask_price": ask_prices,
+                        "ask_volume": ask_volumes,
+                        "bid_side_total_vol": int(quote.bid_side_total_vol) if hasattr(quote, 'bid_side_total_vol') else 0,
+                        "ask_side_total_vol": int(quote.ask_side_total_vol) if hasattr(quote, 'ask_side_total_vol') else 0,
+                    }
+            except Exception as e:
+                logger.debug(f"Failed to extract bidask data: {e}")
+
             if self._on_quote_callback:
                 self._on_quote_callback(rt_quote)
         except Exception as e:

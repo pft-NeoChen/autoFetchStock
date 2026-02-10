@@ -773,6 +773,10 @@ class CallbackManager:
             Output("intraday-chart", "figure", allow_duplicate=True),
             Output("kline-chart", "figure", allow_duplicate=True),
             Output("big-orders-list", "children", allow_duplicate=True),
+            Output("best-five-prices-body", "children", allow_duplicate=True),
+            Output("bidask-ratio-inner", "style", allow_duplicate=True),
+            Output("ask-total-vol", "children", allow_duplicate=True),
+            Output("bid-total-vol", "children", allow_duplicate=True),
             Input("auto-update-interval", "n_intervals"),
             State("app-state-store", "data"),
             State("main-tabs", "value"),
@@ -793,7 +797,8 @@ class CallbackManager:
             if not stock_id:
                 return (
                     no_update, no_update, no_update, no_update,
-                    no_update, no_update, market_text, scheduler_text, no_update, no_update, no_update
+                    no_update, no_update, market_text, scheduler_text, no_update, no_update, no_update,
+                    no_update, no_update, no_update, no_update,
                 )
 
             try:
@@ -806,7 +811,8 @@ class CallbackManager:
                     # Rate limit hit (TWSE) or no data available yet
                     return (
                         no_update, no_update, no_update, no_update,
-                        no_update, no_update, market_text, scheduler_text, no_update, no_update, no_update
+                        no_update, no_update, market_text, scheduler_text, no_update, no_update, no_update,
+                        no_update, no_update, no_update, no_update,
                     )
 
                 direction_class = self._get_direction_class(quote.direction)
@@ -822,7 +828,11 @@ class CallbackManager:
                 intraday_figure = no_update
                 big_orders_items = no_update
                 kline_figure = no_update
-                
+                five_prices_body = no_update
+                bidask_ratio_style = no_update
+                ask_total_text = no_update
+                bid_total_text = no_update
+
                 if n_intervals % 2 == 0:
                     # Update intraday chart if on intraday tab OR if we need Big Orders (which needs intraday data)
                     # Note: Big Orders list is always visible, so we usually need to load this.
@@ -897,6 +907,57 @@ class CallbackManager:
                                 period.display_name
                             )
 
+                    # Update Best Five Prices
+                    bidask = self.shioaji_fetcher.get_last_bidask(stock_id) if self.shioaji_fetcher else None
+                    if bidask and bidask.get("bid_price") and bidask.get("ask_price"):
+                        bid_prices = bidask["bid_price"]
+                        bid_volumes = bidask["bid_volume"]
+                        ask_prices = bidask["ask_price"]
+                        ask_volumes = bidask["ask_volume"]
+                        ask_side_total = bidask.get("ask_side_total_vol", 0)
+                        bid_side_total = bidask.get("bid_side_total_vol", 0)
+
+                        # Build five-level rows + subtotal
+                        rows = []
+                        bid_vol_sum = 0
+                        ask_vol_sum = 0
+                        levels = min(5, len(bid_prices), len(ask_prices))
+                        for i in range(levels):
+                            bv = bid_volumes[i] if i < len(bid_volumes) else 0
+                            av = ask_volumes[i] if i < len(ask_volumes) else 0
+                            bid_vol_sum += bv
+                            ask_vol_sum += av
+                            rows.append(
+                                html.Div(
+                                    className="five-price-row",
+                                    children=[
+                                        html.Span(f"{bv:,}", className="five-bid-vol"),
+                                        html.Span(f"{bid_prices[i]:.2f}", className="five-bid-price"),
+                                        html.Span(f"{ask_prices[i]:.2f}", className="five-ask-price"),
+                                        html.Span(f"{av:,}", className="five-ask-vol"),
+                                    ]
+                                )
+                            )
+                        # Subtotal row
+                        rows.append(
+                            html.Div(
+                                className="five-subtotal-row",
+                                children=[
+                                    html.Span(f"{bid_vol_sum:,}", className="five-subtotal-vol"),
+                                    html.Span("小計", className="five-subtotal-label"),
+                                    html.Span(f"{ask_vol_sum:,}", className="five-subtotal-vol"),
+                                ]
+                            )
+                        )
+                        five_prices_body = rows
+
+                        # Bid/Ask ratio bar
+                        total = ask_side_total + bid_side_total
+                        ratio_pct = (ask_side_total / total * 100) if total > 0 else 50
+                        bidask_ratio_style = {"width": f"{ratio_pct:.1f}%"}
+                        ask_total_text = f"{ask_side_total:,}"
+                        bid_total_text = f"{bid_side_total:,}"
+
                 return (
                     f"{quote.current_price:.2f}",
                     f"stock-price {direction_class}",
@@ -909,13 +970,18 @@ class CallbackManager:
                     intraday_figure,
                     kline_figure,
                     big_orders_items,
+                    five_prices_body,
+                    bidask_ratio_style,
+                    ask_total_text,
+                    bid_total_text,
                 )
 
             except Exception as e:
                 logger.warning(f"Auto-update failed: {e}")
                 return (
                     no_update, no_update, no_update, no_update,
-                    no_update, no_update, market_text, scheduler_text, no_update, no_update, no_update
+                    no_update, no_update, market_text, scheduler_text, no_update, no_update, no_update,
+                    no_update, no_update, no_update, no_update,
                 )
 
     def _register_hover_callbacks(self) -> None:
