@@ -241,14 +241,21 @@ class Scheduler:
         Raises:
             SchedulerTaskError: If fetch fails (REQ-106)
         """
+        # Debug trace
+        # logger.debug(f"APScheduler triggering job for {stock_id}")
+
         # Skip if paused or outside market hours
         if self._paused:
             logger.debug(f"Skipping fetch for {stock_id} - scheduler paused")
             return
 
+        # Bypass market hours check for development/testing
+        # if not self.is_market_open():
+        #     # Log this only once per minute to avoid spamming if interval is short
+        #     # logger.debug(f"Skipping fetch for {stock_id} - market closed")
+        #     return
         if not self.is_market_open():
-            logger.debug(f"Skipping fetch for {stock_id} - market closed")
-            return
+             logger.debug(f"Market closed, but forcing fetch for {stock_id} (DEV MODE)")
 
         if not self._fetch_callback:
             logger.warning(f"No fetch callback set, skipping {stock_id}")

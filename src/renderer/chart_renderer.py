@@ -47,7 +47,8 @@ class ChartRenderer:
         self,
         df: pd.DataFrame,
         stock_name: str = "",
-        period_label: str = "日K"
+        period_label: str = "日K",
+        uirevision: Optional[str] = None
     ) -> go.Figure:
         """
         Render complete K-line chart with volume subplot.
@@ -60,19 +61,23 @@ class ChartRenderer:
             df: DataFrame with OHLC data and MA columns
             stock_name: Stock name for chart title
             period_label: Period label (e.g., "日K", "週K")
+            uirevision: Unique ID to preserve UI state
 
         Returns:
             Plotly Figure object
         """
         if df.empty:
             return self._create_empty_chart(f"{stock_name} {period_label}")
+            
+        if len(df) < 2:
+            return self.render_empty_chart("歷史資料不足，無法繪製完整 K 線")
 
         # Create subplots
         fig = make_subplots(
             rows=2,
             cols=1,
             shared_xaxes=True,
-            vertical_spacing=0.03,
+            vertical_spacing=0.12,
             row_heights=[0.7, 0.3],
             subplot_titles=("", "成交量")
         )
@@ -94,12 +99,23 @@ class ChartRenderer:
 
         # Apply unified layout
         title = f"{stock_name} {period_label}" if stock_name else period_label
-        self._apply_chart_layout(fig, title)
+        self._apply_chart_layout(fig, title, uirevision=uirevision)
 
         # Configure axes
         fig.update_xaxes(
             rangeslider_visible=False,
+            type="category",
+            categoryorder="category ascending",
+            tickformat="%m/%d",
             row=1, col=1
+        )
+        
+        # Also ensure the shared x-axis on the volume subplot skips empty dates
+        fig.update_xaxes(
+            type="category",
+            categoryorder="category ascending",
+            tickformat="%m/%d",
+            row=2, col=1
         )
 
         fig.update_yaxes(
@@ -356,7 +372,8 @@ class ChartRenderer:
         self,
         ticks_df: pd.DataFrame,
         stock_name: str = "",
-        previous_close: float = None
+        previous_close: float = None,
+        uirevision: Optional[str] = None
     ) -> go.Figure:
         """
         Render intraday chart with total volume and market strength subplots.
@@ -369,6 +386,7 @@ class ChartRenderer:
             ticks_df: DataFrame with intraday tick data
             stock_name: Stock name for chart title
             previous_close: Previous day's closing price
+            uirevision: Unique ID to preserve UI state
 
         Returns:
             Plotly Figure object
@@ -381,7 +399,7 @@ class ChartRenderer:
             rows=2,
             cols=1,
             shared_xaxes=True,
-            vertical_spacing=0.03,
+            vertical_spacing=0.12,
             row_heights=[0.6, 0.4],
             subplot_titles=("累計成交量", "買賣力道 (累計差額)")
         )
@@ -394,7 +412,7 @@ class ChartRenderer:
 
         # Apply unified layout
         title = f"{stock_name} 分時走勢" if stock_name else "分時走勢"
-        self._apply_chart_layout(fig, title)
+        self._apply_chart_layout(fig, title, uirevision=uirevision)
         
         # Set barmode to relative
         fig.update_layout(barmode="relative")
@@ -539,7 +557,12 @@ class ChartRenderer:
                 col=col
             )
 
-    def _apply_chart_layout(self, fig: go.Figure, title: str) -> None:
+    def _apply_chart_layout(
+        self, 
+        fig: go.Figure, 
+        title: str,
+        uirevision: Optional[str] = None
+    ) -> None:
         """
         Apply unified chart layout settings (REQ-085).
 
@@ -552,8 +575,9 @@ class ChartRenderer:
         Args:
             fig: Plotly Figure
             title: Chart title
+            uirevision: Unique ID to preserve UI state
         """
-        fig.update_layout(
+        layout_updates = dict(
             title=dict(
                 text=title,
                 font=dict(color=self.colors.TEXT_COLOR, size=16),
@@ -575,6 +599,11 @@ class ChartRenderer:
             dragmode="pan",
             margin=dict(l=50, r=50, t=80, b=50),
         )
+
+        if uirevision:
+            layout_updates["uirevision"] = uirevision
+
+        fig.update_layout(**layout_updates)
 
         # Update all axes
         fig.update_xaxes(

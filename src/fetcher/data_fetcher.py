@@ -67,6 +67,7 @@ class DataFetcher:
 
     def __init__(self, storage=None, shioaji_fetcher=None):
         """Initialize HTTP session and tracking variables."""
+        import threading
         self._session = requests.Session()
         self._session.headers.update(self.DEFAULT_HEADERS)
         self._last_request_time: float = 0
@@ -74,6 +75,12 @@ class DataFetcher:
         self._stock_list_cache: Optional[List[StockInfo]] = None
         self._stock_list_cache_time: Optional[datetime] = None
         self._is_fetching_list: bool = False
+        
+        # In-memory quote cache {stock_id: RealtimeQuote}
+        # Shared between Scheduler thread and Dash callbacks
+        self._quote_cache: dict[str, RealtimeQuote] = {}
+        self._cache_lock = threading.Lock()
+        
         self.storage = storage # Optional storage for persistent cache
         self.shioaji_fetcher = shioaji_fetcher # Optional Shioaji fetcher for cached quotes
         logger.info("DataFetcher initialized")
@@ -86,37 +93,30 @@ class DataFetcher:
     def fetch_realtime_quote(self, stock_id: str, blocking: bool = True) -> Optional[RealtimeQuote]:
         """
         Fetch real-time quote for a stock (REQ-002).
-
-        Args:
-            stock_id: Stock ID (e.g., "2330")
-            blocking: Whether to block/sleep if rate limit is hit.
-
-        Returns:
-            RealtimeQuote with current price, change, volume, etc.
-            Returns None if blocking=False and rate limit is hit.
-
-        Raises:
-            ConnectionTimeoutError: Connection timeout (REQ-100)
-            InvalidDataError: Invalid response format (REQ-101)
-            StockNotFoundError: Stock not found (REQ-102)
-            ServiceUnavailableError: Too many consecutive failures (REQ-104)
+        ...
         """
         # Check Shioaji cache first (bypass TWSE API if available)
         if self.shioaji_fetcher:
             cached_quote = self.shioaji_fetcher.get_last_quote(stock_id)
             if cached_quote:
-                logger.debug(f"Using cached Shioaji quote for {stock_id}: {cached_quote.current_price}")
+                # Update our local cache with Shioaji data too
+                with self._cache_lock:
+                    self._quote_cache[stock_id] = cached_quote
+                # logger.debug(f"Using cached Shioaji quote for {stock_id}: {cached_quote.current_price}")
                 return cached_quote
 
         self._check_consecutive_failures()
 
         # Determine if it's TSE or OTC
-        stock_list = self._get_stock_list()
-        prefix = "tse"
-        for s in stock_list:
-            if s.stock_id == stock_id:
-                prefix = s.market
-                break
+        try:
+            stock_list = self._get_stock_list()
+            prefix = "tse"
+            for s in stock_list:
+                if s.stock_id == stock_id:
+                    prefix = s.market
+                    break
+        except Exception:
+             prefix = "tse" # Fallback
 
         # Format the exchange channel parameter
         ex_ch = f"{prefix}_{stock_id}.tw"
@@ -130,11 +130,23 @@ class DataFetcher:
             data = self._make_request(self.REALTIME_URL, params, blocking=blocking)
             quote = TWSEParser.parse_realtime_quote(data, stock_id)
             self._reset_failure_count()
+            
+            # Update cache
+            with self._cache_lock:
+                self._quote_cache[stock_id] = quote
+                
             logger.info(f"Fetched realtime quote for {stock_id}: {quote.current_price}")
             return quote
 
         except BlockingIOError:
             # Rate limit hit in non-blocking mode
+            # Return cached data if available
+            with self._cache_lock:
+                cached = self._quote_cache.get(stock_id)
+                if cached:
+                    # Check if cache is too stale? (Optional, currently just return what we have)
+                    # For favorites list, stale data is better than "--"
+                    return cached
             return None
             
         except (InvalidDataError, StockNotFoundError):
@@ -151,6 +163,13 @@ class DataFetcher:
         Fetch daily OHLC history for a stock for a specific month.
         Supports both TSE and OTC stocks.
         """
+        # Try Shioaji first (bypasses broken TWSE/OTC endpoints completely)
+        if self.shioaji_fetcher and self.shioaji_fetcher.is_connected:
+            shioaji_records = self.shioaji_fetcher.fetch_daily_history(stock_id, year, month)
+            if shioaji_records:
+                logger.info(f"Using Shioaji kbars for {stock_id} ({year}/{month})")
+                return shioaji_records
+                
         self._check_consecutive_failures()
 
         market = self._get_market(stock_id)
@@ -182,7 +201,10 @@ class DataFetcher:
             logger.info(f"Fetched {len(records)} daily records for {stock_id} ({year}/{month})")
             return records
 
-        except InvalidDataError:
+        except InvalidDataError as e:
+            if market == "otc":
+                logger.warning(f"OTC history fetch failed (API likely changed) for {stock_id}. Returning empty history.")
+                return []
             self._increment_failure_count()
             raise
 

@@ -51,6 +51,9 @@ class AppController:
         # Initialize logging
         setup_logging(self.config)
         logger.info("Initializing AppController...")
+        
+        # Volume cache for real-time accumulation {stock_id: total_volume}
+        self._volume_cache = {}
 
         # Initialize components
         self._init_components()
@@ -62,6 +65,11 @@ class AppController:
         self._load_existing_data()
 
         logger.info("AppController initialized successfully")
+
+    def init_volume_cache(self, stock_id: str, initial_volume: int) -> None:
+        """Initialize or reset volume cache for a stock."""
+        self._volume_cache[stock_id] = initial_volume
+        logger.info(f"Initialized volume cache for {stock_id} to {initial_volume}")
 
     def _init_components(self) -> None:
         """Initialize all application components."""
@@ -77,6 +85,8 @@ class AppController:
                 on_quote=self._handle_shioaji_quote,
                 on_tick=self._handle_shioaji_tick  # Re-enable raw ticks for accurate big orders
             )
+            # Auto-subscribe to saved favorites on startup
+            self._subscribe_saved_favorites()
         else:
             logger.warning("ShioajiFetcher failed to login, fallback to TWSE only")
 
@@ -110,6 +120,31 @@ class AppController:
             fetch_interval=self.config.fetch_interval
         )
         logger.debug("Scheduler initialized")
+
+    def _subscribe_saved_favorites(self) -> None:
+        """Subscribe to all saved favorites in Shioaji."""
+        try:
+            favorites = self.storage.load_favorites()
+            if not favorites:
+                return
+
+            logger.info(f"Auto-subscribing to {len(favorites)} saved favorites...")
+            for fav in favorites:
+                stock_id = fav.get("id")
+                if stock_id:
+                    self.shioaji_fetcher.subscribe(stock_id)
+                    # Warm up cache with snapshot to ensure immediate UI display
+                    try:
+                        quote = self.shioaji_fetcher.fetch_quote(stock_id)
+                        if quote and hasattr(self.fetcher, '_quote_cache'):
+                            # Also update DataFetcher cache
+                            import threading
+                            with self.fetcher._cache_lock:
+                                self.fetcher._quote_cache[stock_id] = quote
+                    except Exception:
+                        pass # Ignore snapshot errors during startup
+        except Exception as e:
+            logger.error(f"Failed to auto-subscribe favorites: {e}")
 
     def _init_dash_app(self) -> None:
         """Initialize Dash application with layout and callbacks."""
@@ -164,10 +199,61 @@ class AppController:
         Args:
             stock_id: Stock ID to fetch
         """
-        # Skip if Shioaji is handling this stock
+        # Check Shioaji cache freshness
         if self.shioaji_fetcher and self.shioaji_fetcher.is_subscribed(stock_id):
-            logger.debug(f"Skipping scheduled fetch for {stock_id} (Shioaji active)")
-            return
+            cached_quote = self.shioaji_fetcher.get_last_quote(stock_id)
+            
+            if cached_quote:
+                # Check data staleness
+                from datetime import datetime
+                now = datetime.now()
+                # Ensure quote.timestamp is timezone-naive or converted properly if needed.
+                # Assuming both are local time for now.
+                ts = cached_quote.timestamp
+                if ts:
+                    age = (now - ts).total_seconds()
+                    if age < 20: # Consider data fresh if < 20 seconds old
+                        logger.debug(f"Skipping scheduled fetch for {stock_id} (Shioaji active & fresh {age:.1f}s)")
+                        return
+                    else:
+                        logger.info(f"Shioaji data for {stock_id} is stale ({age:.1f}s old). forcing update...")
+                else:
+                    # No timestamp? Treat as stale/no-data
+                    pass
+            else:
+                logger.info(f"Shioaji subscribed to {stock_id} but no data yet. Attempting Shioaji snapshot...")
+
+            # If we reach here, it means either no cache or stale cache.
+            # Try to fetch snapshot from Shioaji first
+            try:
+                quote = self.shioaji_fetcher.fetch_quote(stock_id)
+                if quote:
+                    logger.info(f"Fetched Shioaji snapshot for {stock_id}: {quote.current_price}")
+                    # Update DataFetcher's cache too so UI can see it immediately
+                    if hasattr(self.fetcher, '_quote_cache'):
+                        import threading
+                        with self.fetcher._cache_lock:
+                            self.fetcher._quote_cache[stock_id] = quote
+                            
+                    # Save as intraday tick
+                    self._save_quote_as_tick(quote)
+                    return # Success, no need for TWSE
+            except Exception as e:
+                logger.warning(f"Shioaji snapshot failed for {stock_id}: {e}")
+            
+            logger.info(f"Shioaji snapshot failed/empty. Scheduler will fetch fallback from TWSE.")
+
+        try:
+            # Fetch realtime quote
+            quote = self.fetcher.fetch_realtime_quote(stock_id)
+            logger.debug(f"Scheduled fetch for {stock_id}: {quote.current_price}")
+
+            # Save as intraday tick for background data accumulation
+            self._save_quote_as_tick(quote)
+
+        except Exception as e:
+            logger.error(f"Scheduled fetch failed for {stock_id}: {e}")
+            raise
 
         try:
             # Fetch realtime quote
@@ -185,12 +271,19 @@ class AppController:
         """
         Save a realtime quote as an intraday tick.
         """
-        from datetime import datetime, date
+        from datetime import datetime, date, time
         from src.models import IntradayTick
+        
+        # Ignore pre-market trial matching data (before 09:00:00)
+        current_time = quote.timestamp.time() if quote.timestamp else datetime.now().time()
+        if current_time < time(9, 0):
+            return
+
         try:
             # Load previous ticks to calculate volume delta and price trend (REQ-FixVolume0)
             last_accumulated_volume = 0
             last_price = quote.previous_close # Default
+            last_tick_time = None
             
             existing_data = self.storage.load_intraday_data(quote.stock_id, date.today())
             stream_sum = 0
@@ -198,6 +291,9 @@ class AppController:
             if existing_data and existing_data.ticks:
                 last_tick = existing_data.ticks[-1]
                 last_price = last_tick.price
+                last_tick_time = last_tick.timestamp
+                if not last_tick_time and hasattr(last_tick, 'time'):
+                     last_tick_time = datetime.combine(date.today(), last_tick.time)
                 
                 # Search backwards for last non-zero accumulated volume
                 for t in reversed(existing_data.ticks):
@@ -216,6 +312,8 @@ class AppController:
                 delta = quote.total_volume - last_accumulated_volume
                 # Deduplicate: Subtract volume already captured by stream ticks
                 tick_volume = max(0, delta - stream_sum)
+                if tick_volume > 0:
+                    logger.info(f"SaveTick {quote.stock_id}: LastAcc={last_accumulated_volume}, CurrTotal={quote.total_volume}, Delta={delta}, StreamSum={stream_sum} -> TickVol={tick_volume}")
             else:
                 tick_volume = getattr(quote, "tick_volume", 0)
 
@@ -223,25 +321,45 @@ class AppController:
             buy_volume = 0.0
             sell_volume = 0.0
             
-            if quote.current_price > last_price:
-                # Price Up -> Dominant Buy
-                buy_volume = float(tick_volume)
-            elif quote.current_price < last_price:
-                # Price Down -> Dominant Sell
-                sell_volume = float(tick_volume)
-            else:
-                # Price Unchanged -> Check Bid/Ask
-                best_ask = getattr(quote, "best_ask", 0)
-                best_bid = getattr(quote, "best_bid", 0)
-                
-                if best_ask and quote.current_price >= best_ask:
+            # Smart Spike Detection:
+            is_large_gap = False
+            current_time = quote.timestamp or datetime.now()
+            
+            if tick_volume > 500:
+                if last_tick_time:
+                    # Ensure timezone awareness compatibility
+                    if last_tick_time.tzinfo is None and current_time.tzinfo is not None:
+                        last_tick_time = last_tick_time.replace(tzinfo=current_time.tzinfo)
+                    elif last_tick_time.tzinfo is not None and current_time.tzinfo is None:
+                        current_time = current_time.replace(tzinfo=last_tick_time.tzinfo)
+                        
+                    time_gap = (current_time - last_tick_time).total_seconds()
+                    if time_gap > 30: 
+                        is_large_gap = True
+                        logger.info(f"Detected large gap fill for {quote.stock_id}: Vol={tick_volume}, Gap={time_gap:.1f}s. Skipping buy/sell power.")
+                else:
+                    is_large_gap = True
+
+            if not is_large_gap and last_accumulated_volume > 0:
+                if quote.current_price > last_price:
+                    # Price Up -> Dominant Buy
                     buy_volume = float(tick_volume)
-                elif best_bid and quote.current_price <= best_bid:
+                elif quote.current_price < last_price:
+                    # Price Down -> Dominant Sell
                     sell_volume = float(tick_volume)
                 else:
-                    # Indeterminate -> Split
-                    buy_volume = tick_volume / 2.0
-                    sell_volume = tick_volume / 2.0
+                    # Price Unchanged -> Check Bid/Ask
+                    best_ask = getattr(quote, "best_ask", 0)
+                    best_bid = getattr(quote, "best_bid", 0)
+                    
+                    if best_ask and quote.current_price >= best_ask:
+                        buy_volume = float(tick_volume)
+                    elif best_bid and quote.current_price <= best_bid:
+                        sell_volume = float(tick_volume)
+                    else:
+                        # Indeterminate -> Split
+                        buy_volume = tick_volume / 2.0
+                        sell_volume = tick_volume / 2.0
 
             # If this is the first data point (gap fill from 0 to Current Total), do not bias Buy/Sell power
             if last_accumulated_volume == 0:
@@ -322,9 +440,23 @@ class AppController:
 
     def _handle_shioaji_quote(self, quote) -> None:
         """Handle real-time quote from Shioaji."""
-        # Update storage or cache if needed
-        # For now, we mainly rely on ticks for chart data
-        pass
+        logger.debug(f"AppController received quote for {quote.stock_id}")
+        
+        # Use Quote's total volume to calibrate our cache
+        try:
+            current_vol = int(quote.total_volume)
+            old_vol = self._volume_cache.get(quote.stock_id, 0)
+            
+            if quote.stock_id in self._volume_cache:
+                # Only update if new total is greater (prevent out-of-order jitter)
+                if current_vol > self._volume_cache[quote.stock_id]:
+                    self._volume_cache[quote.stock_id] = current_vol
+                    logger.debug(f"[Quote] {quote.stock_id} cache update: {old_vol} -> {current_vol}")
+            else:
+                self._volume_cache[quote.stock_id] = current_vol
+                logger.debug(f"[Quote] {quote.stock_id} cache init: {current_vol}")
+        except Exception as e:
+            logger.error(f"Error processing quote volume: {e}")
 
     def _handle_shioaji_tick(self, tick) -> None:
         """Handle real-time tick from Shioaji and save to storage."""
@@ -339,6 +471,30 @@ class AppController:
             if not stock_id:
                 logger.warning("Received Shioaji tick without stock_id")
                 return
+
+            # --- Fix: Maintain accumulated volume ---
+            # Shioaji tick comes with accumulated_volume=0. We must calculate it.
+            
+            # Initialize cache if needed
+            if stock_id not in self._volume_cache:
+                try:
+                    existing_data = self.storage.load_intraday_data(stock_id, date.today())
+                    if existing_data and existing_data.ticks:
+                        self._volume_cache[stock_id] = existing_data.ticks[-1].accumulated_volume
+                    else:
+                        self._volume_cache[stock_id] = 0
+                except Exception:
+                    self._volume_cache[stock_id] = 0
+            
+            # Update volume
+            tick_vol = int(tick.volume)
+            old_cache = self._volume_cache[stock_id]
+            
+            self._volume_cache[stock_id] += tick_vol
+            tick.accumulated_volume = self._volume_cache[stock_id]
+            
+            logger.debug(f"[Tick] {stock_id} vol:{tick_vol} cache:{old_cache}->{self._volume_cache[stock_id]}")
+            # ----------------------------------------
 
             # Save to storage
             self.storage.save_intraday_data(

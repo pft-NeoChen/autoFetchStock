@@ -92,7 +92,7 @@ def _create_hidden_components() -> html.Div:
                 id="auto-update-interval",
                 interval=1 * 1000,  # 1 second
                 n_intervals=0,
-                disabled=True,  # Start disabled, enable when stock selected
+                disabled=False,  # Start enabled to update favorites list
             ),
         ]
     )

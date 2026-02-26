@@ -38,7 +38,7 @@ class CallbackManager:
     registers all callbacks with the Dash app.
     """
 
-    def __init__(self, app, fetcher, storage, processor, renderer, scheduler, shioaji_fetcher=None):
+    def __init__(self, app, fetcher, storage, processor, renderer, scheduler, shioaji_fetcher=None, on_init_volume=None):
         """
         Initialize callback manager.
 
@@ -50,10 +50,12 @@ class CallbackManager:
             renderer: ChartRenderer instance
             scheduler: Scheduler instance
             shioaji_fetcher: ShioajiFetcher instance (optional)
+            on_init_volume: Callback to initialize volume cache (optional)
         """
         self.app = app
         self.fetcher = fetcher
         self.shioaji_fetcher = shioaji_fetcher
+        self.on_init_volume = on_init_volume
         self.storage = storage
         self.processor = processor
         self.renderer = renderer
@@ -327,6 +329,10 @@ class CallbackManager:
                 # Fetch realtime quote (blocking is fine for search submit)
                 quote = self.fetcher.fetch_realtime_quote(stock_id)
 
+                # Initialize volume cache with current TWSE total volume
+                if self.on_init_volume:
+                    self.on_init_volume(stock_id, quote.total_volume)
+
                 # Check if in favorites (Needed for unsubscription logic)
                 favorites = current_state.get("favorites", [])
                 fav_ids = [f["id"] for f in favorites]
@@ -377,7 +383,8 @@ class CallbackManager:
                     intraday_figure = self.renderer.render_intraday_chart(
                         df,
                         f"{quote.stock_name} ({stock_id})",
-                        quote.previous_close
+                        quote.previous_close,
+                        uirevision=stock_id
                     )
                     
                     # Generate Big Orders List (Newest at Top)
@@ -426,7 +433,8 @@ class CallbackManager:
                     kline_figure = self.renderer.render_kline_chart(
                         kline_df,
                         f"{quote.stock_name} ({stock_id})",
-                        period.display_name
+                        period.display_name,
+                        uirevision=stock_id
                     )
                 else:
                     # If no daily data yet, still try to render a 1-day chart with just the quote
@@ -439,7 +447,8 @@ class CallbackManager:
                         kline_figure = self.renderer.render_kline_chart(
                             kline_df,
                             f"{quote.stock_name} ({stock_id})",
-                            "日K"
+                            "日K",
+                            uirevision=stock_id
                         )
                     else:
                         kline_figure = self.renderer.render_empty_chart("同步資料中...")
@@ -530,7 +539,8 @@ class CallbackManager:
                 figure = self.renderer.render_kline_chart(
                     df,
                     f"{daily_file.stock_name} ({stock_id})",
-                    period.display_name
+                    period.display_name,
+                    uirevision=stock_id
                 )
                 logger.info(f"Background sync complete for {stock_id}")
                 return figure, new_state
@@ -565,7 +575,8 @@ class CallbackManager:
                     return self.renderer.render_intraday_chart(
                         df,
                         f"{intraday_data.stock_name} ({stock_id})",
-                        intraday_data.previous_close
+                        intraday_data.previous_close,
+                        uirevision=stock_id
                     )
                 else:
                     return self.renderer.render_empty_chart("暫無分時資料")
@@ -626,7 +637,8 @@ class CallbackManager:
                     return self.renderer.render_kline_chart(
                         df,
                         f"{daily_file.stock_name} ({stock_id})",
-                        period_label
+                        period_label,
+                        uirevision=stock_id
                     )
                 else:
                     return self.renderer.render_empty_chart("暫無K線資料")
@@ -747,7 +759,8 @@ class CallbackManager:
                     return self.renderer.render_kline_chart(
                         df,
                         f"{daily_file.stock_name} ({stock_id})",
-                        period.display_name
+                        period.display_name,
+                        uirevision=stock_id
                     )
 
                 raise PreventUpdate
@@ -849,7 +862,8 @@ class CallbackManager:
                             intraday_figure = self.renderer.render_intraday_chart(
                                 df,
                                 f"{quote.stock_name} ({stock_id})",
-                                quote.previous_close
+                                quote.previous_close,
+                                uirevision=stock_id
                             )
                         
                         # Generate Big Orders List (Newest at Top)
@@ -904,7 +918,8 @@ class CallbackManager:
                             kline_figure = self.renderer.render_kline_chart(
                                 kline_df,
                                 f"{quote.stock_name} ({stock_id})",
-                                period.display_name
+                                period.display_name,
+                                uirevision=stock_id
                             )
 
                     # Update Best Five Prices

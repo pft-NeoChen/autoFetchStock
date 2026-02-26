@@ -415,8 +415,9 @@ class DataProcessor:
         
         df = pd.DataFrame(records)
 
-        # Merge realtime quote if provided
-        if realtime_quote:
+        # Merge realtime quote if provided and market has opened (volume > 0)
+        # Check if prices are valid to prevent zero-price spikes
+        if realtime_quote and realtime_quote.total_volume > 0 and realtime_quote.open_price > 0:
             quote_date = realtime_quote.timestamp.date() if realtime_quote.timestamp else date.today()
             
             # Create quote record
@@ -512,6 +513,8 @@ class DataProcessor:
         # We replace 0 with NaN and forward fill to propagate the last known total volume
         if "accumulated_volume" in df.columns:
             df["accumulated_volume"] = df["accumulated_volume"].replace(0, np.nan).ffill().fillna(0)
+            # Enforce monotonic increase to prevent zig-zags from mixed data sources (Stream vs Poll)
+            df["accumulated_volume"] = df["accumulated_volume"].cummax()
 
         # Calculate actual tick volume from accumulated volume or use provided volume
         # Primary source: 'volume' column (should be per-tick volume)
