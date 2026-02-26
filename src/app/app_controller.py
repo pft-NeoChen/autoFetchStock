@@ -54,6 +54,12 @@ class AppController:
         
         # Volume cache for real-time accumulation {stock_id: total_volume}
         self._volume_cache = {}
+        
+        # Buffer for batching tick writes to reduce I/O
+        import threading
+        self._tick_buffer = {}
+        self._buffer_lock = threading.Lock()
+        self._stop_event = threading.Event()
 
         # Initialize components
         self._init_components()
@@ -63,6 +69,10 @@ class AppController:
 
         # Load existing data on startup (REQ-073)
         self._load_existing_data()
+        
+        # Start background flush thread
+        self._flush_thread = threading.Thread(target=self._flush_ticks_loop, daemon=True)
+        self._flush_thread.start()
 
         logger.info("AppController initialized successfully")
 
@@ -169,12 +179,21 @@ class AppController:
             processor=self.processor,
             renderer=self.renderer,
             scheduler=self.scheduler,
+            get_buffered_ticks=self._get_buffered_ticks
         )
 
         # Register all callbacks
         self.callback_manager.register_callbacks()
 
         logger.debug("Dash app initialized")
+
+    def _get_buffered_ticks(self, stock_id: str):
+        """Retrieve ticks currently in the memory buffer for a stock (thread-safe)."""
+        with self._buffer_lock:
+            if stock_id in self._tick_buffer:
+                # Return a copy to avoid mutation during iteration
+                return list(self._tick_buffer[stock_id]["ticks"])
+            return []
 
     def _load_existing_data(self) -> None:
         """Load existing history data on startup (REQ-073)."""
@@ -422,9 +441,42 @@ class AppController:
             # Cleanup on shutdown
             self.shutdown()
 
+    def _flush_ticks_loop(self):
+        """Background loop to periodically flush buffered ticks to disk."""
+        import time
+        from datetime import date
+        while not self._stop_event.is_set():
+            time.sleep(5) # Flush every 5 seconds
+            try:
+                ticks_to_save = {}
+                with self._buffer_lock:
+                    if not self._tick_buffer:
+                        continue
+                    # Swap buffers
+                    ticks_to_save = self._tick_buffer
+                    self._tick_buffer = {}
+                
+                # Write to disk outside the lock
+                for stock_id, data in ticks_to_save.items():
+                    if data["ticks"]:
+                        self.storage.save_intraday_data(
+                            stock_id=stock_id,
+                            stock_name=data["stock_name"],
+                            trade_date=date.today(),
+                            previous_close=data["reference"],
+                            ticks=data["ticks"]
+                        )
+                        logger.debug(f"Flushed {len(data['ticks'])} ticks for {stock_id}")
+            except Exception as e:
+                logger.error(f"Error in tick flush loop: {e}")
+
     def shutdown(self) -> None:
         """Gracefully shutdown all components."""
         logger.info("Shutting down AppController...")
+
+        self._stop_event.set()
+        if hasattr(self, '_flush_thread'):
+            self._flush_thread.join(timeout=2)
 
         # Stop scheduler
         if self.scheduler:
@@ -498,16 +550,18 @@ class AppController:
             logger.debug(f"[Tick] {stock_id} vol:{tick_vol} cache:{old_cache}->{self._volume_cache[stock_id]}")
             # ----------------------------------------
 
-            # Save to storage
-            self.storage.save_intraday_data(
-                stock_id=stock_id,
-                stock_name=stock_name,
-                trade_date=date.today(),
-                previous_close=reference,
-                ticks=[tick]
-            )
+            # Buffer tick for batch saving
+            with self._buffer_lock:
+                if stock_id not in self._tick_buffer:
+                    self._tick_buffer[stock_id] = {
+                        "stock_name": stock_name,
+                        "reference": reference,
+                        "ticks": []
+                    }
+                self._tick_buffer[stock_id]["ticks"].append(tick)
+                
         except Exception as e:
-            logger.error(f"Error saving Shioaji tick: {e}")
+            logger.error(f"Error buffering Shioaji tick: {e}")
 
     @property
     def server(self):

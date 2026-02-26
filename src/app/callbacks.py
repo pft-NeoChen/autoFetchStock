@@ -38,7 +38,7 @@ class CallbackManager:
     registers all callbacks with the Dash app.
     """
 
-    def __init__(self, app, fetcher, storage, processor, renderer, scheduler, shioaji_fetcher=None, on_init_volume=None):
+    def __init__(self, app, fetcher, storage, processor, renderer, scheduler, shioaji_fetcher=None, on_init_volume=None, get_buffered_ticks=None):
         """
         Initialize callback manager.
 
@@ -51,11 +51,13 @@ class CallbackManager:
             scheduler: Scheduler instance
             shioaji_fetcher: ShioajiFetcher instance (optional)
             on_init_volume: Callback to initialize volume cache (optional)
+            get_buffered_ticks: Callback to get ticks currently in memory buffer
         """
         self.app = app
         self.fetcher = fetcher
         self.shioaji_fetcher = shioaji_fetcher
         self.on_init_volume = on_init_volume
+        self.get_buffered_ticks = get_buffered_ticks
         self.storage = storage
         self.processor = processor
         self.renderer = renderer
@@ -849,8 +851,20 @@ class CallbackManager:
                     
                     intraday_data = self.storage.load_intraday_data(stock_id, date.today())
                     
+                    # --- REAL-TIME TICK BUFFER MERGE ---
+                    # To keep the UI perfectly real-time while disk writes are batched (every 5s),
+                    # we must fetch any ticks currently waiting in the memory buffer.
+                    all_ticks = []
                     if intraday_data and intraday_data.ticks:
-                        df = self.processor.prepare_intraday_data(intraday_data.ticks)
+                        all_ticks.extend(intraday_data.ticks)
+                        
+                    if self.get_buffered_ticks:
+                        buffered_ticks = self.get_buffered_ticks(stock_id)
+                        if buffered_ticks:
+                            all_ticks.extend(buffered_ticks)
+                    
+                    if all_ticks:
+                        df = self.processor.prepare_intraday_data(all_ticks)
                         
                         # Only render intraday chart if tab is active
                         if active_tab == "intraday":
