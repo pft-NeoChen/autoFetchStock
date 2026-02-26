@@ -322,6 +322,8 @@ class AppController:
             sell_volume = 0.0
             
             # Smart Spike Detection:
+            # Only treat as "Gap Fill" if time difference is large (> 5 minutes) AND volume is large (> 500).
+            # This allows real big orders (which happen instantly) to pass, but filters out long disconnection gaps.
             is_large_gap = False
             current_time = quote.timestamp or datetime.now()
             
@@ -334,7 +336,7 @@ class AppController:
                         current_time = current_time.replace(tzinfo=last_tick_time.tzinfo)
                         
                     time_gap = (current_time - last_tick_time).total_seconds()
-                    if time_gap > 30: 
+                    if time_gap > 300: # 5 minutes gap
                         is_large_gap = True
                         logger.info(f"Detected large gap fill for {quote.stock_id}: Vol={tick_volume}, Gap={time_gap:.1f}s. Skipping buy/sell power.")
                 else:

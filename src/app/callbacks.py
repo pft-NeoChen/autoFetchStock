@@ -831,11 +831,6 @@ class CallbackManager:
                 direction_class = self._get_direction_class(quote.direction)
                 change_text = f"{'+' if quote.change_amount >= 0 else ''}{quote.change_amount:.2f} ({'+' if quote.change_percent >= 0 else ''}{quote.change_percent:.2f}%)"
 
-                # Save as intraday tick
-                # Always save quote as tick to ensure continuous chart data.
-                # Ideally, this handles both TWSE and Shioaji Quote snapshots.
-                self._save_quote_as_tick(quote)
-
                 # OPTIMIZATION: Update charts every 2 seconds (n_intervals % 2 == 0)
                 # Text updates (price, time) happen every second.
                 intraday_figure = no_update
