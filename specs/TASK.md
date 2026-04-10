@@ -58,7 +58,7 @@
     - 新增 `news_start_hour: int = 8`、`news_end_hour: int = 15`、`news_interval_minutes: int = 60`
     - 新增 `news_max_articles_per_category: int = 20`
     - 新增 `news_request_timeout: int = 15`、`news_summarizer_timeout: int = 30`
-    - 新增 `news_summarizer_backend: str = "gemini"`
+    - 新增 `news_summarizer_backend: str = "gemini"`（備案值：`"gemini-cli"`，使用 subprocess 呼叫 gemini CLI）
     - `config.env.example` 新增 `GEMINI_API_KEY=YOUR_KEY_HERE`
 
 - [ ] [TASK-104] 新增新聞相關例外類別
@@ -151,6 +151,7 @@
     - 每次 API 請求設定 30 秒逾時
     - 實作 `_call_gemini(prompt: str) -> str` 基礎呼叫方法
     - 初始化失敗時拋出 `SummarizationError`
+    - **備案**：`news_summarizer_backend="gemini-cli"` 時改用 `subprocess` 呼叫 `gemini -p`，透過暫存檔傳入 prompt 以規避 shell argument 長度與特殊字元問題
 
 - [ ] [TASK-121] 實作單篇文章摘要與股票標記
   - **複雜度**：L
