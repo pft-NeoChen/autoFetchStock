@@ -737,8 +737,8 @@ class NewsCallbackManager:
 
 | 套件 | 版本 | 用途 |
 |------|------|------|
-| `google-generativeai` | >=0.8 | Gemini API SDK |
-| `feedparser` | >=6.0 | RSS Feed 解析 |
+| `google-genai` | >=1.0 | Gemini API SDK（新版，取代已棄用的 google-generativeai） |
+| `atoma` | >=0.0.17 | RSS/Atom feed 解析（feedparser 在 Python 3.11 有 sgmllib 相依性問題） |
 | `beautifulsoup4` | >=4.12 | HTML 全文解析 |
 | `lxml` | >=4.9 | BeautifulSoup HTML 解析器（速度快） |
 
