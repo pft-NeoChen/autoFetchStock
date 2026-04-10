@@ -17,6 +17,7 @@ from src.storage import DataStorage
 from src.processor.data_processor import DataProcessor
 from src.renderer.chart_renderer import ChartRenderer
 from src.scheduler import Scheduler
+from src.news.news_processor import NewsProcessor
 from src.app.layout import create_layout
 from src.app.callbacks import CallbackManager
 
@@ -95,8 +96,6 @@ class AppController:
                 on_quote=self._handle_shioaji_quote,
                 on_tick=self._handle_shioaji_tick  # Re-enable raw ticks for accurate big orders
             )
-            # Auto-subscribe to saved favorites on startup
-            self._subscribe_saved_favorites()
         else:
             logger.warning("ShioajiFetcher failed to login, fallback to TWSE only")
 
@@ -106,6 +105,10 @@ class AppController:
             shioaji_fetcher=self.shioaji_fetcher
         )
         logger.debug("DataFetcher initialized")
+
+        # Auto-subscribe to saved favorites after DataFetcher exists so cache warm-up works.
+        if self.shioaji_fetcher and self.shioaji_fetcher.is_connected:
+            self._subscribe_saved_favorites()
         
         # Pre-load stock list for search (in background ideally)
         try:
@@ -130,6 +133,15 @@ class AppController:
             fetch_interval=self.config.fetch_interval
         )
         logger.debug("Scheduler initialized")
+
+        # News processor
+        self.news_processor = NewsProcessor(
+            config=self.config,
+            storage=self.storage,
+        )
+        # Register hourly news job (08:00-15:00 Mon-Fri)
+        self.scheduler.add_news_job(self.news_processor.run)
+        logger.debug("NewsProcessor initialized and news job registered")
 
     def _subscribe_saved_favorites(self) -> None:
         """Subscribe to all saved favorites in Shioaji."""
@@ -179,7 +191,9 @@ class AppController:
             processor=self.processor,
             renderer=self.renderer,
             scheduler=self.scheduler,
-            get_buffered_ticks=self._get_buffered_ticks
+            on_init_volume=self.init_volume_cache,
+            get_buffered_ticks=self._get_buffered_ticks,
+            news_processor=self.news_processor,
         )
 
         # Register all callbacks
@@ -261,18 +275,6 @@ class AppController:
                 logger.warning(f"Shioaji snapshot failed for {stock_id}: {e}")
             
             logger.info(f"Shioaji snapshot failed/empty. Scheduler will fetch fallback from TWSE.")
-
-        try:
-            # Fetch realtime quote
-            quote = self.fetcher.fetch_realtime_quote(stock_id)
-            logger.debug(f"Scheduled fetch for {stock_id}: {quote.current_price}")
-
-            # Save as intraday tick for background data accumulation
-            self._save_quote_as_tick(quote)
-
-        except Exception as e:
-            logger.error(f"Scheduled fetch failed for {stock_id}: {e}")
-            raise
 
         try:
             # Fetch realtime quote

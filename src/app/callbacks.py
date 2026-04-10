@@ -38,7 +38,19 @@ class CallbackManager:
     registers all callbacks with the Dash app.
     """
 
-    def __init__(self, app, fetcher, storage, processor, renderer, scheduler, shioaji_fetcher=None, on_init_volume=None, get_buffered_ticks=None):
+    def __init__(
+        self,
+        app,
+        fetcher,
+        storage,
+        processor,
+        renderer,
+        scheduler,
+        shioaji_fetcher=None,
+        on_init_volume=None,
+        get_buffered_ticks=None,
+        news_processor=None,
+    ):
         """
         Initialize callback manager.
 
@@ -52,6 +64,7 @@ class CallbackManager:
             shioaji_fetcher: ShioajiFetcher instance (optional)
             on_init_volume: Callback to initialize volume cache (optional)
             get_buffered_ticks: Callback to get ticks currently in memory buffer
+            news_processor: NewsProcessor instance (optional)
         """
         self.app = app
         self.fetcher = fetcher
@@ -62,6 +75,7 @@ class CallbackManager:
         self.processor = processor
         self.renderer = renderer
         self.scheduler = scheduler
+        self.news_processor = news_processor
         self._current_stock_id: Optional[str] = None
         self._current_stock_name: Optional[str] = None
 
@@ -74,6 +88,7 @@ class CallbackManager:
         self._register_hover_callbacks()
         self._register_error_callbacks()
         self._register_favorites_callbacks()
+        self._register_news_callbacks()
         logger.info("All callbacks registered")
 
     def _register_favorites_callbacks(self) -> None:
@@ -1202,3 +1217,254 @@ class CallbackManager:
 
         except Exception as e:
             logger.warning(f"Failed to fetch daily history for {stock_id}: {e}")
+
+    # ── News callbacks ───────────────────────────────────────────────────────
+
+    def _register_news_callbacks(self) -> None:
+        """
+        Register all news-related callbacks.
+
+        TASK-153: URL routing → page-content
+        TASK-154: Main page stock-filtered news tab
+        TASK-155: /news page category view + manual refresh
+        TASK-156: Ticker bar rotation (5 s)
+        """
+        from src.app.layout import create_main_page_layout, create_news_page_layout
+
+        # ── TASK-153  Routing ────────────────────────────────────────────────
+        @self.app.callback(
+            Output("page-content", "children"),
+            Input("url", "pathname"),
+        )
+        def route_page(pathname: str):
+            """Swap page-content based on URL pathname."""
+            if pathname == "/news":
+                return create_news_page_layout()
+            return create_main_page_layout()
+
+        # ── News data store refresh ──────────────────────────────────────────
+        # Loads latest news into the shared store so all news callbacks
+        # can read from it without hitting storage independently.
+        @self.app.callback(
+            Output("news-data-store", "data"),
+            Input("news-ticker-interval", "n_intervals"),
+            Input("news-refresh-button", "n_clicks"),
+            prevent_initial_call=False,
+        )
+        def refresh_news_store(n_intervals, n_clicks):
+            """Load latest news run result into the shared data store."""
+            try:
+                run_result = self.storage.load_latest_news()
+                if run_result is None:
+                    return None
+                return run_result.to_dict()
+            except Exception as e:
+                logger.warning(f"Failed to load latest news: {e}")
+                return no_update
+
+        # ── TASK-154  Stock news tab (main page) ─────────────────────────────
+        @self.app.callback(
+            Output("stock-news-articles", "children"),
+            Input("stock-news-category-tabs", "value"),
+            Input("news-data-store", "data"),
+            State("app-state-store", "data"),
+            prevent_initial_call=False,
+        )
+        def update_stock_news_tab(category: str, news_data: dict, app_state: dict):
+            """Filter news by current stock + selected category."""
+            if not news_data:
+                return html.Div("尚無新聞資料", className="no-news")
+
+            current_stock = (app_state or {}).get("current_stock")
+            if not current_stock:
+                return html.Div("請先選擇股票", className="no-news")
+
+            articles = _extract_articles_from_run(news_data, category, current_stock)
+            if not articles:
+                return html.Div(f"目前無 {current_stock} 相關新聞", className="no-news")
+
+            return _render_article_list(articles)
+
+        # ── TASK-155  /news page ─────────────────────────────────────────────
+        @self.app.callback(
+            Output("news-category-content", "children"),
+            Output("news-last-updated", "children"),
+            Input("news-category-tabs", "value"),
+            Input("news-data-store", "data"),
+            prevent_initial_call=False,
+        )
+        def update_news_page(category: str, news_data: dict):
+            """Show all articles in the selected category on the /news page."""
+            if not news_data:
+                return html.Div("尚無新聞資料", className="no-news"), "最後更新：--"
+
+            # Last updated time
+            run_at = news_data.get("run_at", "")
+            try:
+                from datetime import datetime as _dt
+                ts = _dt.fromisoformat(run_at)
+                updated_str = f"最後更新：{ts.strftime('%Y-%m-%d %H:%M')}"
+            except Exception:
+                updated_str = "最後更新：--"
+
+            articles = _extract_articles_from_run(news_data, category, stock_filter=None)
+            if not articles:
+                return html.Div("此分類目前無新聞", className="no-news"), updated_str
+
+            return _render_article_list(articles), updated_str
+
+        # ── TASK-156  News ticker ────────────────────────────────────────────
+        @self.app.callback(
+            Output("news-ticker-content", "children"),
+            Output("news-ticker-bar", "style"),
+            Input("news-ticker-interval", "n_intervals"),
+            State("news-data-store", "data"),
+            State("app-state-store", "data"),
+            prevent_initial_call=False,
+        )
+        def rotate_ticker(n_intervals: int, news_data: dict, app_state: dict):
+            """Rotate the ticker headline every 5 seconds."""
+            if not news_data:
+                return "--", {"display": "none"}
+
+            current_stock = (app_state or {}).get("current_stock")
+            # Collect one headline per category (most recent)
+            headlines = _collect_ticker_headlines(news_data, current_stock)
+            if not headlines:
+                return "--", {"display": "none"}
+
+            idx = (n_intervals or 0) % len(headlines)
+            item = headlines[idx]
+            ticker_text = f"[{item['category']}] {item['title']}"
+            return ticker_text, {"display": "flex"}
+
+
+# ── Module-level news helper functions ──────────────────────────────────────
+
+_CATEGORY_DISPLAY = {
+    "INTERNATIONAL": "國際",
+    "FINANCIAL": "財經",
+    "TECH": "科技",
+    "STOCK_TW": "台股",
+    "STOCK_US": "美股",
+}
+
+
+def _extract_articles_from_run(
+    run_dict: dict,
+    category: str,
+    stock_filter: Optional[str],
+) -> List[dict]:
+    """
+    Extract article dicts from a serialised NewsRunResult dict.
+
+    Args:
+        run_dict: to_dict() output of a NewsRunResult
+        category: category value ("ALL", "INTERNATIONAL", …)
+        stock_filter: stock_id to filter by (None = no filter)
+
+    Returns:
+        List of plain article dicts ordered newest-first.
+    """
+    categories = run_dict.get("categories", {})
+    articles: List[dict] = []
+
+    for cat_key, cat_data in categories.items():
+        if category != "ALL" and cat_key != category:
+            continue
+        for art in cat_data.get("articles", []):
+            if stock_filter:
+                related = art.get("related_stock_ids", [])
+                if stock_filter not in related:
+                    continue
+            art_copy = dict(art)
+            art_copy["_category_key"] = cat_key
+            articles.append(art_copy)
+
+    # Sort newest-first
+    articles.sort(key=lambda a: a.get("published_at", ""), reverse=True)
+    return articles
+
+
+def _render_article_list(articles: List[dict]) -> html.Div:
+    """Render a list of article dicts as Dash html components."""
+    items = []
+    for art in articles:
+        cat_key = art.get("_category_key", "")
+        cat_label = _CATEGORY_DISPLAY.get(cat_key, cat_key)
+        pub = art.get("published_at", "")
+        try:
+            from datetime import datetime as _dt
+            ts = _dt.fromisoformat(pub)
+            pub_str = ts.strftime("%m/%d %H:%M")
+        except Exception:
+            pub_str = pub[:16] if pub else "--"
+
+        title = art.get("title", "（無標題）")
+        summary = art.get("summary") or art.get("excerpt", "")
+        url = art.get("url", "#")
+        source = art.get("source", "")
+
+        items.append(
+            html.Div(
+                className="news-article-card",
+                children=[
+                    html.Div(
+                        className="news-article-header",
+                        children=[
+                            html.Span(cat_label, className="news-cat-badge"),
+                            html.Span(source, className="news-source"),
+                            html.Span(pub_str, className="news-pub-time"),
+                        ],
+                    ),
+                    html.A(
+                        title,
+                        href=url,
+                        target="_blank",
+                        rel="noopener noreferrer",
+                        className="news-article-title",
+                    ),
+                    html.P(summary, className="news-article-summary") if summary else None,
+                ],
+            )
+        )
+
+    return html.Div(items, className="news-articles-list")
+
+
+def _collect_ticker_headlines(
+    run_dict: dict,
+    stock_filter: Optional[str],
+) -> List[dict]:
+    """
+    Collect one headline per category for the ticker bar.
+
+    If stock_filter is set, prefer related articles; fall back to
+    the most-recent article across all categories if nothing matches.
+    """
+    categories = run_dict.get("categories", {})
+    headlines: List[dict] = []
+
+    for cat_key, cat_data in categories.items():
+        cat_articles = cat_data.get("articles", [])
+        if not cat_articles:
+            continue
+
+        # Prefer articles related to the current stock
+        picked = None
+        if stock_filter:
+            for art in cat_articles:
+                if stock_filter in art.get("related_stock_ids", []):
+                    picked = art
+                    break
+
+        if picked is None:
+            picked = cat_articles[0]
+
+        headlines.append({
+            "category": _CATEGORY_DISPLAY.get(cat_key, cat_key),
+            "title": picked.get("title", ""),
+            "url": picked.get("url", "#"),
+        })
+
+    return headlines
