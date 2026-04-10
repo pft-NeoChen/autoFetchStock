@@ -11,17 +11,17 @@
 
 ## P0：基礎建設
 
-- [ ] [TASK-100] 新增依賴套件
+- [x] [TASK-100] 新增依賴套件
   - **複雜度**：S
   - **依賴**：無
   - **需求對應**：REQ-200
   - **檔案**：`requirements.txt`
   - **接受標準**：
-    - 新增 `google-generativeai>=0.7` 至 requirements.txt
-    - 新增 `feedparser>=6.0` 至 requirements.txt
+    - 新增 `google-genai>=1.0` 至 requirements.txt（取代已棄用的 google-generativeai）
+    - 新增 `atoma>=0.0.17` 至 requirements.txt（feedparser 在 Python 3.11 有 sgmllib 相依性問題）
     - 新增 `beautifulsoup4>=4.12` 至 requirements.txt
-    - 新增 `lxml>=5.0` 至 requirements.txt
-    - 執行 `pip install -r requirements.txt` 可成功安裝所有新依賴
+    - 新增 `lxml>=4.9` 至 requirements.txt
+    - `python3 -c "import google.genai, atoma, bs4, lxml"` 可正常執行
 
 - [ ] [TASK-101] 建立 src/news/ 模組目錄結構
   - **複雜度**：S
