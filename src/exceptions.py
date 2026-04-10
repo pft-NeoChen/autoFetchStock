@@ -191,3 +191,55 @@ class RateLimitError(AutoFetchStockError):
         self.wait_seconds = wait_seconds
         detail = f" (請等待 {wait_seconds:.1f} 秒)" if wait_seconds else ""
         super().__init__(f"{message}{detail}")
+
+
+class NewsFetchError(AutoFetchStockError):
+    """
+    News source fetch failure.
+
+    Raised when:
+    - RSS feed parsing fails completely (not a single-article fallback)
+    - HTTP error on a news source URL
+
+    Handling:
+    - Log error and skip the source
+    - Increment consecutive failure counter
+    """
+
+    def __init__(
+        self,
+        message: str = "新聞來源抓取失敗",
+        source_url: str = None,
+        reason: str = None,
+    ):
+        self.source_url = source_url
+        self.reason = reason
+        detail = f" (url: {source_url})" if source_url else ""
+        super().__init__(f"{message}{detail}")
+
+
+class SummarizationError(AutoFetchStockError):
+    """
+    News summarization API failure.
+
+    Raised when:
+    - Gemini API initialization fails
+    - API quota exceeded
+    - gemini-cli subprocess returns non-zero exit code
+
+    Handling:
+    - Set summary_failed=True on affected articles
+    - Log full error details
+    - Continue processing other articles
+    """
+
+    def __init__(
+        self,
+        message: str = "新聞摘要失敗",
+        article_title: str = None,
+        reason: str = None,
+    ):
+        self.article_title = article_title
+        self.reason = reason
+        detail = f": {reason}" if reason else ""
+        super().__init__(f"{message}{detail}")

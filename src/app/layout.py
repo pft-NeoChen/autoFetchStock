@@ -2,11 +2,13 @@
 Dash layout module for autoFetchStock.
 
 This module defines the web application layout structure:
+- Multi-page routing via dcc.Location
 - Stock search input field
 - Stock info display area
-- Dual-tab interface (intraday/K-line)
-- Chart containers
-- Control components (period selector, interval)
+- Three-tab interface (intraday / K-line / news)
+- News page layout (/news)
+- News ticker bar
+- Control components (period selector, intervals)
 """
 
 from dash import html, dcc
@@ -16,25 +18,56 @@ from src.models import KlinePeriod
 
 def create_layout() -> html.Div:
     """
-    Create the main application layout.
+    Create the top-level application shell.
 
-    Layout structure:
-    - Header with stock search
-    - Main content area with:
-      - Left sidebar (favorites list)
-      - Right content (stock info, tabs, charts)
-    - Status bar
+    Contains the URL router, shared hidden components, the navigation
+    header, a ``page-content`` placeholder filled by the routing
+    callback, and the persistent news ticker bar at the bottom.
 
     Returns:
-        Dash html.Div containing the complete layout
+        Dash html.Div containing the complete shell layout
     """
     return html.Div(
         id="main-container",
         className="main-container",
         children=[
-            # Hidden stores and intervals
+            # URL router (no page refresh)
+            dcc.Location(id="url", refresh=False),
+
+            # Hidden stores and intervals (shared across all pages)
             _create_hidden_components(),
 
+            # Top navigation bar
+            _create_nav_bar(),
+
+            # Dynamic page content (swapped by routing callback)
+            html.Div(id="page-content"),
+
+            # News ticker bar (visible on all pages)
+            _create_news_ticker(),
+        ]
+    )
+
+
+def create_main_page_layout() -> html.Div:
+    """
+    Create the stock-monitoring main page layout (pathname='/').
+
+    Layout structure:
+    - Header with stock search
+    - Main content area with:
+      - Left sidebar (favorites list)
+      - Center content (stock info, three-tab panel)
+      - Right sidebar (big orders / best five prices)
+    - Error message display
+    - System status bar
+
+    Returns:
+        html.Div for the main stock page
+    """
+    return html.Div(
+        id="stock-page",
+        children=[
             # Header with search
             _create_header(),
 
@@ -52,7 +85,7 @@ def create_layout() -> html.Div:
                             # Stock info display
                             _create_stock_info_section(),
 
-                            # Main tabs
+                            # Main tabs (intraday / K-line / news)
                             _create_tabs_section(),
                         ]
                     ),
@@ -68,6 +101,55 @@ def create_layout() -> html.Div:
             # System status bar
             _create_status_bar(),
         ]
+    )
+
+
+def create_news_page_layout() -> html.Div:
+    """
+    Create the standalone news page layout (pathname='/news').
+
+    Displays all five news categories in sub-tabs with a manual
+    refresh button.
+
+    Returns:
+        html.Div for the /news page
+    """
+    category_tabs = [
+        dcc.Tab(label="國際新聞",   value="INTERNATIONAL", className="tab", selected_className="tab-selected"),
+        dcc.Tab(label="財經新聞",   value="FINANCIAL",     className="tab", selected_className="tab-selected"),
+        dcc.Tab(label="科技新聞",   value="TECH",          className="tab", selected_className="tab-selected"),
+        dcc.Tab(label="台股相關",   value="STOCK_TW",      className="tab", selected_className="tab-selected"),
+        dcc.Tab(label="美股相關",   value="STOCK_US",      className="tab", selected_className="tab-selected"),
+    ]
+
+    return html.Div(
+        id="news-page",
+        className="news-page",
+        children=[
+            html.Div(
+                className="news-page-header",
+                children=[
+                    html.H2("市場新聞總覽", className="news-page-title"),
+                    html.Button(
+                        "手動更新",
+                        id="news-refresh-button",
+                        className="news-refresh-button",
+                    ),
+                    html.Span(
+                        id="news-last-updated",
+                        className="news-last-updated",
+                        children="最後更新：--",
+                    ),
+                ],
+            ),
+            dcc.Tabs(
+                id="news-category-tabs",
+                value="INTERNATIONAL",
+                className="main-tabs",
+                children=category_tabs,
+            ),
+            html.Div(id="news-category-content", className="news-category-content"),
+        ],
     )
 
 
@@ -87,6 +169,9 @@ def _create_hidden_components() -> html.Div:
                 }
             ),
 
+            # Latest news data cache (shared between ticker and news tab)
+            dcc.Store(id="news-data-store", data=None),
+
             # Auto-update interval (1 second for real-time feel)
             dcc.Interval(
                 id="auto-update-interval",
@@ -94,7 +179,44 @@ def _create_hidden_components() -> html.Div:
                 n_intervals=0,
                 disabled=True,  # Start disabled, enable when stock selected
             ),
+
+            # Ticker rotation interval (5 seconds)
+            dcc.Interval(
+                id="news-ticker-interval",
+                interval=5 * 1000,  # 5 seconds
+                n_intervals=0,
+                disabled=False,
+            ),
         ]
+    )
+
+
+def _create_nav_bar() -> html.Div:
+    """Create top navigation bar with links to main page and news page."""
+    return html.Div(
+        id="nav-bar",
+        className="nav-bar",
+        children=[
+            html.A("台股即時資料", href="/", className="nav-link nav-home"),
+            html.A("市場新聞", href="/news", className="nav-link nav-news"),
+        ],
+    )
+
+
+def _create_news_ticker() -> html.Div:
+    """Create the news ticker bar displayed at the bottom of every page."""
+    return html.Div(
+        id="news-ticker-bar",
+        className="news-ticker-bar",
+        style={"display": "none"},  # hidden until news data is available
+        children=[
+            html.Span("新聞：", className="ticker-label"),
+            html.Div(
+                id="news-ticker-content",
+                className="ticker-content",
+                children="--",
+            ),
+        ],
     )
 
 
@@ -312,7 +434,7 @@ def _create_stock_info_section() -> html.Div:
 
 
 def _create_tabs_section() -> html.Div:
-    """Create main tabs section (Intraday / K-line)."""
+    """Create main tabs section (Intraday / K-line / News)."""
     return html.Div(
         id="tabs-section",
         className="tabs-section",
@@ -338,9 +460,46 @@ def _create_tabs_section() -> html.Div:
                         selected_className="tab-selected",
                         children=_create_kline_tab_content(),
                     ),
+                    # News tab (stock-filtered)
+                    dcc.Tab(
+                        label="新聞",
+                        value="news",
+                        className="tab",
+                        selected_className="tab-selected",
+                        children=_create_news_tab_content(),
+                    ),
                 ]
             ),
         ]
+    )
+
+
+def _create_news_tab_content() -> html.Div:
+    """Create the stock-filtered news tab inside the main page."""
+    category_tabs = [
+        dcc.Tab(label="全部",     value="ALL",           className="tab", selected_className="tab-selected"),
+        dcc.Tab(label="國際",     value="INTERNATIONAL", className="tab", selected_className="tab-selected"),
+        dcc.Tab(label="財經",     value="FINANCIAL",     className="tab", selected_className="tab-selected"),
+        dcc.Tab(label="科技",     value="TECH",          className="tab", selected_className="tab-selected"),
+        dcc.Tab(label="台股",     value="STOCK_TW",      className="tab", selected_className="tab-selected"),
+        dcc.Tab(label="美股",     value="STOCK_US",      className="tab", selected_className="tab-selected"),
+    ]
+    return html.Div(
+        id="news-tab-content",
+        className="tab-content",
+        children=[
+            dcc.Tabs(
+                id="stock-news-category-tabs",
+                value="ALL",
+                className="main-tabs",
+                children=category_tabs,
+            ),
+            html.Div(
+                id="stock-news-articles",
+                className="news-articles-container",
+                children=[html.Div("請先選擇股票", className="no-news")],
+            ),
+        ],
     )
 
 
@@ -499,6 +658,7 @@ COMPONENT_IDS = {
     "main_tabs": "main-tabs",
     "intraday_tab": "intraday-tab-content",
     "kline_tab": "kline-tab-content",
+    "news_tab": "news-tab-content",
 
     # Charts
     "intraday_chart": "intraday-chart",
@@ -516,6 +676,22 @@ COMPONENT_IDS = {
     # Hidden components
     "app_state": "app-state-store",
     "auto_update": "auto-update-interval",
+    "news_data_store": "news-data-store",
+    "news_ticker_interval": "news-ticker-interval",
+
+    # News main page tab
+    "stock_news_category_tabs": "stock-news-category-tabs",
+    "stock_news_articles": "stock-news-articles",
+
+    # News page (/news)
+    "news_category_tabs": "news-category-tabs",
+    "news_category_content": "news-category-content",
+    "news_refresh_button": "news-refresh-button",
+    "news_last_updated": "news-last-updated",
+
+    # Ticker
+    "news_ticker_bar": "news-ticker-bar",
+    "news_ticker_content": "news-ticker-content",
 
     # Error and status
     "error_display": "error-message-display",

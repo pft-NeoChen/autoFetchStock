@@ -64,6 +64,28 @@ class AppConfig:
         default_factory=lambda: os.getenv("SHIOAJI_SIMULATION", "true").lower() == "true"
     )
 
+    # ── News submodule settings ──────────────────────────────────────────────
+
+    # Gemini API
+    gemini_api_key: str = field(
+        default_factory=lambda: os.getenv("GEMINI_API_KEY", "")
+    )
+    news_summarizer_backend: str = field(
+        default_factory=lambda: os.getenv("NEWS_SUMMARIZER_BACKEND", "gemini")
+    )
+
+    # News schedule (Asia/Taipei)
+    news_start_hour: int = 8      # 排程開始時間
+    news_end_hour: int = 15       # 排程結束時間（最後觸發在此小時）
+    news_interval_minutes: int = 60
+
+    # News fetch settings
+    news_max_articles_per_category: int = 20
+    news_request_timeout: int = 15        # 全文抓取逾時（秒）
+    news_request_interval: float = 2.0   # 同網域請求間隔（秒）
+    news_summarizer_timeout: int = 30     # 摘要 API 逾時（秒）
+    news_max_run_minutes: int = 30        # 單次執行時間上限（分鐘）
+
     def get_shioaji_credentials(self) -> tuple[str, str]:
         """根據目前的模擬狀態回傳對應的 API Key 與 Secret."""
         if self.shioaji_simulation:
@@ -74,7 +96,7 @@ class AppConfig:
         """Ensure directories exist after initialization."""
         # Create data directories
         data_path = Path(self.data_dir)
-        for subdir in ["stocks", "intraday", "cache", "backup"]:
+        for subdir in ["stocks", "intraday", "cache", "backup", "news"]:
             (data_path / subdir).mkdir(parents=True, exist_ok=True)
 
         # Create logs directory

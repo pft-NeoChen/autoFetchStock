@@ -51,6 +51,7 @@ class DataStorage:
     INTRADAY_DIR: str = "intraday"
     CACHE_DIR: str = "cache"
     BACKUP_DIR: str = "backup"
+    NEWS_DIR: str = "news"
 
     def __init__(self, data_dir: str = None):
         """
@@ -70,6 +71,7 @@ class DataStorage:
             self.INTRADAY_DIR,
             self.CACHE_DIR,
             self.BACKUP_DIR,
+            self.NEWS_DIR,
         ]
 
         for subdir in subdirs:
@@ -96,6 +98,11 @@ class DataStorage:
     def backup_dir(self) -> Path:
         """Get backup directory path."""
         return self._data_dir / self.BACKUP_DIR
+
+    @property
+    def news_dir(self) -> Path:
+        """Get news data directory path."""
+        return self._data_dir / self.NEWS_DIR
 
     def save_favorites(self, favorites: List[Dict[str, str]]) -> bool:
         """
@@ -653,3 +660,93 @@ class DataStorage:
         if deleted_count > 0:
             logger.info(f"Cleaned up {deleted_count} old intraday files")
         return deleted_count
+
+    # ── News storage methods ─────────────────────────────────────────────────
+
+    def save_news(self, run_result: "NewsRunResult") -> None:
+        """
+        Save a news run result to daily JSON and update latest.json.
+
+        Appends the run to data/news/YYYYMMDD.json (NewsDailyFile format)
+        and overwrites data/news/latest.json with the most recent run.
+
+        Args:
+            run_result: Completed NewsRunResult from NewsProcessor
+
+        Raises:
+            DiskSpaceError: Insufficient disk space
+        """
+        self._check_disk_space()
+
+        date_str = run_result.run_at.strftime("%Y%m%d")
+        daily_path = self.news_dir / f"{date_str}.json"
+
+        # Load existing daily file or create new one
+        existing_data = self._load_json_file(daily_path)
+        if existing_data and "runs" in existing_data:
+            daily_dict = existing_data
+        else:
+            daily_dict = {
+                "date": date_str,
+                "runs": [],
+            }
+
+        # Append this run
+        daily_dict["runs"].append(run_result.to_dict())
+
+        # Write daily file atomically
+        self._atomic_write(daily_path, daily_dict)
+        logger.info(
+            f"Saved news run at {run_result.run_at.isoformat()} "
+            f"to {daily_path.name}"
+        )
+
+        # Update latest.json with this run
+        latest_path = self.news_dir / "latest.json"
+        self._atomic_write(latest_path, run_result.to_dict())
+        logger.debug("Updated news latest.json")
+
+    def load_news(self, date_str: str) -> "Optional[NewsDailyFile]":
+        """
+        Load news daily file for a given date.
+
+        Args:
+            date_str: Date in YYYYMMDD format
+
+        Returns:
+            NewsDailyFile if the file exists, None otherwise
+        """
+        from src.news.news_models import NewsDailyFile
+
+        daily_path = self.news_dir / f"{date_str}.json"
+        data = self._load_json_file(daily_path)
+        if data is None:
+            logger.debug(f"No news file for date {date_str}")
+            return None
+
+        try:
+            return NewsDailyFile.from_dict(data)
+        except Exception as e:
+            logger.error(f"Failed to parse news daily file {daily_path}: {e}")
+            return None
+
+    def load_latest_news(self) -> "Optional[NewsRunResult]":
+        """
+        Load the most recent news run result.
+
+        Returns:
+            NewsRunResult from latest.json, or None if not found
+        """
+        from src.news.news_models import NewsRunResult
+
+        latest_path = self.news_dir / "latest.json"
+        data = self._load_json_file(latest_path)
+        if data is None:
+            logger.debug("No latest news file found")
+            return None
+
+        try:
+            return NewsRunResult.from_dict(data)
+        except Exception as e:
+            logger.error(f"Failed to parse latest news file: {e}")
+            return None

@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 
 from src.models import SchedulerStatus
@@ -228,6 +229,60 @@ class Scheduler:
             callback: Function that takes stock_id and fetches data
         """
         self._fetch_callback = callback
+
+    def add_news_job(self, news_callback: Callable[[], None]) -> bool:
+        """
+        Add the hourly news collection job.
+
+        Runs every hour from 08:00 to 15:00 Asia/Taipei, Mon-Fri.
+        Uses CronTrigger so it fires at the top of each hour within
+        the configured window (hour="8-15").
+
+        Args:
+            news_callback: Zero-argument callable that runs the full news
+                           collection and summarization pipeline.
+
+        Returns:
+            True if the job was registered successfully.
+        """
+        try:
+            self._scheduler.add_job(
+                self._news_job,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour="8-15",
+                    minute=0,
+                    timezone=TW_TIMEZONE,
+                ),
+                id="news_collect",
+                kwargs={"news_callback": news_callback},
+                name="News collection",
+                replace_existing=True,
+            )
+            logger.info("Registered hourly news job (08:00-15:00 Mon-Fri)")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to register news job: {e}")
+            return False
+
+    def _news_job(self, news_callback: Callable[[], None]) -> None:
+        """
+        Execute the news collection job.
+
+        Wraps the callback so exceptions are logged but do not crash
+        the scheduler (REQ-106).
+
+        Args:
+            news_callback: The NewsProcessor.run() bound method.
+        """
+        logger.info("Starting scheduled news collection")
+        try:
+            news_callback()
+            logger.info("Scheduled news collection completed")
+        except Exception as e:
+            logger.error(
+                f"News collection job failed: {e}\n{traceback.format_exc()}"
+            )
 
     def _fetch_job(self, stock_id: str) -> None:
         """

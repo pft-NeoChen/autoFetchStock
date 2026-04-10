@@ -17,6 +17,7 @@ from src.storage import DataStorage
 from src.processor.data_processor import DataProcessor
 from src.renderer.chart_renderer import ChartRenderer
 from src.scheduler import Scheduler
+from src.news.news_processor import NewsProcessor
 from src.app.layout import create_layout
 from src.app.callbacks import CallbackManager
 
@@ -111,6 +112,15 @@ class AppController:
         )
         logger.debug("Scheduler initialized")
 
+        # News processor
+        self.news_processor = NewsProcessor(
+            config=self.config,
+            storage=self.storage,
+        )
+        # Register hourly news job (08:00-15:00 Mon-Fri)
+        self.scheduler.add_news_job(self.news_processor.run)
+        logger.debug("NewsProcessor initialized and news job registered")
+
     def _init_dash_app(self) -> None:
         """Initialize Dash application with layout and callbacks."""
         # Create Dash app
@@ -134,6 +144,7 @@ class AppController:
             processor=self.processor,
             renderer=self.renderer,
             scheduler=self.scheduler,
+            news_processor=self.news_processor,
         )
 
         # Register all callbacks
