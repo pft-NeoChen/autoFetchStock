@@ -440,6 +440,27 @@ body {
     border-color: var(--color-accent);
 }
 
+/* Drag-and-drop reorder */
+.favorite-item[draggable="true"] {
+    cursor: grab;
+}
+
+.favorite-item[draggable="true"]:active {
+    cursor: grabbing;
+}
+
+.favorite-item.dragging {
+    opacity: 0.35;
+    border-style: dashed;
+    border-color: var(--color-accent);
+}
+
+.favorite-item.drag-over {
+    background-color: rgba(33, 150, 243, 0.25);
+    border-color: var(--color-accent);
+    transform: scale(1.01);
+}
+
 .favorite-item-text {
     white-space: nowrap;
     overflow: hidden;

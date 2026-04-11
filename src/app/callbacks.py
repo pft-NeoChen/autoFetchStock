@@ -201,6 +201,8 @@ class CallbackManager:
                             html.Span(price_text, className=price_class),
                         ],
                         n_clicks=0,
+                        draggable="true",
+                        **{"data-stock-id": stock_id},
                     )
                 )
             return items
@@ -228,6 +230,54 @@ class CallbackManager:
 
             # Set search input and trigger search button
             return stock_id, (current_search_clicks or 0) + 1
+
+        # ── Drag-and-drop reorder ────────────────────────────────────────────
+
+        # Clientside: on hidden button click, read window._favoritesOrder and
+        # push it into the store so the Python callback can persist it.
+        self.app.clientside_callback(
+            """
+            function(n) {
+                if (!window._favoritesOrder) {
+                    return window.dash_clientside.no_update;
+                }
+                var order = window._favoritesOrder;
+                window._favoritesOrder = null;
+                return order;
+            }
+            """,
+            Output("favorites-order-store", "data"),
+            Input("favorites-reorder-btn", "n_clicks"),
+            prevent_initial_call=True,
+        )
+
+        @self.app.callback(
+            Output("app-state-store", "data", allow_duplicate=True),
+            Input("favorites-order-store", "data"),
+            State("app-state-store", "data"),
+            prevent_initial_call=True,
+        )
+        def on_favorites_reorder(new_order, app_state):
+            """Persist drag-and-drop reordered favorites list."""
+            if not new_order or not app_state:
+                raise PreventUpdate
+
+            current_favorites = app_state.get("favorites", [])
+            fav_map = {f["id"]: f for f in current_favorites}
+
+            # Rebuild list in dropped order; keep any IDs not in new_order at end
+            reordered = [fav_map[sid] for sid in new_order if sid in fav_map]
+            seen = set(new_order)
+            for fav in current_favorites:
+                if fav["id"] not in seen:
+                    reordered.append(fav)
+
+            self.storage.save_favorites(reordered)
+            logger.info(f"Favorites reordered: {[f['id'] for f in reordered]}")
+
+            new_state = dict(app_state)
+            new_state["favorites"] = reordered
+            return new_state
 
         @self.app.callback(
             Output("stock-search-input", "value", allow_duplicate=True),
