@@ -140,9 +140,9 @@ class TWSEParser:
                 stock_id=stock_id,
                 stock_name=quote_data.get("n", ""),
                 current_price=current_price,
-                open_price=open_price or current_price,
-                high_price=high_price or current_price,
-                low_price=low_price or current_price,
+                open_price=open_price,   # None when TWSE returns "-"; handled by data_processor
+                high_price=high_price,   # None when TWSE returns "-"; handled by data_processor
+                low_price=low_price,     # None when TWSE returns "-"; handled by data_processor
                 previous_close=previous_close or current_price,
                 change_amount=price_change.amount,
                 change_percent=price_change.percentage,
