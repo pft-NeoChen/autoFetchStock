@@ -187,6 +187,11 @@ def _create_hidden_components() -> html.Div:
                 n_intervals=0,
                 disabled=False,
             ),
+
+            # Favorites drag-and-drop reorder support
+            dcc.Store(id="favorites-order-store", data=None),
+            html.Button(id="favorites-reorder-btn", n_clicks=0,
+                        style={"display": "none"}),
         ]
     )
 
