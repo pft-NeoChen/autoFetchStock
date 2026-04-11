@@ -94,11 +94,11 @@ class RealtimeQuote:
     """Real-time stock quote data."""
     stock_id: str
     stock_name: str
-    current_price: float       # Latest transaction price
-    open_price: float          # Opening price
-    high_price: float          # Day's high
-    low_price: float           # Day's low
-    previous_close: float      # Previous day's close
+    current_price: float            # Latest transaction price
+    open_price: Optional[float]     # Opening price (None if not yet available)
+    high_price: Optional[float]     # Day's high (None if not yet available)
+    low_price: Optional[float]      # Day's low (None if not yet available)
+    previous_close: float           # Previous day's close
     change_amount: float       # Price change amount
     change_percent: float      # Price change percentage
     direction: PriceDirection  # Price direction

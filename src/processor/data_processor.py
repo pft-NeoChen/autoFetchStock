@@ -433,18 +433,46 @@ class DataProcessor:
 
             if not df.empty:
                 # Check if we already have this date
-                # Use a small tolerance for date comparison if needed, but usually exact match
                 date_mask = df["date"] == quote_date
                 if date_mask.any():
-                    # Update existing record
+                    # Date already exists in historical data (from TWSE STOCK_DAY).
+                    # Historical open/high/low are authoritative — do NOT overwrite them.
+                    # Only refresh close price and volume from the realtime feed.
                     idx = df.index[date_mask][0]
-                    for key, val in quote_record.items():
-                        df.at[idx, key] = val
+                    df.at[idx, "close"] = quote_record["close"]
+                    df.at[idx, "volume"] = quote_record["volume"]
+                    # Extend high/low only when realtime values are valid and exceed history
+                    rt_high = quote_record["high"]
+                    rt_low = quote_record["low"]
+                    if rt_high is not None and rt_high > df.at[idx, "high"]:
+                        df.at[idx, "high"] = rt_high
+                    if rt_low is not None and rt_low < df.at[idx, "low"]:
+                        df.at[idx, "low"] = rt_low
                 else:
-                    # Append new record
-                    df = pd.concat([df, pd.DataFrame([quote_record])], ignore_index=True)
+                    # New date not yet in history (today's intraday bar).
+                    # Fall back to current_price for any unavailable OHLC fields.
+                    current = quote_record["close"]
+                    new_record = {
+                        "date": quote_record["date"],
+                        "open": quote_record["open"] if quote_record["open"] is not None else current,
+                        "high": quote_record["high"] if quote_record["high"] is not None else current,
+                        "low": quote_record["low"] if quote_record["low"] is not None else current,
+                        "close": current,
+                        "volume": quote_record["volume"],
+                        "turnover": quote_record["turnover"],
+                    }
+                    df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
             else:
-                df = pd.DataFrame([quote_record])
+                current = quote_record["close"]
+                df = pd.DataFrame([{
+                    "date": quote_record["date"],
+                    "open": quote_record["open"] if quote_record["open"] is not None else current,
+                    "high": quote_record["high"] if quote_record["high"] is not None else current,
+                    "low": quote_record["low"] if quote_record["low"] is not None else current,
+                    "close": current,
+                    "volume": quote_record["volume"],
+                    "turnover": quote_record["turnover"],
+                }])
 
         # Sort by date
         df = df.sort_values("date").reset_index(drop=True)
