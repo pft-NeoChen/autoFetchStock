@@ -518,6 +518,8 @@ def _create_intraday_tab_content() -> html.Div:
             dcc.Graph(
                 id="intraday-chart",
                 className="chart",
+                responsive=True,
+                style={"height": "100%"},
                 config={
                     "displayModeBar": True,
                     "scrollZoom": True,
@@ -578,6 +580,8 @@ def _create_kline_tab_content() -> html.Div:
             dcc.Graph(
                 id="kline-chart",
                 className="chart",
+                responsive=True,
+                style={"height": "100%"},
                 config={
                     "displayModeBar": True,
                     "scrollZoom": True,
