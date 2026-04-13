@@ -59,6 +59,17 @@ body {
     background-color: var(--bg-primary);
     color: var(--text-primary);
     line-height: 1.5;
+    height: 100%;
+}
+
+/* Propagate full height through Dash's React wrapper divs */
+html {
+    height: 100%;
+}
+
+#react-entry-point,
+#_dash-app-content {
+    height: 100%;
 }
 
 * {
@@ -67,10 +78,14 @@ body {
 
 /* ===== Main Container ===== */
 .main-container {
-    max-width: 1400px;
-    margin: 0 auto;
+    /* Full viewport — no max-width cap */
+    width: 100%;
     padding: var(--spacing-md);
-    min-height: 100vh;
+    /* Vertical flex column so content-wrapper can stretch to fill remaining height */
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;   /* inner panes scroll independently */
 }
 
 /* ===== Header Section ===== */
@@ -83,6 +98,7 @@ body {
     background-color: var(--bg-secondary);
     border-radius: 8px;
     margin-bottom: var(--spacing-md);
+    flex-shrink: 0;     /* never compress header */
 }
 
 .app-title {
@@ -186,21 +202,29 @@ body {
     display: flex;
     gap: var(--spacing-md);
     margin-bottom: var(--spacing-md);
-    min-height: 800px;
+    /* Grow to fill all vertical space left by header + status bar */
+    flex: 1;
+    min-height: 0;      /* allow flex children to shrink below their content size */
+    overflow: hidden;
 }
 
 .favorites-sidebar {
-    width: 250px;
+    width: 220px;
+    flex-shrink: 0;
     background-color: var(--bg-secondary);
     border-radius: 8px;
     padding: var(--spacing-md);
     display: flex;
     flex-direction: column;
+    overflow: hidden;
 }
 
 .main-content {
     flex: 1;
-    min-width: 0; /* Prevent overflow */
+    min-width: 0;       /* Prevent overflow */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .sidebar-title {
@@ -212,12 +236,14 @@ body {
 }
 
 .big-orders-sidebar {
-    width: 250px;
+    width: 220px;
+    flex-shrink: 0;
     background-color: var(--bg-secondary);
     border-radius: 8px;
     padding: var(--spacing-md);
     display: flex;
     flex-direction: column;
+    overflow: hidden;
 }
 
 .big-orders-header {
@@ -405,6 +431,7 @@ body {
 
 .favorites-list {
     flex: 1;
+    min-height: 0;      /* allow shrinking in flex column */
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -508,6 +535,7 @@ body {
     background-color: var(--bg-secondary);
     border-radius: 8px;
     margin-bottom: var(--spacing-md);
+    flex-shrink: 0;     /* never compress stock info row */
 }
 
 .stock-header {
@@ -576,6 +604,11 @@ body {
 .tabs-section {
     background-color: var(--bg-secondary);
     border-radius: 8px;
+    /* Grow to fill remaining height inside .main-content */
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
     margin-bottom: var(--spacing-md);
 }
@@ -608,6 +641,11 @@ body {
 
 .tab-content {
     padding: var(--spacing-md);
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 /* ===== Period Selector ===== */
@@ -664,7 +702,9 @@ body {
 /* ===== Charts ===== */
 .chart {
     width: 100%;
-    height: 600px;
+    /* Fill available height inside the flex tab-content; fall back to 400px minimum */
+    flex: 1;
+    min-height: 400px;
     background-color: var(--bg-primary);
     border-radius: 4px;
 }
@@ -720,6 +760,7 @@ body {
     background-color: var(--bg-secondary);
     border-radius: 8px;
     font-size: var(--font-sm);
+    flex-shrink: 0;     /* never compress status bar */
 }
 
 .status-item {
@@ -736,6 +777,36 @@ body {
 
 /* ===== Responsive Design ===== */
 @media (max-width: 768px) {
+    /* On small screens revert to scrollable column layout */
+    .main-container {
+        height: auto;
+        overflow: visible;
+    }
+
+    .content-wrapper {
+        flex-direction: column;
+        overflow: visible;
+    }
+
+    .favorites-sidebar,
+    .big-orders-sidebar {
+        width: 100%;
+        max-height: 200px;
+    }
+
+    .main-content {
+        overflow: visible;
+    }
+
+    .tabs-section {
+        flex: none;
+        overflow: visible;
+    }
+
+    .tab-content {
+        overflow: visible;
+    }
+
     .header-section {
         flex-direction: column;
         align-items: stretch;
@@ -765,7 +836,9 @@ body {
     }
 
     .chart {
-        height: 400px;
+        flex: none;
+        min-height: 350px;
+        height: 350px;
     }
 
     .status-bar {
@@ -788,7 +861,9 @@ body {
     }
 
     .chart {
-        height: 300px;
+        flex: none;
+        height: 280px;
+        min-height: 280px;
     }
 }
 
