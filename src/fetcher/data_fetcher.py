@@ -13,7 +13,7 @@ Includes rate limiting, timeout handling, and retry logic.
 import logging
 import time
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import requests
 
@@ -46,7 +46,7 @@ class DataFetcher:
     # API endpoints
     REALTIME_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
     DAILY_HISTORY_URL = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
-    OTC_HISTORY_URL = "https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/stk_quote_result.php"
+    OTC_HISTORY_URL = "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
     STOCK_LIST_URL = "https://isin.twse.com.tw/isin/C_public.jsp"
 
     # Rate limiting and timeout settings
@@ -62,7 +62,7 @@ class DataFetcher:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json, text/html, */*",
         "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/stk_quote.php"
+        "Referer": "https://www.tpex.org.tw/zh-tw/mainboard/trading/info/stock-pricing.html"
     }
 
     def __init__(self, storage=None, shioaji_fetcher=None):
@@ -73,6 +73,7 @@ class DataFetcher:
         self._consecutive_failures: int = 0
         self._stock_list_cache: Optional[List[StockInfo]] = None
         self._stock_list_cache_time: Optional[datetime] = None
+        self._realtime_quote_cache: Dict[str, RealtimeQuote] = {}
         self._is_fetching_list: bool = False
         self.storage = storage # Optional storage for persistent cache
         self.shioaji_fetcher = shioaji_fetcher # Optional Shioaji fetcher for cached quotes
@@ -105,6 +106,7 @@ class DataFetcher:
         if self.shioaji_fetcher:
             cached_quote = self.shioaji_fetcher.get_last_quote(stock_id)
             if cached_quote:
+                self._realtime_quote_cache[stock_id] = cached_quote
                 logger.debug(f"Using cached Shioaji quote for {stock_id}: {cached_quote.current_price}")
                 return cached_quote
 
@@ -129,17 +131,27 @@ class DataFetcher:
         try:
             data = self._make_request(self.REALTIME_URL, params, blocking=blocking)
             quote = TWSEParser.parse_realtime_quote(data, stock_id)
+            self._realtime_quote_cache[stock_id] = quote
             self._reset_failure_count()
             logger.info(f"Fetched realtime quote for {stock_id}: {quote.current_price}")
             return quote
 
         except BlockingIOError:
             # Rate limit hit in non-blocking mode
-            return None
+            return self._realtime_quote_cache.get(stock_id)
             
         except (InvalidDataError, StockNotFoundError):
             self._increment_failure_count()
             raise
+
+    def get_cached_quote(self, stock_id: str) -> Optional[RealtimeQuote]:
+        """Return the most recent cached quote from Shioaji or local fallback cache."""
+        if self.shioaji_fetcher:
+            cached_quote = self.shioaji_fetcher.get_last_quote(stock_id)
+            if cached_quote:
+                self._realtime_quote_cache[stock_id] = cached_quote
+                return cached_quote
+        return self._realtime_quote_cache.get(stock_id)
 
     def fetch_daily_history(
         self,
@@ -166,17 +178,16 @@ class DataFetcher:
             url = self.DAILY_HISTORY_URL
         else:
             # TPEx (OTC)
-            roc_year = year - 1911
             params = {
-                "l": "zh-tw",
-                "d": f"{roc_year}/{month:02d}/01",
-                "stkno": stock_id,
-                "_": int(time.time() * 1000)
+                "code": stock_id,
+                "date": f"{year}/{month:02d}/01",
+                "response": "json",
             }
             url = self.OTC_HISTORY_URL
 
         try:
-            data = self._make_request(url, params)
+            method = "GET" if market == "tse" else "POST"
+            data = self._make_request(url, params, method=method)
             records = TWSEParser.parse_daily_history(data, stock_id)
             self._reset_failure_count()
             logger.info(f"Fetched {len(records)} daily records for {stock_id} ({year}/{month})")
@@ -247,6 +258,37 @@ class DataFetcher:
         results = TWSEParser.search_stocks(stock_list, keyword)
         logger.info(f"Search '{keyword}' returned {len(results)} results")
         return results
+
+    def resolve_stock(self, keyword: str) -> StockInfo:
+        """
+        Resolve a user-entered stock ID or exact stock name into StockInfo.
+
+        Falls back to search ranking, but only auto-selects when the match is
+        unambiguous enough for a submit action.
+        """
+        keyword = keyword.strip()
+        if not keyword:
+            raise StockNotFoundError(keyword=keyword)
+
+        normalized_keyword = TWSEParser.normalize_search_text(keyword)
+        stock_list = self._get_stock_list()
+
+        for stock in stock_list:
+            if TWSEParser.normalize_search_text(stock.stock_id) == normalized_keyword:
+                return stock
+
+        results = TWSEParser.search_stocks(stock_list, keyword)
+        if not results:
+            raise StockNotFoundError(keyword=keyword)
+
+        top_match = results[0]
+        if len(results) == 1:
+            return top_match
+
+        if TWSEParser.normalize_search_text(top_match.stock_name) == normalized_keyword:
+            return top_match
+
+        raise StockNotFoundError(keyword=keyword)
 
     def _get_stock_list(self) -> List[StockInfo]:
         """
@@ -331,7 +373,8 @@ class DataFetcher:
         params: dict = None,
         expect_json: bool = True,
         bypass_limit: bool = False,
-        blocking: bool = True
+        blocking: bool = True,
+        method: str = "GET",
     ):
         """
         Make HTTP request with rate limiting, timeout, and retry.
@@ -358,7 +401,7 @@ class DataFetcher:
 
         # First attempt
         try:
-            return self._execute_request(url, params, expect_json)
+            return self._execute_request(url, params, expect_json, method=method)
 
         except ConnectionTimeoutError:
             # Retry after delay (REQ-100)
@@ -366,7 +409,7 @@ class DataFetcher:
             time.sleep(self.RETRY_DELAY)
 
             try:
-                return self._execute_request(url, params, expect_json)
+                return self._execute_request(url, params, expect_json, method=method)
             except ConnectionTimeoutError:
                 self._increment_failure_count()
                 raise
@@ -375,7 +418,8 @@ class DataFetcher:
         self,
         url: str,
         params: dict = None,
-        expect_json: bool = True
+        expect_json: bool = True,
+        method: str = "GET",
     ):
         """
         Execute single HTTP request.
@@ -393,11 +437,14 @@ class DataFetcher:
             InvalidDataError: Invalid response format
         """
         try:
-            response = self._session.get(
-                url,
-                params=params,
-                timeout=self.CONNECTION_TIMEOUT
-            )
+            method = method.upper()
+            request_kwargs = {"timeout": self.CONNECTION_TIMEOUT}
+            if method == "GET":
+                request_kwargs["params"] = params
+            else:
+                request_kwargs["data"] = params
+
+            response = self._session.request(method, url, **request_kwargs)
             response.raise_for_status()
 
             # Update last request time (REQ-064)
@@ -466,7 +513,7 @@ class DataFetcher:
                 f"Service unavailable: {self._consecutive_failures} consecutive failures"
             )
             raise ServiceUnavailableError(
-                consecutive_failures=self._consecutive_failures
+                failures=self._consecutive_failures
             )
 
     def _increment_failure_count(self) -> None:

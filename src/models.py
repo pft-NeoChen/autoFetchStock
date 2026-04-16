@@ -107,6 +107,9 @@ class RealtimeQuote:
     best_bid: float            # Best bid price
     best_ask: float            # Best ask price
     timestamp: datetime        # Data timestamp
+    limit_up_price: float = 0.0    # Limit up price (漲停價)
+    limit_down_price: float = 0.0  # Limit down price (跌停價)
+    is_simtrade: bool = False      # Whether this quote came from trial matching
 
     def __post_init__(self):
         """Validate quote data."""

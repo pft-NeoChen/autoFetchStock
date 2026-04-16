@@ -12,7 +12,7 @@ import shioaji as sj
 from shioaji.constant import QuoteVersion
 
 from src.config import AppConfig, get_logger
-from src.models import RealtimeQuote, IntradayTick
+from src.models import RealtimeQuote, IntradayTick, DailyOHLC, PriceDirection
 
 logger = get_logger("autofetchstock.fetcher")
 
@@ -140,21 +140,168 @@ class ShioajiFetcher:
         """Check if stock is currently subscribed."""
         return stock_id in self._subscriptions
 
+    def fetch_quote(self, stock_id: str) -> Optional[RealtimeQuote]:
+        """
+        Fetch a single snapshot quote for a stock using Shioaji API.
+        Useful for filling gaps when streaming hasn't provided data yet.
+        """
+        if not self.is_connected:
+            return None
+
+        try:
+            contract = self.api.Contracts.Stocks[stock_id]
+            if not contract:
+                return None
+                
+            snapshots = self.api.snapshots([contract])
+            if not snapshots:
+                return None
+                
+            snapshot = snapshots[0]
+            
+            # Convert Snapshot to RealtimeQuote (similar logic to _handle_quote)
+            reference = getattr(contract, "reference", 0)
+            current_price = float(snapshot.close)
+            
+            # Calculate change
+            if reference > 0:
+                change = current_price - reference
+                change_percent = (change / reference) * 100
+                if change > 0:
+                    direction = PriceDirection.UP
+                elif change < 0:
+                    direction = PriceDirection.DOWN
+                else:
+                    direction = PriceDirection.FLAT
+            else:
+                change = 0.0
+                change_percent = 0.0
+                direction = PriceDirection.FLAT
+
+            # Robust attribute access for Shioaji Snapshot object
+            total_vol = int(getattr(snapshot, 'total_volume', getattr(snapshot, 'vol_sum', 0)))
+            tick_vol = int(getattr(snapshot, 'volume', 0))
+            bid_price = float(getattr(snapshot, 'bid_price', 0.0)) if getattr(snapshot, 'bid_price', None) else 0.0
+            ask_price = float(getattr(snapshot, 'ask_price', 0.0)) if getattr(snapshot, 'ask_price', None) else 0.0
+            
+            # ts = getattr(snapshot, 'ts', 0)
+            # timestamp = datetime.fromtimestamp(ts * 1e-9) if ts else datetime.now()
+            # Use system time for snapshot to avoid timezone confusion and ensure consistency
+            timestamp = datetime.now()
+
+            # Construct quote object
+            rt_quote = RealtimeQuote(
+                stock_id=stock_id,
+                stock_name=contract.name,
+                current_price=current_price,
+                open_price=float(snapshot.open),
+                high_price=float(snapshot.high),
+                low_price=float(snapshot.low),
+                previous_close=reference,
+                change_amount=change,
+                change_percent=change_percent,
+                direction=direction,
+                total_volume=total_vol,
+                tick_volume=tick_vol,
+                best_bid=bid_price,
+                best_ask=ask_price,
+                timestamp=timestamp,
+                limit_up_price=float(getattr(contract, 'limit_up', 0)),
+                limit_down_price=float(getattr(contract, 'limit_down', 0)),
+                is_simtrade=bool(getattr(snapshot, "simtrade", False)),
+            )
+            
+            # Update internal cache too
+            self._last_quotes[stock_id] = rt_quote
+            
+            return rt_quote
+
+        except Exception as e:
+            logger.error(f"Error fetching snapshot for {stock_id}: {e}")
+            return None
+
+    def fetch_daily_history(self, stock_id: str, year: int, month: int) -> List[DailyOHLC]:
+        """
+        Fetch historical daily OHLC data using Shioaji kbars.
+        Automatically resamples 1-minute kbars into daily data.
+        """
+        if not self.is_connected:
+            return []
+
+        try:
+            contract = self.api.Contracts.Stocks[stock_id]
+            if not contract:
+                logger.error(f"Stock contract not found: {stock_id}")
+                return []
+
+            # Calculate start and end dates for the given month
+            from datetime import date
+            import calendar
+            import pandas as pd
+            start_date = date(year, month, 1)
+            last_day = calendar.monthrange(year, month)[1]
+            end_date = date(year, month, last_day)
+
+            # Shioaji expects string format YYYY-MM-DD
+            start_str = start_date.strftime("%Y-%m-%d")
+            end_str = end_date.strftime("%Y-%m-%d")
+
+            logger.info(f"Fetching Shioaji kbars for {stock_id} from {start_str} to {end_str}...")
+            kbars = self.api.kbars(contract, start=start_str, end=end_str)
+            
+            if not kbars or not hasattr(kbars, 'ts') or not kbars.ts:
+                return []
+
+            # Convert to DataFrame
+            df = pd.DataFrame({**kbars})
+            df['ts'] = pd.to_datetime(df['ts'])
+            df.set_index('ts', inplace=True)
+            
+            # Resample to daily OHLC
+            daily_df = df.resample('D').agg({
+                'Open': 'first',
+                'High': 'max',
+                'Low': 'min',
+                'Close': 'last',
+                'Volume': 'sum',
+                'Amount': 'sum'
+            }).dropna()
+
+            # Convert to List[DailyOHLC]
+            records = []
+            for d, row in daily_df.iterrows():
+                # Volume from kbars is already in lots for Taiwan stocks
+                vol_lots = int(row['Volume'])
+                
+                records.append(DailyOHLC(
+                    date=d.date(),
+                    open=float(row['Open']),
+                    high=float(row['High']),
+                    low=float(row['Low']),
+                    close=float(row['Close']),
+                    volume=vol_lots,
+                    turnover=float(row['Amount']),
+                    timestamp=datetime.now()
+                ))
+                
+            return records
+
+        except Exception as e:
+            logger.error(f"Failed to fetch Shioaji daily history for {stock_id}: {e}")
+            return []
+
     def _handle_quote(self, exchange, quote):
         """Callback handler for Shioaji Quote updates."""
         # logger.debug(f"Received quote for {quote.code}: simtrade={quote.simtrade}, price={quote.close}, vol_sum={getattr(quote, 'vol_sum', 'N/A')}")
-        
-        # filter out simtrade
-        if quote.simtrade:
-            return
 
         try:
-            from src.models import PriceDirection, PriceChange
-
             stock_id = quote.code
             sub_info = self._subscriptions.get(stock_id, {})
             stock_name = sub_info.get("name", "")
             reference = sub_info.get("reference", 0)
+            contract = sub_info.get("contract")
+            limit_up = float(getattr(contract, "limit_up", 0)) if contract else 0.0
+            limit_down = float(getattr(contract, "limit_down", 0)) if contract else 0.0
             
             current_price = float(quote.close)
             
@@ -189,7 +336,10 @@ class ShioajiFetcher:
                 tick_volume=int(quote.volume) if hasattr(quote, 'volume') else 0,
                 best_bid=float(quote.bid_price[0]) if hasattr(quote, 'bid_price') and quote.bid_price else 0.0,
                 best_ask=float(quote.ask_price[0]) if hasattr(quote, 'ask_price') and quote.ask_price else 0.0,
-                timestamp=datetime.now() # Use local time as quote.datetime might be offset
+                timestamp=datetime.now(), # Use local time as quote.datetime might be offset
+                limit_up_price=limit_up,
+                limit_down_price=limit_down,
+                is_simtrade=bool(getattr(quote, "simtrade", False)),
             )
             
             # Update cache
