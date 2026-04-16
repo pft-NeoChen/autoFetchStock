@@ -91,6 +91,111 @@ class CallbackManager:
         self._register_news_callbacks()
         logger.info("All callbacks registered")
 
+    def _build_favorite_kbar(self, quote: Optional[RealtimeQuote]) -> html.Div:
+        """Build a compact day-candle marker for the favorites list."""
+        bar_height = 28
+        body_class = "price-flat"
+        wick_top = 2
+        wick_height = bar_height - 4
+        body_top = (bar_height // 2) - 2
+        body_height = 4
+
+        if quote:
+            current_price = quote.current_price
+            open_price = (
+                quote.open_price
+                if quote.open_price is not None and quote.open_price > 0
+                else (quote.previous_close or current_price)
+            )
+            high_candidates = [p for p in (quote.high_price, open_price, current_price) if p and p > 0]
+            low_candidates = [p for p in (quote.low_price, open_price, current_price) if p and p > 0]
+            high_price = max(high_candidates) if high_candidates else current_price
+            low_price = min(low_candidates) if low_candidates else current_price
+
+            if current_price > open_price:
+                body_class = "price-up"
+            elif current_price < open_price:
+                body_class = "price-down"
+
+            if high_price > low_price:
+                usable_height = bar_height - 4
+                price_range = high_price - low_price
+                body_high = max(open_price, current_price)
+                body_low = min(open_price, current_price)
+                body_top = round(((high_price - body_high) / price_range) * usable_height) + 2
+                body_height = max(4, round(((body_high - body_low) / price_range) * usable_height))
+                max_top = max(2, bar_height - 2 - body_height)
+                body_top = min(max(body_top, 2), max_top)
+
+        return html.Div(
+            className="favorite-item-kbar",
+            children=[
+                html.Span(
+                    className=f"favorite-kbar-wick {body_class}",
+                    style={"top": f"{wick_top}px", "height": f"{wick_height}px"},
+                ),
+                html.Span(
+                    className=f"favorite-kbar-body {body_class}",
+                    style={"top": f"{body_top}px", "height": f"{body_height}px"},
+                ),
+            ],
+        )
+
+    def _render_favorite_item(self, favorite: dict, current_stock: Optional[str]) -> html.Div:
+        """Render a single item in the favorites list."""
+        stock_id = favorite["id"]
+        is_active = stock_id == current_stock
+
+        quote = None
+        price_text = "--"
+        price_class = "favorite-item-price"
+        item_class = f"favorite-item{' active' if is_active else ''}"
+
+        try:
+            if self.fetcher:
+                get_cached_quote = getattr(self.fetcher, "get_cached_quote", None)
+                if callable(get_cached_quote):
+                    quote = get_cached_quote(stock_id)
+
+                # Using blocking=False to avoid UI freeze if many favorites use TWSE.
+                # The fetcher now falls back to its last cached quote instead of
+                # wiping the UI back to "--" when rate-limited.
+                if quote is None:
+                    quote = self.fetcher.fetch_realtime_quote(stock_id, blocking=False)
+            if quote:
+                price_text = f"{quote.current_price:.2f}"
+                if quote.change_amount > 0:
+                    price_class += " price-up"
+                elif quote.change_amount < 0:
+                    price_class += " price-down"
+                else:
+                    price_class += " price-flat"
+
+                if quote.limit_up_price > 0 and quote.current_price >= quote.limit_up_price:
+                    item_class += " limit-up-bg"
+                elif quote.limit_down_price > 0 and quote.current_price <= quote.limit_down_price:
+                    item_class += " limit-down-bg"
+        except Exception:
+            quote = None
+
+        return html.Div(
+            id={"type": "favorite-item", "index": stock_id},
+            className=item_class,
+            children=[
+                html.Div(
+                    className="favorite-item-main",
+                    children=[
+                        self._build_favorite_kbar(quote),
+                        html.Span(favorite["name"], className="favorite-item-text"),
+                    ],
+                ),
+                html.Span(price_text, className=price_class),
+            ],
+            n_clicks=0,
+            draggable="true",
+            **{"data-stock-id": stock_id},
+        )
+
     def _register_favorites_callbacks(self) -> None:
         """Register favorites related callbacks."""
 
@@ -174,7 +279,7 @@ class CallbackManager:
         @self.app.callback(
             Output("favorites-list", "children"),
             Input("app-state-store", "data"),
-            Input("auto-update-interval", "n_intervals")
+            Input("favorites-update-interval", "n_intervals")
         )
         def render_favorites_list(app_state: dict, n_intervals: int):
             """Render the favorites list sidebar."""
@@ -184,43 +289,7 @@ class CallbackManager:
             if not favorites:
                 return html.Div("尚未加入最愛", className="no-favorites")
 
-            items = []
-            for fav in favorites:
-                stock_id = fav["id"]
-                is_active = stock_id == current_stock
-                
-                # Fetch real-time price (non-blocking)
-                price_text = "--"
-                price_class = "favorite-item-price"
-                
-                try:
-                    # Using blocking=False to avoid UI freeze if many favorites use TWSE
-                    quote = self.fetcher.fetch_realtime_quote(stock_id, blocking=False)
-                    if quote:
-                        price_text = f"{quote.current_price:.2f}"
-                        if quote.change_amount > 0:
-                            price_class += " price-up"
-                        elif quote.change_amount < 0:
-                            price_class += " price-down"
-                        else:
-                            price_class += " price-flat"
-                except Exception:
-                    pass
-
-                items.append(
-                    html.Div(
-                        id={"type": "favorite-item", "index": stock_id},
-                        className=f"favorite-item{' active' if is_active else ''}",
-                        children=[
-                            html.Span(f"{fav['name']} ({stock_id})", className="favorite-item-text"),
-                            html.Span(price_text, className=price_class),
-                        ],
-                        n_clicks=0,
-                        draggable="true",
-                        **{"data-stock-id": stock_id},
-                    )
-                )
-            return items
+            return [self._render_favorite_item(fav, current_stock) for fav in favorites]
 
         @self.app.callback(
             Output("stock-search-input", "value", allow_duplicate=True),
@@ -390,8 +459,10 @@ class CallbackManager:
                 raise PreventUpdate
 
             try:
-                # Try to fetch by exact ID first, then search
-                stock_id = search_value.strip().upper()
+                # Resolve submit text into a concrete stock first. Exact names
+                # such as "國巨" should map to the underlying stock code.
+                stock = self.fetcher.resolve_stock(search_value)
+                stock_id = stock.stock_id
 
                 # Fetch realtime quote (blocking is fine for search submit)
                 quote = self.fetcher.fetch_realtime_quote(stock_id)
@@ -1149,6 +1220,10 @@ class CallbackManager:
             quote: RealtimeQuote to convert and save
         """
         try:
+            if getattr(quote, "is_simtrade", False):
+                logger.debug(f"Skip saving simtrade quote for {quote.stock_id}")
+                return
+
             # Load previous ticks to calculate volume delta and price trend (REQ-FixVolume0)
             last_accumulated_volume = 0
             last_price = quote.previous_close # Default to prev close if no ticks

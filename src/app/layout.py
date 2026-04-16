@@ -180,6 +180,14 @@ def _create_hidden_components() -> html.Div:
                 disabled=False,  # Start enabled to update favorites list
             ),
 
+            # Favorites sidebar refresh interval
+            dcc.Interval(
+                id="favorites-update-interval",
+                interval=1 * 1000,  # 1 second
+                n_intervals=0,
+                disabled=False,
+            ),
+
             # Ticker rotation interval (5 seconds)
             dcc.Interval(
                 id="news-ticker-interval",

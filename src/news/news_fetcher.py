@@ -2,23 +2,35 @@
 News fetcher for autoFetchStock news submodule.
 
 Handles:
-- RSS feed parsing via atoma
-- Full-text article fetching via BeautifulSoup
+- RSS feed parsing via atoma with stdlib XML fallback
+- Full-text article fetching via BeautifulSoup with regex fallback
 - Per-category and per-stock news collection
 - Rate limiting (2s per domain) and source disabling (3 failures → 24h pause)
 """
 
+import html
 import logging
+import re
 import time
-from dataclasses import dataclass, field
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
-import atoma
 import requests
-from bs4 import BeautifulSoup
+
+try:
+    import atoma
+except ImportError:
+    atoma = None
+
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
 
 from src.config import AppConfig
 from src.models import StockInfo
@@ -187,53 +199,9 @@ class NewsFetcher:
     def fetch_rss(self, url: str) -> List[RawArticle]:
         """Parse an RSS/Atom feed URL and return list of RawArticle."""
         self._rate_limit(url)
-        try:
-            resp = self._session.get(url, timeout=self._config.news_request_timeout)
-            resp.raise_for_status()
-            feed = atoma.parse_rss_bytes(resp.content)
-            articles = []
-            for item in feed.items:
-                pub = item.pub_date or datetime.now(tz=TW_TIMEZONE)
-                if pub.tzinfo is None:
-                    pub = pub.replace(tzinfo=TW_TIMEZONE)
-                link = item.link or ""
-                excerpt = ""
-                if item.description:
-                    # Strip HTML tags from description
-                    soup = BeautifulSoup(item.description, "lxml")
-                    excerpt = soup.get_text(separator=" ", strip=True)[:500]
-                source = urlparse(link).netloc or url
-                articles.append(RawArticle(
-                    title=item.title or "",
-                    url=link,
-                    source=source,
-                    published_at=pub,
-                    excerpt=excerpt,
-                ))
-            return articles
-        except atoma.exceptions.FeedXMLError:
-            # Try Atom format
-            try:
-                self._rate_limit(url)
-                resp = self._session.get(url, timeout=self._config.news_request_timeout)
-                feed = atoma.parse_atom_bytes(resp.content)
-                articles = []
-                for entry in feed.entries:
-                    pub = entry.published or entry.updated or datetime.now(tz=TW_TIMEZONE)
-                    if pub.tzinfo is None:
-                        pub = pub.replace(tzinfo=TW_TIMEZONE)
-                    link = entry.links[0].href if entry.links else ""
-                    source = urlparse(link).netloc or url
-                    articles.append(RawArticle(
-                        title=entry.title.value if entry.title else "",
-                        url=link,
-                        source=source,
-                        published_at=pub,
-                        excerpt="",
-                    ))
-                return articles
-            except Exception as exc:
-                raise RuntimeError(f"RSS/Atom 解析失敗: {exc}") from exc
+        resp = self._session.get(url, timeout=self._config.news_request_timeout)
+        resp.raise_for_status()
+        return self._parse_feed(resp.content, url)
 
     def fetch_full_text(self, url: str) -> Tuple[str, bool]:
         """
@@ -260,17 +228,210 @@ class NewsFetcher:
 
     # ── 私有方法 ──────────────────────────────────────────────────────────────
 
+    def _parse_feed(self, content: bytes, source_url: str) -> List[RawArticle]:
+        """Parse feed bytes using atoma when available, otherwise stdlib XML."""
+        if atoma is not None:
+            try:
+                return self._parse_feed_with_atoma(content, source_url)
+            except Exception as exc:
+                logger.debug("atoma 解析失敗，改用內建 XML parser [%s]: %s", source_url, exc)
+        return self._parse_feed_with_stdlib(content, source_url)
+
+    def _parse_feed_with_atoma(self, content: bytes, source_url: str) -> List[RawArticle]:
+        """Parse RSS/Atom feed bytes via atoma."""
+        try:
+            feed = atoma.parse_rss_bytes(content)
+            return [
+                self._build_article(
+                    title=item.title or "",
+                    link=item.link or "",
+                    published_at=item.pub_date,
+                    excerpt=item.description or "",
+                    fallback_source=source_url,
+                )
+                for item in feed.items
+            ]
+        except atoma.exceptions.FeedXMLError:
+            try:
+                feed = atoma.parse_atom_bytes(content)
+                return [
+                    self._build_article(
+                        title=entry.title.value if entry.title else "",
+                        link=entry.links[0].href if entry.links else "",
+                        published_at=entry.published or entry.updated,
+                        excerpt="",
+                        fallback_source=source_url,
+                    )
+                    for entry in feed.entries
+                ]
+            except Exception as exc:
+                raise RuntimeError(f"RSS/Atom 解析失敗: {exc}") from exc
+
+    def _parse_feed_with_stdlib(self, content: bytes, source_url: str) -> List[RawArticle]:
+        """Parse RSS/Atom feed bytes via the Python standard library."""
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError as exc:
+            raise RuntimeError(f"RSS/Atom 解析失敗: {exc}") from exc
+
+        root_tag = self._local_name(root.tag)
+        if root_tag == "rss":
+            return self._parse_rss_xml(root, source_url)
+        if root_tag == "feed":
+            return self._parse_atom_xml(root, source_url)
+        raise RuntimeError(f"不支援的 feed 格式: {root.tag}")
+
+    def _parse_rss_xml(self, root: ET.Element, source_url: str) -> List[RawArticle]:
+        """Parse RSS 2.0 XML into article models."""
+        channel = next(
+            (child for child in root if self._local_name(child.tag) == "channel"),
+            None,
+        )
+        if channel is None:
+            return []
+
+        articles = []
+        for item in channel:
+            if self._local_name(item.tag) != "item":
+                continue
+            articles.append(self._build_article(
+                title=self._first_child_text(item, "title"),
+                link=self._first_child_text(item, "link"),
+                published_at=self._parse_datetime(self._first_child_text(item, "pubDate")),
+                excerpt=self._first_child_text(item, "description"),
+                fallback_source=source_url,
+            ))
+        return articles
+
+    def _parse_atom_xml(self, root: ET.Element, source_url: str) -> List[RawArticle]:
+        """Parse Atom XML into article models."""
+        articles = []
+        for entry in root:
+            if self._local_name(entry.tag) != "entry":
+                continue
+            articles.append(self._build_article(
+                title=self._first_child_text(entry, "title"),
+                link=self._first_link(entry),
+                published_at=self._parse_datetime(
+                    self._first_child_text(entry, "published", "updated")
+                ),
+                excerpt=self._first_child_text(entry, "summary", "content"),
+                fallback_source=source_url,
+            ))
+        return articles
+
+    def _build_article(
+        self,
+        title: str,
+        link: str,
+        published_at: Optional[datetime],
+        excerpt: str,
+        fallback_source: str,
+    ) -> RawArticle:
+        """Normalize parsed feed fields into a RawArticle."""
+        pub = published_at or datetime.now(tz=TW_TIMEZONE)
+        if pub.tzinfo is None:
+            pub = pub.replace(tzinfo=TW_TIMEZONE)
+        return RawArticle(
+            title=title,
+            url=link,
+            source=urlparse(link).netloc or fallback_source,
+            published_at=pub,
+            excerpt=self._strip_html(excerpt)[:500],
+        )
+
+    def _parse_datetime(self, value: str) -> datetime:
+        """Parse RSS pubDate or Atom timestamp into a timezone-aware datetime."""
+        value = value.strip()
+        if not value:
+            return datetime.now(tz=TW_TIMEZONE)
+
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return datetime.now(tz=TW_TIMEZONE)
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=TW_TIMEZONE)
+        return parsed
+
+    def _first_child_text(self, element: ET.Element, *names: str) -> str:
+        """Return the text content of the first direct child with any matching local name."""
+        for child in element:
+            if self._local_name(child.tag) in names:
+                return "".join(child.itertext()).strip()
+        return ""
+
+    def _first_link(self, element: ET.Element) -> str:
+        """Extract the first usable link from an Atom entry."""
+        for child in element:
+            if self._local_name(child.tag) != "link":
+                continue
+            href = (child.attrib.get("href") or "").strip()
+            if href:
+                return href
+            text = "".join(child.itertext()).strip()
+            if text:
+                return text
+        return ""
+
+    def _local_name(self, tag: str) -> str:
+        """Strip XML namespaces from a tag name."""
+        return tag.rsplit("}", 1)[-1]
+
+    def _strip_html(self, text: str) -> str:
+        """Convert small HTML fragments into plain text."""
+        if not text:
+            return ""
+
+        if BeautifulSoup is not None:
+            try:
+                soup = BeautifulSoup(text, "lxml")
+            except Exception:
+                soup = BeautifulSoup(text, "html.parser")
+            return soup.get_text(separator=" ", strip=True)
+
+        text = re.sub(r"<[^>]+>", " ", text)
+        return " ".join(html.unescape(text).split())
+
     def _is_taiwan_stock(self, stock_id: str) -> bool:
         """Pure digits → Taiwan stock; contains letters → US stock."""
         return stock_id.isdigit()
 
-    def _extract_text_from_html(self, html: str) -> str:
+    def _extract_text_from_html(self, html_content: str) -> str:
         """Extract main body text using BeautifulSoup, filtering noise tags."""
-        soup = BeautifulSoup(html, "lxml")
-        for tag in soup.find_all(_EXCLUDE_TAGS):
-            tag.decompose()
-        paragraphs = soup.find_all("p")
-        text = " ".join(p.get_text(separator=" ", strip=True) for p in paragraphs)
+        if BeautifulSoup is not None:
+            try:
+                soup = BeautifulSoup(html_content, "lxml")
+            except Exception:
+                soup = BeautifulSoup(html_content, "html.parser")
+            for tag in soup.find_all(_EXCLUDE_TAGS):
+                tag.decompose()
+            paragraphs = soup.find_all("p")
+            text = " ".join(p.get_text(separator=" ", strip=True) for p in paragraphs)
+            return text[:8000]  # cap at 8000 chars to keep token usage reasonable
+
+        cleaned = html_content
+        for tag in _EXCLUDE_TAGS:
+            cleaned = re.sub(
+                rf"<{tag}\b[^>]*>.*?</{tag}>",
+                " ",
+                cleaned,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+
+        paragraphs = re.findall(
+            r"<p\b[^>]*>(.*?)</p>",
+            cleaned,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if paragraphs:
+            text = " ".join(self._strip_html(fragment) for fragment in paragraphs)
+        else:
+            text = self._strip_html(cleaned)
         return text[:8000]  # cap at 8000 chars to keep token usage reasonable
 
     def _rate_limit(self, url: str) -> None:

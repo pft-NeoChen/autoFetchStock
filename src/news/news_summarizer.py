@@ -64,23 +64,28 @@ class NewsSummarizer:
         self._config = config
         self._backend = config.news_summarizer_backend
         self._favorites: List[StockInfo] = []
-        self._model = None
+        self._client = None
+        self._model_name = ""
+        self._disabled_reason = ""
 
         if self._backend == "gemini":
             self._init_sdk()
 
     def _init_sdk(self) -> None:
         """Initialize google-genai SDK client."""
+        if not self._config.gemini_api_key:
+            self._disabled_reason = "GEMINI_API_KEY is not configured"
+            logger.warning("Gemini SDK 未啟用: %s", self._disabled_reason)
+            return
+
         try:
             import google.genai as genai
             self._client = genai.Client(api_key=self._config.gemini_api_key)
             self._model_name = "gemini-2.0-flash"
             logger.info("Gemini SDK 初始化完成（model: %s）", self._model_name)
         except Exception as exc:
-            raise SummarizationError(
-                message="Gemini SDK 初始化失敗",
-                reason=str(exc),
-            ) from exc
+            self._disabled_reason = str(exc)
+            logger.warning("Gemini SDK 初始化失敗，新聞摘要功能將停用: %s", exc)
 
     def set_favorites(self, favorites: List[StockInfo]) -> None:
         """Set favorites list for stock tagging in each run."""
@@ -149,11 +154,20 @@ class NewsSummarizer:
         """Route to SDK or CLI backend based on config."""
         if self._backend == "gemini-cli":
             return self._call_cli(prompt)
-        return self._call_sdk(prompt)
+        if self._backend == "gemini":
+            return self._call_sdk(prompt)
+        raise SummarizationError(
+            message="未知的新聞摘要 backend",
+            reason=self._backend,
+        )
 
     def _call_sdk(self, prompt: str) -> str:
         """Call Gemini API via google-genai SDK."""
-        import google.genai as genai
+        if self._client is None:
+            raise SummarizationError(
+                message="Gemini SDK 不可用",
+                reason=self._disabled_reason or "client not initialized",
+            )
         response = self._client.models.generate_content(
             model=self._model_name,
             contents=prompt,

@@ -12,7 +12,7 @@ import shioaji as sj
 from shioaji.constant import QuoteVersion
 
 from src.config import AppConfig, get_logger
-from src.models import RealtimeQuote, IntradayTick, PriceDirection, DailyOHLC
+from src.models import RealtimeQuote, IntradayTick, DailyOHLC, PriceDirection
 
 logger = get_logger("autofetchstock.fetcher")
 
@@ -205,7 +205,10 @@ class ShioajiFetcher:
                 tick_volume=tick_vol,
                 best_bid=bid_price,
                 best_ask=ask_price,
-                timestamp=timestamp
+                timestamp=timestamp,
+                limit_up_price=float(getattr(contract, 'limit_up', 0)),
+                limit_down_price=float(getattr(contract, 'limit_down', 0)),
+                is_simtrade=bool(getattr(snapshot, "simtrade", False)),
             )
             
             # Update internal cache too
@@ -299,6 +302,9 @@ class ShioajiFetcher:
             sub_info = self._subscriptions.get(stock_id, {})
             stock_name = sub_info.get("name", "")
             reference = sub_info.get("reference", 0)
+            contract = sub_info.get("contract")
+            limit_up = float(getattr(contract, "limit_up", 0)) if contract else 0.0
+            limit_down = float(getattr(contract, "limit_down", 0)) if contract else 0.0
             
             current_price = float(quote.close)
             
@@ -333,7 +339,10 @@ class ShioajiFetcher:
                 tick_volume=int(quote.volume) if hasattr(quote, 'volume') else 0,
                 best_bid=float(quote.bid_price[0]) if hasattr(quote, 'bid_price') and quote.bid_price else 0.0,
                 best_ask=float(quote.ask_price[0]) if hasattr(quote, 'ask_price') and quote.ask_price else 0.0,
-                timestamp=datetime.now() # Use local time as quote.datetime might be offset
+                timestamp=datetime.now(), # Use local time as quote.datetime might be offset
+                limit_up_price=limit_up,
+                limit_down_price=limit_down,
+                is_simtrade=bool(getattr(quote, "simtrade", False)),
             )
             
             # Update cache

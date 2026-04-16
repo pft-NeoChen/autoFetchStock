@@ -89,6 +89,10 @@ class TWSEParser:
             best_ask_str = quote_data.get("a", "-").split("_")[0]
             best_ask = TWSEParser._parse_price(best_ask_str)
 
+            # Parse limit up and limit down prices
+            limit_up_price = TWSEParser._parse_price(quote_data.get("u", "-")) or 0.0
+            limit_down_price = TWSEParser._parse_price(quote_data.get("w", "-")) or 0.0
+
             # Improved Price Fallback Logic (REQ-040)
             if current_price is None:
                 if open_price is None:
@@ -152,6 +156,8 @@ class TWSEParser:
                 best_bid=best_bid or 0,
                 best_ask=best_ask or 0,
                 timestamp=timestamp,
+                limit_up_price=limit_up_price,
+                limit_down_price=limit_down_price,
             )
 
         except (ValueError, TypeError, KeyError) as e:
@@ -165,11 +171,10 @@ class TWSEParser:
     @staticmethod
     def parse_daily_history(data: dict, stock_id: str) -> List[DailyOHLC]:
         """
-        Parse daily OHLC history from TWSE STOCK_DAY or TPEx stk_quote_result response.
+        Parse daily OHLC history from TWSE STOCK_DAY or TPEx history responses.
         """
-        # TWSE uses 'stat', TPEx doesn't always use it or uses it differently
         stat = data.get("stat")
-        if stat and stat != "OK":
+        if stat and str(stat).lower() != "ok":
             if "查無資料" in str(stat) or "沒有符合條件的資料" in str(stat):
                 logger.warning(f"No data available for {stock_id}")
                 return []
@@ -179,10 +184,15 @@ class TWSEParser:
                 value=stat
             )
 
-        # TWSE uses 'data', TPEx uses 'aaData'
-        # Detect market based on key
-        is_otc = "aaData" in data
-        raw_data = data.get("data", data.get("aaData", []))
+        is_otc_new = "tables" in data and isinstance(data.get("tables"), list)
+        is_otc_legacy = "aaData" in data
+        is_otc = is_otc_new or is_otc_legacy
+
+        if is_otc_new:
+            tables = data.get("tables", [])
+            raw_data = tables[0].get("data", []) if tables else []
+        else:
+            raw_data = data.get("data", data.get("aaData", []))
         
         if not raw_data:
             logger.warning(f"Empty data array for {stock_id}")
@@ -191,9 +201,21 @@ class TWSEParser:
         results = []
         for row in raw_data:
             try:
-                if is_otc:
-                    # OTC (TPEx) format: 0:Date, 1:ID, 2:Name, 3:Close, 4:Change, 5:Open, 6:High, 7:Low, 8:Volume...
-                    if len(row) < 8: continue
+                if is_otc_new:
+                    # New TPEx format: 日期, 成交張數, 成交仟元, 開盤, 最高, 最低, 收盤, 漲跌, 筆數
+                    if len(row) < 7:
+                        continue
+                    date_str = row[0]
+                    volume_lots = TWSEParser._parse_number(row[1])
+                    turnover = TWSEParser._parse_number(row[2]) * 1000
+                    open_price = TWSEParser._parse_price(row[3])
+                    high_price = TWSEParser._parse_price(row[4])
+                    low_price = TWSEParser._parse_price(row[5])
+                    close_price = TWSEParser._parse_price(row[6])
+                elif is_otc_legacy:
+                    # Legacy TPEx format: Date, ID, Name, Close, Change, Open, High, Low, Volume, Turnover...
+                    if len(row) < 10:
+                        continue
                     date_str = row[0]
                     open_price = TWSEParser._parse_price(row[5])
                     high_price = TWSEParser._parse_price(row[6])
@@ -201,6 +223,7 @@ class TWSEParser:
                     close_price = TWSEParser._parse_price(row[3])
                     volume_shares = TWSEParser._parse_number(row[8])
                     turnover = TWSEParser._parse_number(row[9])
+                    volume_lots = volume_shares // 1000 if volume_shares else 0
                 else:
                     # TWSE format: 0:Date, 1:Volume, 2:Turnover, 3:Open, 4:High, 5:Low, 6:Close, 7:Change...
                     if len(row) < 7: continue
@@ -220,8 +243,9 @@ class TWSEParser:
                     logger.warning(f"Skipping row with invalid prices: {row}")
                     continue
 
-                # Convert volume from shares to lots (1 lot = 1000 shares)
-                volume_lots = volume_shares // 1000 if volume_shares else 0
+                if not is_otc_new:
+                    # TWSE and legacy TPEx report volume in shares.
+                    volume_lots = volume_shares // 1000 if volume_shares else 0
 
                 # Validate OHLC integrity
                 if not TWSEParser._validate_ohlc(open_price, high_price, low_price, close_price, volume_lots):
@@ -442,6 +466,29 @@ class TWSEParser:
         return True
 
     @staticmethod
+    def normalize_search_text(value: str) -> str:
+        """Normalize stock search text for matching and ranking."""
+        normalized = []
+        for char in value or "":
+            code = ord(char)
+            if 0xFF01 <= code <= 0xFF5E:
+                normalized.append(chr(code - 0xFEE0))
+            elif code == 0x3000:
+                normalized.append(" ")
+            else:
+                normalized.append(char)
+
+        collapsed = "".join(normalized).strip().upper()
+        # Ignore spacing and the trailing markers commonly seen in TWSE names,
+        # e.g. "國巨*" should behave the same as "國巨" in search ranking.
+        return re.sub(r"[\s*＊]+", "", collapsed)
+
+    @staticmethod
+    def _is_primary_stock(stock: StockInfo) -> bool:
+        """Heuristically prefer plain stock/ETF codes over warrants."""
+        return stock.stock_id.isdigit() and len(stock.stock_id) == 4
+
+    @staticmethod
     def search_stocks(stock_list: List[StockInfo], keyword: str) -> List[StockInfo]:
         """
         Search stocks by keyword (ID or name).
@@ -453,32 +500,41 @@ class TWSEParser:
         Returns:
             List of matching StockInfo instances
         """
-        # Normalize full-width characters to half-width
-        normalized_keyword = ""
-        for char in keyword:
-            code = ord(char)
-            if 0xFF01 <= code <= 0xFF5E:
-                normalized_keyword += chr(code - 0xFEE0)
-            elif code == 0x3000:
-                normalized_keyword += chr(0x0020)
-            else:
-                normalized_keyword += char
-        
-        keyword = normalized_keyword.strip().upper()
+        keyword = TWSEParser.normalize_search_text(keyword)
+        if not keyword:
+            return []
+
         results = []
 
         for stock in stock_list:
+            stock_id = TWSEParser.normalize_search_text(stock.stock_id)
+            stock_name = TWSEParser.normalize_search_text(stock.stock_name)
+
             # Match by ID (exact or prefix)
-            if stock.stock_id.upper().startswith(keyword):
+            if stock_id.startswith(keyword):
                 results.append(stock)
             # Match by name (contains)
-            elif keyword.lower() in stock.stock_name.lower():
+            elif keyword in stock_name:
                 results.append(stock)
 
-        # Sort: exact ID match first, then by ID
-        results.sort(key=lambda s: (
-            0 if s.stock_id.upper() == keyword else 1,
-            s.stock_id
-        ))
+        def sort_key(stock: StockInfo) -> tuple:
+            stock_id = TWSEParser.normalize_search_text(stock.stock_id)
+            stock_name = TWSEParser.normalize_search_text(stock.stock_name)
+            name_index = stock_name.find(keyword)
+            name_gap = abs(len(stock_name) - len(keyword))
+
+            return (
+                0 if stock_id == keyword else 1,
+                0 if stock_name == keyword else 1,
+                0 if stock_id.startswith(keyword) else 1,
+                0 if stock_name.startswith(keyword) else 1,
+                name_index if name_index >= 0 else 9999,
+                name_gap,
+                0 if TWSEParser._is_primary_stock(stock) else 1,
+                len(stock.stock_id),
+                stock.stock_id,
+            )
+
+        results.sort(key=sort_key)
 
         return results[:20]  # Limit results

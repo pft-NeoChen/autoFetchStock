@@ -127,9 +127,20 @@ class ServiceUnavailableError(AutoFetchStockError):
     - Allow manual retry later
     """
 
-    def __init__(self, message: str = "資料來源暫時無法存取，自動更新已暫停", failures: int = None):
-        self.failures = failures
-        detail = f" (連續失敗 {failures} 次)" if failures else ""
+    def __init__(
+        self,
+        message: str = "資料來源暫時無法存取，自動更新已暫停",
+        failures: int = None,
+        consecutive_failures: int = None,
+    ):
+        resolved_failures = (
+            consecutive_failures
+            if consecutive_failures is not None
+            else failures
+        )
+        self.failures = resolved_failures
+        self.consecutive_failures = resolved_failures
+        detail = f" (連續失敗 {resolved_failures} 次)" if resolved_failures else ""
         super().__init__(f"{message}{detail}")
 
 
