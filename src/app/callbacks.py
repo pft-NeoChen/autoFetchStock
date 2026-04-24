@@ -969,6 +969,11 @@ class CallbackManager:
                 direction_class = self._get_direction_class(quote.direction)
                 change_text = f"{'+' if quote.change_amount >= 0 else ''}{quote.change_amount:.2f} ({'+' if quote.change_percent >= 0 else ''}{quote.change_percent:.2f}%)"
 
+                # Shioaji tick callback stores real transaction times. Do not
+                # turn Shioaji quote snapshots into fake ticks at poll time.
+                if not (self.shioaji_fetcher and self.shioaji_fetcher.is_subscribed(stock_id)):
+                    self._save_quote_as_tick(quote)
+
                 # OPTIMIZATION: Update charts every 2 seconds (n_intervals % 2 == 0)
                 # Text updates (price, time) happen every second.
                 intraday_figure = no_update
@@ -1230,6 +1235,7 @@ class CallbackManager:
             
             existing_data = self.storage.load_intraday_data(quote.stock_id, date.today())
             stream_sum = 0
+            has_accumulated_anchor = False
             
             if existing_data and existing_data.ticks:
                 last_tick = existing_data.ticks[-1]
@@ -1240,6 +1246,7 @@ class CallbackManager:
                 for t in reversed(existing_data.ticks):
                     if t.accumulated_volume > 0:
                         last_accumulated_volume = t.accumulated_volume
+                        has_accumulated_anchor = True
                         break
                     
                     # Skip odd lots for stream sum (they are shares, but quote.total_volume is lots)
@@ -1249,12 +1256,19 @@ class CallbackManager:
                     stream_sum += t.volume
 
             # Calculate actual volume since last poll
+            latest_tick_volume = max(0, int(getattr(quote, "tick_volume", 0) or 0))
             if quote.total_volume >= last_accumulated_volume:
-                delta = quote.total_volume - last_accumulated_volume
-                # Deduplicate: Subtract volume already captured by stream ticks
-                tick_volume = max(0, delta - stream_sum)
+                if has_accumulated_anchor:
+                    delta = quote.total_volume - last_accumulated_volume
+                    # Deduplicate: Subtract volume already captured by stream ticks
+                    tick_volume = max(0, delta - stream_sum)
+                else:
+                    # A first snapshot's cumulative volume is not one trade.
+                    # Keep the total as accumulated_volume, but only use the
+                    # source's latest single-trade volume for per-tick volume.
+                    tick_volume = latest_tick_volume
             else:
-                tick_volume = quote.tick_volume
+                tick_volume = latest_tick_volume
 
             # Determine buy/sell volume based on Price Trend (Primary) -> Bid/Ask (Secondary)
             buy_volume = 0.0
@@ -1373,7 +1387,7 @@ class CallbackManager:
         @self.app.callback(
             Output("news-data-store", "data"),
             Input("news-ticker-interval", "n_intervals"),
-            Input("news-refresh-button", "n_clicks"),
+            Input("news-refresh-button", "n_clicks", allow_optional=True),
             prevent_initial_call=False,
         )
         def refresh_news_store(n_intervals, n_clicks):
@@ -1390,13 +1404,14 @@ class CallbackManager:
         # ── TASK-154  Stock news tab (main page) ─────────────────────────────
         @self.app.callback(
             Output("stock-news-articles", "children"),
-            Input("stock-news-category-tabs", "value"),
+            Input("stock-news-category-tabs", "value", allow_optional=True),
             Input("news-data-store", "data"),
-            State("app-state-store", "data"),
+            Input("app-state-store", "data"),
             prevent_initial_call=False,
         )
         def update_stock_news_tab(category: str, news_data: dict, app_state: dict):
             """Filter news by current stock + selected category."""
+            category = category or "ALL"
             if not news_data:
                 return html.Div("尚無新聞資料", className="no-news")
 
@@ -1414,12 +1429,13 @@ class CallbackManager:
         @self.app.callback(
             Output("news-category-content", "children"),
             Output("news-last-updated", "children"),
-            Input("news-category-tabs", "value"),
+            Input("news-category-tabs", "value", allow_optional=True),
             Input("news-data-store", "data"),
             prevent_initial_call=False,
         )
         def update_news_page(category: str, news_data: dict):
             """Show all articles in the selected category on the /news page."""
+            category = category or "INTERNATIONAL"
             if not news_data:
                 return html.Div("尚無新聞資料", className="no-news"), "最後更新：--"
 

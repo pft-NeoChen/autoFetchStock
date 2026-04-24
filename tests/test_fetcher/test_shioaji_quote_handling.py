@@ -2,6 +2,7 @@
 Unit tests for Shioaji quote handling behavior.
 """
 
+from datetime import datetime
 from types import SimpleNamespace
 
 from src.fetcher.shioaji_fetcher import ShioajiFetcher
@@ -25,8 +26,10 @@ def _make_fetcher() -> ShioajiFetcher:
 
 def test_handle_quote_keeps_simtrade_quote_for_display_cache():
     fetcher = _make_fetcher()
+    source_time = datetime(2026, 4, 23, 9, 1, 2, 345678)
     quote = SimpleNamespace(
         code="2330",
+        datetime=source_time,
         simtrade=True,
         close=101.0,
         open=100.0,
@@ -47,3 +50,28 @@ def test_handle_quote_keeps_simtrade_quote_for_display_cache():
     cached = fetcher._last_quotes["2330"]
     assert cached.current_price == 101.0
     assert cached.is_simtrade is True
+    assert cached.timestamp == source_time
+
+
+def test_handle_tick_uses_shioaji_total_volume_as_accumulated_volume():
+    fetcher = _make_fetcher()
+    received = []
+    source_time = datetime(2026, 4, 23, 9, 2, 3, 456789)
+    fetcher._on_tick_callback = received.append
+    tick = SimpleNamespace(
+        code="2330",
+        datetime=source_time,
+        simtrade=False,
+        close=101.5,
+        volume=7,
+        total_volume=12345,
+        tick_type=1,
+        intraday_odd=False,
+    )
+
+    fetcher._handle_tick(None, tick)
+
+    assert len(received) == 1
+    assert received[0].volume == 7
+    assert received[0].accumulated_volume == 12345
+    assert received[0].timestamp == source_time

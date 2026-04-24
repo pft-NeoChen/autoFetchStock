@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.models import StockInfo
+from src.news.news_fetcher import RawArticle
 from src.news.news_models import NewsCategory, NewsCategoryResult, NewsRunResult
 from src.news.news_processor import NewsProcessor
 from tests.test_news.conftest import make_article, make_category_result, make_run_result
@@ -89,6 +91,53 @@ class TestBuildStats:
         assert stats.total_articles == 2
         assert stats.failed_summaries >= 1
         assert stats.duration_seconds == pytest.approx(5.0)
+
+
+class TestProcessStockCategory:
+    def test_stock_news_keeps_stock_id_even_when_summary_fails(self, mock_config, mock_storage):
+        processor = _make_processor(mock_config, mock_storage)
+        raw = RawArticle(
+            title="台積電新聞",
+            url="https://example.com/2330",
+            source="TestSource",
+            published_at=make_article().published_at,
+            excerpt="short",
+        )
+        processor._fetcher.fetch_stock_news.return_value = ([raw], NewsCategory.STOCK_TW)
+        processor._summarizer.summarize_article.return_value = ("", [], False)
+
+        result = processor._process_stock_category(
+            NewsCategory.STOCK_TW,
+            [StockInfo(stock_id="2330", stock_name="台積電")],
+        )
+
+        assert result.articles[0].related_stock_ids == ["2330"]
+        assert result.articles[0].summary_failed is True
+
+    def test_stock_news_merges_stock_ids_for_duplicate_url(self, mock_config, mock_storage):
+        processor = _make_processor(mock_config, mock_storage)
+        raw = RawArticle(
+            title="供應鏈新聞",
+            url="https://example.com/supply-chain",
+            source="TestSource",
+            published_at=make_article().published_at,
+            excerpt="short",
+        )
+        processor._fetcher.fetch_stock_news.side_effect = [
+            ([raw], NewsCategory.STOCK_TW),
+            ([raw], NewsCategory.STOCK_TW),
+        ]
+
+        result = processor._process_stock_category(
+            NewsCategory.STOCK_TW,
+            [
+                StockInfo(stock_id="2330", stock_name="台積電"),
+                StockInfo(stock_id="2317", stock_name="鴻海"),
+            ],
+        )
+
+        assert len(result.articles) == 1
+        assert result.articles[0].related_stock_ids == ["2330", "2317"]
 
 
 # ── run() integration ─────────────────────────────────────────────────────────
