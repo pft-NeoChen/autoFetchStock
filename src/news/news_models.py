@@ -152,12 +152,94 @@ class NewsRunStats:
 
 
 @dataclass
+class CategoryHighlight:
+    """Per-category key points extracted by global summary."""
+    category: NewsCategory
+    headline_points: List[str] = field(default_factory=list)  # 3~5 個要點
+
+    def to_dict(self) -> dict:
+        return {
+            "category": self.category.value,
+            "headline_points": self.headline_points,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CategoryHighlight":
+        return cls(
+            category=NewsCategory(data["category"]),
+            headline_points=data.get("headline_points", []),
+        )
+
+
+@dataclass
+class GlobalBrief:
+    """Aggregated insight produced by a single Gemini call over all articles."""
+    overall_summary: str = ""                 # 今日重點總結（≤300 字）
+    category_highlights: List[CategoryHighlight] = field(default_factory=list)
+    market_sentiment: int = 50                # 市場情緒 0~100（0=極度恐慌, 100=極度樂觀）
+    sentiment_reason: str = ""                # 情緒分數的一句話理由
+    failed: bool = False                      # 是否整體失敗
+
+    def to_dict(self) -> dict:
+        return {
+            "overall_summary": self.overall_summary,
+            "category_highlights": [h.to_dict() for h in self.category_highlights],
+            "market_sentiment": self.market_sentiment,
+            "sentiment_reason": self.sentiment_reason,
+            "failed": self.failed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "GlobalBrief":
+        return cls(
+            overall_summary=data.get("overall_summary", ""),
+            category_highlights=[
+                CategoryHighlight.from_dict(h) for h in data.get("category_highlights", [])
+            ],
+            market_sentiment=int(data.get("market_sentiment", 50)),
+            sentiment_reason=data.get("sentiment_reason", ""),
+            failed=data.get("failed", False),
+        )
+
+
+@dataclass
+class FavoriteSignal:
+    """Per-favorite-stock impact signal derived from today's news."""
+    stock_id: str
+    stock_name: str
+    signal: str = "neutral"                   # "bullish" | "neutral" | "bearish"
+    reason: str = ""                          # 一句話理由（≤120 字）
+    referenced_urls: List[str] = field(default_factory=list)  # 支撐判斷的新聞 URL
+
+    def to_dict(self) -> dict:
+        return {
+            "stock_id": self.stock_id,
+            "stock_name": self.stock_name,
+            "signal": self.signal,
+            "reason": self.reason,
+            "referenced_urls": self.referenced_urls,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "FavoriteSignal":
+        return cls(
+            stock_id=data["stock_id"],
+            stock_name=data.get("stock_name", data["stock_id"]),
+            signal=data.get("signal", "neutral"),
+            reason=data.get("reason", ""),
+            referenced_urls=data.get("referenced_urls", []),
+        )
+
+
+@dataclass
 class NewsRunResult:
     """Result of a single news collection and summarization run."""
     run_at: datetime                                              # 執行觸發時間（Asia/Taipei）
     finished_at: Optional[datetime] = None                       # 完成時間
     categories: Dict[NewsCategory, NewsCategoryResult] = field(default_factory=dict)
     run_stats: Optional[NewsRunStats] = None
+    global_brief: Optional[GlobalBrief] = None                  # Phase 1: 今日重點聚合分析
+    favorite_signals: List[FavoriteSignal] = field(default_factory=list)  # Phase 1: 自選股訊號
 
     def to_dict(self) -> dict:
         return {
@@ -168,6 +250,8 @@ class NewsRunResult:
                 for cat, result in self.categories.items()
             },
             "run_stats": self.run_stats.to_dict() if self.run_stats else None,
+            "global_brief": self.global_brief.to_dict() if self.global_brief else None,
+            "favorite_signals": [s.to_dict() for s in self.favorite_signals],
         }
 
     @classmethod
@@ -184,6 +268,10 @@ class NewsRunResult:
             finished_at=datetime.fromisoformat(data["finished_at"]) if data.get("finished_at") else None,
             categories=cats,
             run_stats=NewsRunStats.from_dict(data["run_stats"]) if data.get("run_stats") else None,
+            global_brief=GlobalBrief.from_dict(data["global_brief"]) if data.get("global_brief") else None,
+            favorite_signals=[
+                FavoriteSignal.from_dict(s) for s in data.get("favorite_signals", [])
+            ],
         )
 
 

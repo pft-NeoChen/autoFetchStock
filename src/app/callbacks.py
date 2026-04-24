@@ -1457,6 +1457,32 @@ class CallbackManager:
             ticker_text = f"[{item['category']}] {item['title']}"
             return ticker_text, {"display": "flex"}
 
+        # ── Phase 1 今日重點卡片（/news 頁） ──────────────────────────────────
+        @self.app.callback(
+            Output("global-brief-card", "children"),
+            Input("news-data-store", "data"),
+            prevent_initial_call=False,
+        )
+        def render_global_brief(news_data: dict):
+            if not news_data or not news_data.get("global_brief"):
+                return html.Div("今日重點尚未產生", className="global-brief-empty")
+            return _render_global_brief_card(news_data["global_brief"])
+
+        # ── Phase 1 自選股訊號列（主頁） ──────────────────────────────────────
+        @self.app.callback(
+            Output("favorite-signal-strip", "children"),
+            Input("news-data-store", "data"),
+            Input("app-state-store", "data"),
+            prevent_initial_call=False,
+        )
+        def render_favorite_signals(news_data: dict, app_state: dict):
+            if not news_data:
+                return ""
+            signals = news_data.get("favorite_signals") or []
+            if not signals:
+                return ""
+            return _render_favorite_signal_strip(signals)
+
 
 # ── Module-level news helper functions ──────────────────────────────────────
 
@@ -1572,6 +1598,100 @@ def _render_article_list(articles: List[dict]) -> html.Div:
         )
 
     return html.Div(items, className="news-articles-list")
+
+
+_SIGNAL_STYLES = {
+    "bullish": {"emoji": "🟢", "label": "利多", "cls": "signal-bullish"},
+    "bearish": {"emoji": "🔴", "label": "利空", "cls": "signal-bearish"},
+    "neutral": {"emoji": "⚪", "label": "中性", "cls": "signal-neutral"},
+}
+
+
+def _render_global_brief_card(brief: dict) -> html.Div:
+    """Render the 今日重點 summary card on /news page."""
+    if brief.get("failed"):
+        return html.Div(
+            [
+                html.H3("今日重點", className="global-brief-title"),
+                html.P(
+                    f"分析失敗：{brief.get('sentiment_reason', '未知錯誤')}",
+                    className="global-brief-error",
+                ),
+            ],
+            className="global-brief-card-inner failed",
+        )
+
+    sentiment = int(brief.get("market_sentiment", 50))
+    if sentiment >= 65:
+        mood_label, mood_cls = "樂觀", "mood-bullish"
+    elif sentiment <= 35:
+        mood_label, mood_cls = "恐慌", "mood-bearish"
+    else:
+        mood_label, mood_cls = "中性", "mood-neutral"
+
+    highlights_children = []
+    for h in brief.get("category_highlights", []):
+        cat = _CATEGORY_DISPLAY.get(h.get("category", ""), h.get("category", ""))
+        points = h.get("headline_points", [])
+        if not points:
+            continue
+        highlights_children.append(
+            html.Div(
+                [
+                    html.H4(cat, className="brief-highlight-cat"),
+                    html.Ul([html.Li(p) for p in points]),
+                ],
+                className="brief-highlight-block",
+            )
+        )
+
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.H3("今日重點", className="global-brief-title"),
+                    html.Div(
+                        [
+                            html.Span(f"市場情緒 {sentiment}", className="brief-sentiment-score"),
+                            html.Span(mood_label, className=f"brief-sentiment-label {mood_cls}"),
+                        ],
+                        className="brief-sentiment-box",
+                    ),
+                ],
+                className="global-brief-header",
+            ),
+            html.P(brief.get("overall_summary", ""), className="global-brief-summary"),
+            html.P(
+                f"情緒理由：{brief.get('sentiment_reason', '')}",
+                className="global-brief-sentiment-reason",
+            ) if brief.get("sentiment_reason") else None,
+            html.Div(highlights_children, className="global-brief-highlights"),
+        ],
+        className="global-brief-card-inner",
+    )
+
+
+def _render_favorite_signal_strip(signals: List[dict]) -> html.Div:
+    """Render the 自選股訊號列 (horizontal strip) on main page."""
+    items = []
+    for s in signals:
+        style = _SIGNAL_STYLES.get(s.get("signal", "neutral"), _SIGNAL_STYLES["neutral"])
+        items.append(
+            html.Div(
+                [
+                    html.Span(style["emoji"], className="fav-signal-emoji"),
+                    html.Span(
+                        f"{s.get('stock_id', '')} {s.get('stock_name', '')}",
+                        className="fav-signal-stock",
+                    ),
+                    html.Span(style["label"], className=f"fav-signal-label {style['cls']}"),
+                    html.Span(s.get("reason", ""), className="fav-signal-reason"),
+                ],
+                className=f"fav-signal-item {style['cls']}",
+                title=s.get("reason", ""),
+            )
+        )
+    return html.Div(items, className="fav-signal-items")
 
 
 def _collect_ticker_headlines(

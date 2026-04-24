@@ -71,6 +71,9 @@ def create_main_page_layout() -> html.Div:
             # Header with search
             _create_header(),
 
+            # Favorite signal strip (自選股訊號列) — rendered by callback
+            html.Div(id="favorite-signal-strip", className="favorite-signal-strip"),
+
             # Main content area (sidebar + content)
             html.Div(
                 className="content-wrapper",
@@ -142,6 +145,7 @@ def create_news_page_layout() -> html.Div:
                     ),
                 ],
             ),
+            html.Div(id="global-brief-card", className="global-brief-card"),
             dcc.Tabs(
                 id="news-category-tabs",
                 value="INTERNATIONAL",
@@ -705,6 +709,8 @@ COMPONENT_IDS = {
     "news_category_content": "news-category-content",
     "news_refresh_button": "news-refresh-button",
     "news_last_updated": "news-last-updated",
+    "global_brief_card": "global-brief-card",
+    "favorite_signal_strip": "favorite-signal-strip",
 
     # Ticker
     "news_ticker_bar": "news-ticker-bar",

@@ -976,3 +976,113 @@ html {
         transform: rotate(360deg);
     }
 }
+
+/* ── Phase 1 Global brief card / favorite signal strip ───────────────── */
+
+.global-brief-card {
+    margin: 16px 0;
+    padding: 16px 20px;
+    background: #2A2A2A;
+    border: 1px solid #3A3A3A;
+    border-radius: 8px;
+}
+.global-brief-empty {
+    color: #888;
+    font-size: 13px;
+}
+.global-brief-card-inner.failed .global-brief-error {
+    color: #EF5350;
+}
+.global-brief-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+.global-brief-title {
+    margin: 0;
+    font-size: 16px;
+    color: #FFF;
+}
+.brief-sentiment-box {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+.brief-sentiment-score {
+    font-size: 20px;
+    font-weight: bold;
+    color: #FFF;
+}
+.brief-sentiment-label {
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+}
+.mood-bullish { background: #EF5350; color: #FFF; }
+.mood-bearish { background: #26A69A; color: #FFF; }
+.mood-neutral { background: #555; color: #FFF; }
+.global-brief-summary {
+    color: #DDD;
+    line-height: 1.6;
+    margin: 0 0 10px 0;
+    font-size: 14px;
+}
+.global-brief-sentiment-reason {
+    color: #999;
+    font-size: 12px;
+    margin: 0 0 12px 0;
+}
+.global-brief-highlights {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+.brief-highlight-block {
+    background: #1F1F1F;
+    padding: 10px 12px;
+    border-radius: 6px;
+}
+.brief-highlight-cat {
+    margin: 0 0 6px 0;
+    font-size: 13px;
+    color: #FF9800;
+}
+.brief-highlight-block ul {
+    margin: 0;
+    padding-left: 18px;
+    color: #CCC;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.favorite-signal-strip {
+    padding: 0 16px;
+}
+.fav-signal-items {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 8px 0;
+}
+.fav-signal-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: #2A2A2A;
+    border: 1px solid #3A3A3A;
+    border-radius: 20px;
+    white-space: nowrap;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+.fav-signal-item.signal-bullish { border-color: #EF5350; }
+.fav-signal-item.signal-bearish { border-color: #26A69A; }
+.fav-signal-stock { color: #FFF; font-weight: bold; }
+.fav-signal-label { padding: 1px 8px; border-radius: 10px; font-size: 11px; }
+.signal-bullish.fav-signal-label { background: #EF5350; color: #FFF; }
+.signal-bearish.fav-signal-label { background: #26A69A; color: #FFF; }
+.signal-neutral.fav-signal-label { background: #555; color: #FFF; }
+.fav-signal-reason { color: #AAA; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }

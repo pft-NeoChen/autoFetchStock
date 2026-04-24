@@ -93,8 +93,11 @@ class TestBuildStats:
         assert stats.duration_seconds == pytest.approx(5.0)
 
 
-class TestProcessStockCategory:
-    def test_stock_news_keeps_stock_id_even_when_summary_fails(self, mock_config, mock_storage):
+class TestFetchStockCategory:
+    """Phase 1：_fetch_stock_category 不再做 LLM per-article 摘要，
+    summary 欄位 fallback 為 RSS excerpt，related_stock_ids 來自 favorites 比對。"""
+
+    def test_stock_news_keeps_stock_id_from_favorite(self, mock_config, mock_storage):
         processor = _make_processor(mock_config, mock_storage)
         raw = RawArticle(
             title="台積電新聞",
@@ -104,15 +107,16 @@ class TestProcessStockCategory:
             excerpt="short",
         )
         processor._fetcher.fetch_stock_news.return_value = ([raw], NewsCategory.STOCK_TW)
-        processor._summarizer.summarize_article.return_value = ("", [], False)
 
-        result = processor._process_stock_category(
+        result, raws = processor._fetch_stock_category(
             NewsCategory.STOCK_TW,
             [StockInfo(stock_id="2330", stock_name="台積電")],
         )
 
         assert result.articles[0].related_stock_ids == ["2330"]
-        assert result.articles[0].summary_failed is True
+        assert result.articles[0].summary_failed is False
+        assert result.articles[0].summary == "short"  # RSS excerpt fallback
+        assert raws == [raw]
 
     def test_stock_news_merges_stock_ids_for_duplicate_url(self, mock_config, mock_storage):
         processor = _make_processor(mock_config, mock_storage)
@@ -128,7 +132,7 @@ class TestProcessStockCategory:
             ([raw], NewsCategory.STOCK_TW),
         ]
 
-        result = processor._process_stock_category(
+        result, _ = processor._fetch_stock_category(
             NewsCategory.STOCK_TW,
             [
                 StockInfo(stock_id="2330", stock_name="台積電"),
@@ -172,17 +176,17 @@ class TestRun:
         assert set(result.categories.keys()) == set(NewsCategory)
 
     def test_run_saves_even_if_one_category_fails(self):
-        """run() should not raise even when a category processor raises."""
+        """run() should not raise even when a category fetch raises."""
         call_count = 0
 
-        def side_effect(cat, favorites):
+        def side_effect(cat):
             nonlocal call_count
             call_count += 1
             if call_count == 2:
                 raise RuntimeError("network error")
-            return make_category_result(cat)
+            return make_category_result(cat), []
 
-        self.processor._process_category = side_effect
+        self.processor._fetch_category = side_effect
         self.processor._fetcher.fetch_stock_news.return_value = ([], NewsCategory.STOCK_TW)
         self.mock_storage.load_favorites.return_value = []  # skip stock categories
 
