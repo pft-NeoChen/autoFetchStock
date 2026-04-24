@@ -18,6 +18,8 @@ from src.exceptions import SchedulerTaskError
 from src.models import StockInfo
 from src.news.news_fetcher import NewsFetcher
 from src.news.news_models import (
+    FavoriteSignal,
+    GlobalBrief,
     NewsCategory,
     NewsArticle,
     NewsCategoryResult,
@@ -69,31 +71,37 @@ class NewsProcessor:
         self._summarizer.set_favorites(favorites)
 
         categories: Dict[NewsCategory, NewsCategoryResult] = {}
+        raw_by_category: Dict[NewsCategory, list] = {}
 
-        # Fixed categories
+        # Fetch-only phase（不再逐篇呼叫 LLM 摘要）
         for cat in _FIXED_CATEGORIES:
             try:
-                categories[cat] = self._process_category(cat, favorites)
+                cat_result, raws = self._fetch_category(cat)
+                categories[cat] = cat_result
+                raw_by_category[cat] = raws
             except Exception as exc:
-                logger.error("分類處理失敗 [%s]: %s", cat.display_name, exc, exc_info=True)
+                logger.error("分類抓取失敗 [%s]: %s", cat.display_name, exc, exc_info=True)
                 categories[cat] = NewsCategoryResult(
                     category=cat,
                     fetched_at=datetime.now(tz=TW_TIMEZONE),
                     summary_failed=True,
                 )
+                raw_by_category[cat] = []
 
-        # Stock categories (skip if favorites is empty)
         if favorites:
             for cat in _STOCK_CATEGORIES:
                 try:
-                    categories[cat] = self._process_stock_category(cat, favorites)
+                    cat_result, raws = self._fetch_stock_category(cat, favorites)
+                    categories[cat] = cat_result
+                    raw_by_category[cat] = raws
                 except Exception as exc:
-                    logger.error("個股分類處理失敗 [%s]: %s", cat.display_name, exc, exc_info=True)
+                    logger.error("個股分類抓取失敗 [%s]: %s", cat.display_name, exc, exc_info=True)
                     categories[cat] = NewsCategoryResult(
                         category=cat,
                         fetched_at=datetime.now(tz=TW_TIMEZONE),
                         summary_failed=True,
                     )
+                    raw_by_category[cat] = []
         else:
             logger.warning("我的最愛為空，略過 STOCK_TW / STOCK_US 分類")
             for cat in _STOCK_CATEGORIES:
@@ -101,6 +109,15 @@ class NewsProcessor:
                     category=cat,
                     fetched_at=datetime.now(tz=TW_TIMEZONE),
                 )
+                raw_by_category[cat] = []
+
+        # Aggregate-analysis phase：2 次 Gemini 呼叫
+        logger.info("開始全局重點分析 + 自選股影響分析")
+        global_brief = self._summarizer.summarize_global(raw_by_category)
+        all_raw_articles = [a for arts in raw_by_category.values() for a in arts]
+        favorite_signals = self._summarizer.analyze_favorites_impact(
+            all_raw_articles, favorites
+        )
 
         duration = time.monotonic() - t_start
         if duration > self._config.news_max_run_minutes * 60:
@@ -113,6 +130,8 @@ class NewsProcessor:
             finished_at=finished_at,
             categories=categories,
             run_stats=stats,
+            global_brief=global_brief,
+            favorite_signals=favorite_signals,
         )
 
         try:
@@ -130,14 +149,13 @@ class NewsProcessor:
         )
         return run_result
 
-    # ── 分類處理 ──────────────────────────────────────────────────────────────
+    # ── 分類抓取（不再呼叫 LLM） ────────────────────────────────────────────
 
-    def _process_category(
+    def _fetch_category(
         self,
         category: NewsCategory,
-        favorites: List[StockInfo],
-    ) -> NewsCategoryResult:
-        """Fetch + summarize a fixed category."""
+    ) -> "tuple[NewsCategoryResult, list]":
+        """Fetch fixed-category news only. Returns (result, raw_articles)."""
         result = NewsCategoryResult(
             category=category,
             fetched_at=datetime.now(tz=TW_TIMEZONE),
@@ -146,22 +164,18 @@ class NewsProcessor:
             category,
             max_articles=self._config.news_max_articles_per_category,
         )
-        articles = self._summarize_articles(raw_articles, category)
+        articles = self._raws_to_articles(raw_articles, category)
         result.articles = articles
-        result.article_count = len([a for a in articles if not a.summary_failed])
-        result.failed_count = len([a for a in articles if a.summary_failed])
+        result.article_count = len(articles)
+        result.failed_count = 0
+        return result, raw_articles
 
-        summary, ok = self._summarizer.summarize_category(articles, category)
-        result.category_summary = summary
-        result.summary_failed = not ok
-        return result
-
-    def _process_stock_category(
+    def _fetch_stock_category(
         self,
         category: NewsCategory,
         favorites: List[StockInfo],
-    ) -> NewsCategoryResult:
-        """Fetch + summarize stock-specific news for all favorites."""
+    ) -> "tuple[NewsCategoryResult, list]":
+        """Fetch per-favorite news and merge. Returns (result, raw_articles)."""
         result = NewsCategoryResult(
             category=category,
             fetched_at=datetime.now(tz=TW_TIMEZONE),
@@ -185,30 +199,24 @@ class NewsProcessor:
             except Exception as exc:
                 logger.warning("個股新聞抓取失敗 [%s]: %s", stock.stock_id, exc)
 
-        articles = self._summarize_articles(all_raw, category, related_by_url)
+        articles = self._raws_to_articles(all_raw, category, related_by_url)
         result.articles = articles
-        result.article_count = len([a for a in articles if not a.summary_failed])
-        result.failed_count = len([a for a in articles if a.summary_failed])
+        result.article_count = len(articles)
+        result.failed_count = 0
+        return result, all_raw
 
-        summary, ok = self._summarizer.summarize_category(articles, category)
-        result.category_summary = summary
-        result.summary_failed = not ok
-        return result
-
-    def _summarize_articles(
-        self,
+    @staticmethod
+    def _raws_to_articles(
         raw_articles: list,
         category: NewsCategory,
         related_by_url: Optional[Dict[str, List[str]]] = None,
     ) -> List[NewsArticle]:
-        """Summarize a list of RawArticles into NewsArticles."""
+        """Convert RawArticles to NewsArticles without LLM per-article summarization.
+        The `summary` field falls back to the RSS excerpt."""
         articles = []
         related_by_url = related_by_url or {}
         for raw in raw_articles:
-            summary, related_ids, ok = self._summarizer.summarize_article(raw)
-            forced_related = related_by_url.get(raw.url, [])
-            if forced_related:
-                related_ids = list(dict.fromkeys([*forced_related, *related_ids]))
+            related_ids = list(dict.fromkeys(related_by_url.get(raw.url, [])))
             articles.append(NewsArticle(
                 title=raw.title,
                 source=raw.source,
@@ -217,10 +225,10 @@ class NewsProcessor:
                 category=category,
                 excerpt=raw.excerpt,
                 full_text=raw.full_text,
-                summary=summary,
+                summary=raw.excerpt or (raw.full_text[:200] if raw.full_text else ""),
                 related_stock_ids=related_ids,
                 full_text_fetched=raw.full_text_fetched,
-                summary_failed=not ok,
+                summary_failed=False,
             ))
         return articles
 

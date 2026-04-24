@@ -12,15 +12,25 @@ Fallback: when news_summarizer_backend == "gemini-cli", uses subprocess.
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
-from typing import List, Optional, Tuple
+import threading
+import time
+from collections import deque
+from typing import Deque, List, Optional, Tuple
 
 from src.config import AppConfig
 from src.exceptions import SummarizationError
 from src.models import StockInfo
 from src.news.news_fetcher import RawArticle
-from src.news.news_models import NewsArticle, NewsCategory
+from src.news.news_models import (
+    CategoryHighlight,
+    FavoriteSignal,
+    GlobalBrief,
+    NewsArticle,
+    NewsCategory,
+)
 
 logger = logging.getLogger("autofetchstock.news.summarizer")
 
@@ -53,8 +63,77 @@ _CATEGORY_PROMPT = """\
 請直接回應繁體中文總結內容，不需要加標題或格式標記。
 """
 
+_GLOBAL_BRIEF_PROMPT = """\
+你是一位資深財經新聞主編。以下是今日從多來源收集的新聞（每則含標題與 excerpt）。
+請完成以下任務，全部用繁體中文回應：
+
+1. 寫出「今日重點總結」（不超過 300 字），扼要點出今天全球最重要的事件與其交互影響。
+2. 各分類的「重點條列」（每個分類列 3~5 條短句，每條不超過 40 字）。
+3. 給出一個市場情緒分數（0~100 整數）：0=極度恐慌、50=中性、100=極度樂觀，並附上一句話理由。
+
+---
+
+各分類新聞：
+{sections}
+
+---
+
+請嚴格以下列 JSON 格式回應（不要加 markdown 程式碼框、不要加其他文字）：
+{{
+  "overall_summary": "今日重點總結...",
+  "category_highlights": [
+    {{"category": "INTERNATIONAL", "headline_points": ["要點1", "要點2", "要點3"]}},
+    {{"category": "FINANCIAL", "headline_points": ["...", "...", "..."]}},
+    {{"category": "TECH", "headline_points": ["...", "...", "..."]}}
+  ],
+  "market_sentiment": 55,
+  "sentiment_reason": "一句話理由"
+}}
+"""
+
+_FAVORITES_IMPACT_PROMPT = """\
+你是一位專業投資分析師。以下是今日收集的所有新聞（每則含標題、來源、URL、excerpt），
+以及使用者關注的個股清單。請針對每一檔關注個股，判斷今日新聞對它可能造成的影響。
+
+---
+
+使用者關注個股清單：
+{favorites}
+
+---
+
+今日新聞：
+{articles}
+
+---
+
+對每一檔個股產出一個判斷，訊號僅能用以下三種之一：
+- "bullish"（利多）：新聞對此股有明顯正面影響
+- "bearish"（利空）：新聞對此股有明顯負面影響
+- "neutral"（中性）：無明顯關聯或影響有限
+
+請嚴格以下列 JSON 格式回應（陣列順序與個股清單一致，不要加 markdown 程式碼框、不要加其他文字）：
+{{
+  "signals": [
+    {{
+      "stock_id": "2330",
+      "signal": "bullish",
+      "reason": "一句話理由（≤120 字）",
+      "referenced_urls": ["支撐判斷的新聞 URL（最多 3 個）"]
+    }}
+  ]
+}}
+"""
+
 _MAX_SUMMARY_LEN = 200
 _MAX_CATEGORY_SUMMARY_LEN = 500
+
+# Free-tier gemini-3.1-flash-lite 速率限制：15 RPM
+# 保留 1 個 buffer 避免邊界 race，用 14 RPM。
+_SDK_RPM_LIMIT = 14
+_SDK_WINDOW_SECONDS = 60
+_SDK_MAX_RETRIES_ON_429 = 2
+_RETRY_DELAY_PATTERN = re.compile(r"retry.*?in\s+([\d.]+)s", re.IGNORECASE)
 
 
 class NewsSummarizer:
@@ -67,6 +146,9 @@ class NewsSummarizer:
         self._client = None
         self._model_name = ""
         self._disabled_reason = ""
+        # Sliding window of recent SDK request timestamps for client-side throttling.
+        self._sdk_call_times: Deque[float] = deque()
+        self._sdk_lock = threading.Lock()
 
         if self._backend == "gemini":
             self._init_sdk()
@@ -81,7 +163,7 @@ class NewsSummarizer:
         try:
             import google.genai as genai
             self._client = genai.Client(api_key=self._config.gemini_api_key)
-            self._model_name = "gemini-2.0-flash"
+            self._model_name = "gemini-3.1-flash-lite-preview"
             logger.info("Gemini SDK 初始化完成（model: %s）", self._model_name)
         except Exception as exc:
             self._disabled_reason = str(exc)
@@ -148,6 +230,76 @@ class NewsSummarizer:
             logger.warning("分類摘要失敗 [%s]: %s", category.display_name, exc)
             return "", False
 
+    # ── Phase 1：聚合分析方法 ────────────────────────────────────────────────
+
+    def summarize_global(
+        self,
+        articles_by_category: "dict[NewsCategory, List[RawArticle]]",
+    ) -> GlobalBrief:
+        """
+        One-shot aggregate analysis over all today's articles.
+        Produces an overall brief, per-category highlights, and a market sentiment score.
+        """
+        if not any(articles_by_category.values()):
+            return GlobalBrief(failed=True, sentiment_reason="無新聞資料")
+
+        sections = self._format_sections(articles_by_category)
+        prompt = _GLOBAL_BRIEF_PROMPT.format(sections=sections[:60000])
+
+        try:
+            raw = self._call_backend(prompt)
+            return self._parse_global_brief_response(raw)
+        except Exception as exc:
+            logger.warning("全局重點分析失敗: %s", exc)
+            return GlobalBrief(failed=True, sentiment_reason=str(exc)[:80])
+
+    def analyze_favorites_impact(
+        self,
+        articles: List["RawArticle"],
+        favorites: List[StockInfo],
+    ) -> List[FavoriteSignal]:
+        """
+        One-shot impact analysis for each favorite stock based on today's news.
+        Returns one FavoriteSignal per favorite (signal: bullish/neutral/bearish).
+        """
+        if not favorites:
+            return []
+        if not articles:
+            return [
+                FavoriteSignal(
+                    stock_id=s.stock_id,
+                    stock_name=s.stock_name,
+                    signal="neutral",
+                    reason="今日無相關新聞",
+                )
+                for s in favorites
+            ]
+
+        favorites_block = "\n".join(
+            f"- {s.stock_id}: {s.stock_name}" for s in favorites
+        )
+        articles_block = self._format_articles_for_impact(articles)
+        prompt = _FAVORITES_IMPACT_PROMPT.format(
+            favorites=favorites_block,
+            articles=articles_block[:60000],
+        )
+
+        try:
+            raw = self._call_backend(prompt)
+            return self._parse_favorites_impact_response(raw, favorites)
+        except Exception as exc:
+            logger.warning("自選股影響分析失敗: %s", exc)
+            # Fallback: 全部標中性
+            return [
+                FavoriteSignal(
+                    stock_id=s.stock_id,
+                    stock_name=s.stock_name,
+                    signal="neutral",
+                    reason="分析失敗，暫無訊號",
+                )
+                for s in favorites
+            ]
+
     # ── 私有方法 ──────────────────────────────────────────────────────────────
 
     def _call_backend(self, prompt: str) -> str:
@@ -162,17 +314,63 @@ class NewsSummarizer:
         )
 
     def _call_sdk(self, prompt: str) -> str:
-        """Call Gemini API via google-genai SDK."""
+        """Call Gemini API via google-genai SDK with client-side throttling + 429 retry."""
         if self._client is None:
             raise SummarizationError(
                 message="Gemini SDK 不可用",
                 reason=self._disabled_reason or "client not initialized",
             )
-        response = self._client.models.generate_content(
-            model=self._model_name,
-            contents=prompt,
-        )
-        return response.text or ""
+
+        attempts = 0
+        while True:
+            self._throttle_sdk()
+            try:
+                response = self._client.models.generate_content(
+                    model=self._model_name,
+                    contents=prompt,
+                )
+                return response.text or ""
+            except Exception as exc:
+                if self._is_rate_limit_error(exc) and attempts < _SDK_MAX_RETRIES_ON_429:
+                    wait_s = self._extract_retry_delay(exc) or 30.0
+                    logger.info("Gemini 429，等待 %.1fs 後重試（第 %d 次）", wait_s, attempts + 1)
+                    time.sleep(wait_s + 0.5)
+                    attempts += 1
+                    continue
+                raise
+
+    def _throttle_sdk(self) -> None:
+        """Block until next request would fit within the RPM window."""
+        with self._sdk_lock:
+            now = time.monotonic()
+            cutoff = now - _SDK_WINDOW_SECONDS
+            while self._sdk_call_times and self._sdk_call_times[0] < cutoff:
+                self._sdk_call_times.popleft()
+            if len(self._sdk_call_times) >= _SDK_RPM_LIMIT:
+                wait_s = _SDK_WINDOW_SECONDS - (now - self._sdk_call_times[0]) + 0.2
+                if wait_s > 0:
+                    logger.debug("SDK 節流：等待 %.2fs 避開 RPM 上限", wait_s)
+                    time.sleep(wait_s)
+                    now = time.monotonic()
+                    cutoff = now - _SDK_WINDOW_SECONDS
+                    while self._sdk_call_times and self._sdk_call_times[0] < cutoff:
+                        self._sdk_call_times.popleft()
+            self._sdk_call_times.append(now)
+
+    @staticmethod
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        text = str(exc)
+        return "429" in text or "RESOURCE_EXHAUSTED" in text
+
+    @staticmethod
+    def _extract_retry_delay(exc: Exception) -> Optional[float]:
+        match = _RETRY_DELAY_PATTERN.search(str(exc))
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
+        return None
 
     def _call_cli(self, prompt: str) -> str:
         """
@@ -230,3 +428,124 @@ class NewsSummarizer:
             if text:
                 return text, [], True
             return "", [], False
+
+    # ── Phase 1 helper ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _format_sections(
+        articles_by_category: "dict[NewsCategory, List[RawArticle]]",
+    ) -> str:
+        """Render articles grouped by category for the global-brief prompt."""
+        lines: List[str] = []
+        for category, arts in articles_by_category.items():
+            if not arts:
+                continue
+            lines.append(f"\n## {category.value} ({category.display_name})")
+            for a in arts:
+                excerpt = (a.excerpt or a.full_text[:200]).replace("\n", " ").strip()
+                lines.append(f"- {a.title} | {a.source} | {excerpt}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_articles_for_impact(articles: List["RawArticle"]) -> str:
+        """Render flat article list for the favorites-impact prompt."""
+        lines: List[str] = []
+        for a in articles:
+            excerpt = (a.excerpt or a.full_text[:200]).replace("\n", " ").strip()
+            lines.append(f"- [{a.source}] {a.title}\n  URL: {a.url}\n  {excerpt}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _strip_code_fence(raw: str) -> str:
+        raw = raw.strip()
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            if len(parts) >= 2:
+                raw = parts[1]
+                if raw.lstrip().lower().startswith("json"):
+                    raw = raw.lstrip()[4:]
+        return raw.strip()
+
+    def _parse_global_brief_response(self, raw: str) -> GlobalBrief:
+        try:
+            data = json.loads(self._strip_code_fence(raw))
+        except json.JSONDecodeError as exc:
+            logger.warning("全局重點 JSON 解析失敗: %s", exc)
+            return GlobalBrief(failed=True, sentiment_reason="回應格式錯誤")
+
+        highlights: List[CategoryHighlight] = []
+        for h in data.get("category_highlights", []):
+            try:
+                highlights.append(
+                    CategoryHighlight(
+                        category=NewsCategory(h["category"]),
+                        headline_points=[str(p) for p in h.get("headline_points", [])][:5],
+                    )
+                )
+            except (KeyError, ValueError):
+                continue
+
+        sentiment = data.get("market_sentiment", 50)
+        try:
+            sentiment = max(0, min(100, int(sentiment)))
+        except (TypeError, ValueError):
+            sentiment = 50
+
+        return GlobalBrief(
+            overall_summary=str(data.get("overall_summary", "")).strip()[:600],
+            category_highlights=highlights,
+            market_sentiment=sentiment,
+            sentiment_reason=str(data.get("sentiment_reason", "")).strip()[:120],
+            failed=False,
+        )
+
+    def _parse_favorites_impact_response(
+        self,
+        raw: str,
+        favorites: List[StockInfo],
+    ) -> List[FavoriteSignal]:
+        fav_map = {s.stock_id: s for s in favorites}
+        try:
+            data = json.loads(self._strip_code_fence(raw))
+        except json.JSONDecodeError as exc:
+            logger.warning("自選股影響 JSON 解析失敗: %s", exc)
+            return [
+                FavoriteSignal(
+                    stock_id=s.stock_id,
+                    stock_name=s.stock_name,
+                    signal="neutral",
+                    reason="回應格式錯誤",
+                )
+                for s in favorites
+            ]
+
+        by_id: dict = {}
+        for entry in data.get("signals", []):
+            sid = str(entry.get("stock_id", "")).strip()
+            if sid not in fav_map:
+                continue
+            signal = str(entry.get("signal", "neutral")).lower()
+            if signal not in ("bullish", "bearish", "neutral"):
+                signal = "neutral"
+            urls = [str(u) for u in entry.get("referenced_urls", [])][:3]
+            by_id[sid] = FavoriteSignal(
+                stock_id=sid,
+                stock_name=fav_map[sid].stock_name,
+                signal=signal,
+                reason=str(entry.get("reason", "")).strip()[:120],
+                referenced_urls=urls,
+            )
+
+        # 確保每檔自選股都有一筆結果（順序與輸入一致）
+        return [
+            by_id.get(
+                s.stock_id,
+                FavoriteSignal(
+                    stock_id=s.stock_id,
+                    stock_name=s.stock_name,
+                    signal="neutral",
+                    reason="今日無明顯相關新聞",
+                ),
+            )
+            for s in favorites
+        ]
