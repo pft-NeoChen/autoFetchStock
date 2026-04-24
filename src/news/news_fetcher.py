@@ -44,8 +44,8 @@ TW_TIMEZONE = ZoneInfo("Asia/Taipei")
 
 RSS_SOURCES: Dict[NewsCategory, List[str]] = {
     NewsCategory.INTERNATIONAL: [
-        "https://feeds.reuters.com/reuters/worldNews",
         "https://news.google.com/rss/headlines/section/topic/WORLD?hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
     ],
     NewsCategory.FINANCIAL: [
         "https://finance.yahoo.com/news/rssindex",
