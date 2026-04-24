@@ -506,6 +506,7 @@ class CallbackManager:
                 # Update app state - Trigger background sync via 'needs_history_sync'
                 new_state = current_state.copy() if current_state else {}
                 new_state["current_stock"] = stock_id
+                new_state["current_stock_name"] = quote.stock_name or stock.stock_name
                 new_state["needs_history_sync"] = stock_id  # Flag to trigger sync callback
 
                 # Determine price direction class
@@ -1215,6 +1216,18 @@ class CallbackManager:
         # In Dash, we'd need to use a Store + callback pattern
         logger.error(f"UI Error ({error_type}): {message}")
 
+    def _load_news_store_data(self, force_refresh: bool = False) -> Optional[dict]:
+        """Load latest news, or run a fresh collection for manual refresh."""
+        run_result = None
+        if force_refresh and self.news_processor:
+            run_result = self.news_processor.run()
+        else:
+            run_result = self.storage.load_latest_news()
+
+        if run_result is None:
+            return None
+        return run_result.to_dict()
+
     def _save_quote_as_tick(self, quote: RealtimeQuote) -> None:
         """
         Save a realtime quote as an intraday tick.
@@ -1392,11 +1405,9 @@ class CallbackManager:
         )
         def refresh_news_store(n_intervals, n_clicks):
             """Load latest news run result into the shared data store."""
+            manual_refresh = ctx.triggered_id == "news-refresh-button" and bool(n_clicks)
             try:
-                run_result = self.storage.load_latest_news()
-                if run_result is None:
-                    return None
-                return run_result.to_dict()
+                return self._load_news_store_data(force_refresh=manual_refresh)
             except Exception as e:
                 logger.warning(f"Failed to load latest news: {e}")
                 return no_update
@@ -1419,7 +1430,13 @@ class CallbackManager:
             if not current_stock:
                 return html.Div("請先選擇股票", className="no-news")
 
-            articles = _extract_articles_from_run(news_data, category, current_stock)
+            current_stock_name = (app_state or {}).get("current_stock_name")
+            articles = _extract_articles_from_run(
+                news_data,
+                category,
+                current_stock,
+                current_stock_name,
+            )
             if not articles:
                 return html.Div(f"目前無 {current_stock} 相關新聞", className="no-news")
 
@@ -1469,8 +1486,9 @@ class CallbackManager:
                 return "--", {"display": "none"}
 
             current_stock = (app_state or {}).get("current_stock")
+            current_stock_name = (app_state or {}).get("current_stock_name")
             # Collect one headline per category (most recent)
-            headlines = _collect_ticker_headlines(news_data, current_stock)
+            headlines = _collect_ticker_headlines(news_data, current_stock, current_stock_name)
             if not headlines:
                 return "--", {"display": "none"}
 
@@ -1495,6 +1513,7 @@ def _extract_articles_from_run(
     run_dict: dict,
     category: str,
     stock_filter: Optional[str],
+    stock_name_filter: Optional[str] = None,
 ) -> List[dict]:
     """
     Extract article dicts from a serialised NewsRunResult dict.
@@ -1503,6 +1522,7 @@ def _extract_articles_from_run(
         run_dict: to_dict() output of a NewsRunResult
         category: category value ("ALL", "INTERNATIONAL", …)
         stock_filter: stock_id to filter by (None = no filter)
+        stock_name_filter: stock name used as fallback for legacy untagged data
 
     Returns:
         List of plain article dicts ordered newest-first.
@@ -1516,7 +1536,11 @@ def _extract_articles_from_run(
         for art in cat_data.get("articles", []):
             if stock_filter:
                 related = art.get("related_stock_ids", [])
-                if stock_filter not in related:
+                if stock_filter not in related and not _article_matches_stock(
+                    art,
+                    stock_filter,
+                    stock_name_filter,
+                ):
                     continue
             art_copy = dict(art)
             art_copy["_category_key"] = cat_key
@@ -1525,6 +1549,23 @@ def _extract_articles_from_run(
     # Sort newest-first
     articles.sort(key=lambda a: a.get("published_at", ""), reverse=True)
     return articles
+
+
+def _article_matches_stock(
+    article: dict,
+    stock_id: str,
+    stock_name: Optional[str],
+) -> bool:
+    """Fallback matcher for legacy news data without related_stock_ids."""
+    terms = [stock_id]
+    if stock_name:
+        terms.append(stock_name)
+
+    searchable = " ".join(
+        str(article.get(field, "") or "")
+        for field in ("title", "excerpt", "summary", "full_text")
+    )
+    return any(term and term in searchable for term in terms)
 
 
 def _render_article_list(articles: List[dict]) -> html.Div:
@@ -1576,6 +1617,7 @@ def _render_article_list(articles: List[dict]) -> html.Div:
 def _collect_ticker_headlines(
     run_dict: dict,
     stock_filter: Optional[str],
+    stock_name_filter: Optional[str] = None,
 ) -> List[dict]:
     """
     Collect one headline per category for the ticker bar.
@@ -1595,7 +1637,11 @@ def _collect_ticker_headlines(
         picked = None
         if stock_filter:
             for art in cat_articles:
-                if stock_filter in art.get("related_stock_ids", []):
+                if stock_filter in art.get("related_stock_ids", []) or _article_matches_stock(
+                    art,
+                    stock_filter,
+                    stock_name_filter,
+                ):
                     picked = art
                     break
 
