@@ -168,6 +168,7 @@ class NewsProcessor:
         )
         seen_urls: set = set()
         all_raw = []
+        related_by_url: Dict[str, List[str]] = {}
 
         for stock in favorites:
             try:
@@ -175,13 +176,16 @@ class NewsProcessor:
                 if detected_cat != category:
                     continue
                 for raw in raw_list:
+                    related_ids = related_by_url.setdefault(raw.url, [])
+                    if stock.stock_id not in related_ids:
+                        related_ids.append(stock.stock_id)
                     if raw.url not in seen_urls:
                         seen_urls.add(raw.url)
                         all_raw.append(raw)
             except Exception as exc:
                 logger.warning("個股新聞抓取失敗 [%s]: %s", stock.stock_id, exc)
 
-        articles = self._summarize_articles(all_raw, category)
+        articles = self._summarize_articles(all_raw, category, related_by_url)
         result.articles = articles
         result.article_count = len([a for a in articles if not a.summary_failed])
         result.failed_count = len([a for a in articles if a.summary_failed])
@@ -195,11 +199,16 @@ class NewsProcessor:
         self,
         raw_articles: list,
         category: NewsCategory,
+        related_by_url: Optional[Dict[str, List[str]]] = None,
     ) -> List[NewsArticle]:
         """Summarize a list of RawArticles into NewsArticles."""
         articles = []
+        related_by_url = related_by_url or {}
         for raw in raw_articles:
             summary, related_ids, ok = self._summarizer.summarize_article(raw)
+            forced_related = related_by_url.get(raw.url, [])
+            if forced_related:
+                related_ids = list(dict.fromkeys([*forced_related, *related_ids]))
             articles.append(NewsArticle(
                 title=raw.title,
                 source=raw.source,

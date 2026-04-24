@@ -89,6 +89,7 @@ data/stocks/
 data/intraday/
 data/cache/
 data/backup/
+data/news/
 
 # Log files
 logs/

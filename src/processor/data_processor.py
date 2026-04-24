@@ -536,21 +536,32 @@ class DataProcessor:
         if df.empty:
             return df
 
-        # Fix sawtooth pattern in accumulated volume (Shioaji ticks have acc=0)
-        # We replace 0 with NaN and forward fill to propagate the last known total volume
+        # Keep source accumulated volume before deriving display totals. Shioaji
+        # tick callbacks do not provide accumulated volume, so zero means
+        # "derive from per-tick volume" rather than an actual zero total.
         if "accumulated_volume" in df.columns:
-            df["accumulated_volume"] = df["accumulated_volume"].replace(0, np.nan).ffill().fillna(0)
+            source_accumulated = pd.to_numeric(
+                df["accumulated_volume"],
+                errors="coerce",
+            ).fillna(0.0).astype(float)
+            df["accumulated_volume"] = source_accumulated
+        else:
+            source_accumulated = pd.Series(0.0, index=df.index)
 
         # Calculate actual tick volume from accumulated volume or use provided volume
         # Primary source: 'volume' column (should be per-tick volume)
-        df["tick_vol_calc"] = df["volume"]
+        df["tick_vol_calc"] = pd.to_numeric(
+            df["volume"],
+            errors="coerce",
+        ).fillna(0.0).astype(float)
         
         # If volume is 0 but accumulated volume exists, try to recover from diff
         # (This handles legacy data or potential sync issues)
         if (df["tick_vol_calc"] == 0).all() and "accumulated_volume" in df.columns:
-             df["tick_vol_calc"] = df["accumulated_volume"].diff().fillna(0)
-             if not df.empty:
-                 df.loc[0, "tick_vol_calc"] = df.loc[0, "accumulated_volume"]
+            filled_accumulated = source_accumulated.replace(0, np.nan).ffill().fillna(0)
+            df["tick_vol_calc"] = filled_accumulated.diff().fillna(0)
+            if not df.empty:
+                df.loc[0, "tick_vol_calc"] = filled_accumulated.iloc[0]
 
         # Heuristic for buy/sell volume attribution
         df["price_diff"] = df["price"].diff().fillna(0)
@@ -569,9 +580,22 @@ class DataProcessor:
         if "is_odd" in df.columns:
             odd_mask = df["is_odd"] == True
             if odd_mask.any():
+                source_accumulated.loc[odd_mask] = source_accumulated.loc[odd_mask] / 1000.0
                 df.loc[odd_mask, "tick_vol_calc"] = df.loc[odd_mask, "tick_vol_calc"] / 1000.0
                 df.loc[odd_mask, "buy_volume"] = df.loc[odd_mask, "buy_volume"] / 1000.0
                 df.loc[odd_mask, "sell_volume"] = df.loc[odd_mask, "sell_volume"] / 1000.0
+
+        # Build chart cumulative volume. Source accumulated values are anchors;
+        # rows without an anchor, such as Shioaji ticks, advance by tick volume.
+        running_total = 0.0
+        accumulated_display = []
+        for source_total, tick_volume in zip(source_accumulated, df["tick_vol_calc"]):
+            if source_total > 0:
+                running_total = float(source_total)
+            else:
+                running_total += float(tick_volume)
+            accumulated_display.append(running_total)
+        df["accumulated_volume"] = accumulated_display
         
         # Attribute the calculated tick volume based on price movement
         # ONLY if explicit buy/sell volume is missing (e.g. from TWSE fallback)

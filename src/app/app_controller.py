@@ -205,6 +205,7 @@ class AppController:
             
             existing_data = self.storage.load_intraday_data(quote.stock_id, date.today())
             stream_sum = 0
+            has_accumulated_anchor = False
             
             if existing_data and existing_data.ticks:
                 last_tick = existing_data.ticks[-1]
@@ -214,6 +215,7 @@ class AppController:
                 for t in reversed(existing_data.ticks):
                     if t.accumulated_volume > 0:
                         last_accumulated_volume = t.accumulated_volume
+                        has_accumulated_anchor = True
                         break
                     
                     # Skip odd lots for stream sum (they are shares, but quote.total_volume is lots)
@@ -223,12 +225,19 @@ class AppController:
                     stream_sum += t.volume
 
             # Calculate actual volume since last poll
+            latest_tick_volume = max(0, int(getattr(quote, "tick_volume", 0) or 0))
             if quote.total_volume >= last_accumulated_volume:
-                delta = quote.total_volume - last_accumulated_volume
-                # Deduplicate: Subtract volume already captured by stream ticks
-                tick_volume = max(0, delta - stream_sum)
+                if has_accumulated_anchor:
+                    delta = quote.total_volume - last_accumulated_volume
+                    # Deduplicate: Subtract volume already captured by stream ticks
+                    tick_volume = max(0, delta - stream_sum)
+                else:
+                    # A first snapshot's cumulative volume is not one trade.
+                    # Keep the total as accumulated_volume, but only use the
+                    # source's latest single-trade volume for per-tick volume.
+                    tick_volume = latest_tick_volume
             else:
-                tick_volume = getattr(quote, "tick_volume", 0)
+                tick_volume = latest_tick_volume
 
             # Determine buy/sell volume based on Price Trend (Primary)
             buy_volume = 0.0

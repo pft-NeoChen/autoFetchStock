@@ -85,3 +85,15 @@ class TestFavoritesSidebarHelpers:
         self.manager._save_quote_as_tick(simtrade_quote)
 
         self.storage.save_intraday_data.assert_not_called()
+
+    def test_save_quote_as_tick_does_not_treat_first_total_volume_as_single_tick(self):
+        quote = _make_quote()
+        quote.total_volume = 1234
+        quote.tick_volume = 12
+        self.storage.load_intraday_data.return_value = None
+
+        self.manager._save_quote_as_tick(quote)
+
+        saved_tick = self.storage.save_intraday_data.call_args.kwargs["ticks"][0]
+        assert saved_tick.volume == 12
+        assert saved_tick.accumulated_volume == 1234

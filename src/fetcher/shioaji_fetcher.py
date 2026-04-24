@@ -47,6 +47,47 @@ class ShioajiFetcher:
         self._initialized = True
         logger.info(f"ShioajiFetcher initialized (Simulation: {self.config.shioaji_simulation})")
 
+    @staticmethod
+    def _normalize_datetime(value: Any) -> Optional[datetime]:
+        """Normalize Shioaji timestamp fields to local naive datetimes."""
+        if value is None:
+            return None
+
+        if isinstance(value, datetime):
+            if value.tzinfo is not None:
+                return value.astimezone().replace(tzinfo=None)
+            return value
+
+        if isinstance(value, (int, float)):
+            if value <= 0:
+                return None
+            # Shioaji snapshot ts is commonly epoch nanoseconds.
+            seconds = value / 1_000_000_000 if value > 10_000_000_000 else value
+            try:
+                return datetime.fromtimestamp(seconds)
+            except (OSError, OverflowError, ValueError):
+                return None
+
+        if isinstance(value, str) and value:
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    return parsed.astimezone().replace(tzinfo=None)
+                return parsed
+            except ValueError:
+                return None
+
+        return None
+
+    @classmethod
+    def _extract_source_datetime(cls, obj: Any) -> datetime:
+        """Extract the transaction/source time from Shioaji objects."""
+        for attr in ("datetime", "ts", "timestamp"):
+            parsed = cls._normalize_datetime(getattr(obj, attr, None))
+            if parsed is not None:
+                return parsed
+        return datetime.now()
+
     def login(self) -> bool:
         """Log in to Shioaji API and activate CA."""
         try:
@@ -184,10 +225,7 @@ class ShioajiFetcher:
             bid_price = float(getattr(snapshot, 'bid_price', 0.0)) if getattr(snapshot, 'bid_price', None) else 0.0
             ask_price = float(getattr(snapshot, 'ask_price', 0.0)) if getattr(snapshot, 'ask_price', None) else 0.0
             
-            # ts = getattr(snapshot, 'ts', 0)
-            # timestamp = datetime.fromtimestamp(ts * 1e-9) if ts else datetime.now()
-            # Use system time for snapshot to avoid timezone confusion and ensure consistency
-            timestamp = datetime.now()
+            timestamp = self._extract_source_datetime(snapshot)
 
             # Construct quote object
             rt_quote = RealtimeQuote(
@@ -336,7 +374,7 @@ class ShioajiFetcher:
                 tick_volume=int(quote.volume) if hasattr(quote, 'volume') else 0,
                 best_bid=float(quote.bid_price[0]) if hasattr(quote, 'bid_price') and quote.bid_price else 0.0,
                 best_ask=float(quote.ask_price[0]) if hasattr(quote, 'ask_price') and quote.ask_price else 0.0,
-                timestamp=datetime.now(), # Use local time as quote.datetime might be offset
+                timestamp=self._extract_source_datetime(quote),
                 limit_up_price=limit_up,
                 limit_down_price=limit_down,
                 is_simtrade=bool(getattr(quote, "simtrade", False)),
@@ -380,10 +418,10 @@ class ShioajiFetcher:
         try:
             sub_info = self._subscriptions.get(tick.code, {})
             # Convert Shioaji Tick to IntradayTick
-            # TickSTKv1 doesn't have bid/ask/total_volume
             # tick_type: 1=Buy, 2=Sell
             buy_vol = int(tick.volume) if tick.tick_type == 1 else 0
             sell_vol = int(tick.volume) if tick.tick_type == 2 else 0
+            accumulated_volume = int(getattr(tick, "total_volume", 0) or 0)
             
             # if sell_vol > 0:
             #     logger.info(f"SELL DETECTED: {tick.code}, vol={sell_vol}")
@@ -394,7 +432,7 @@ class ShioajiFetcher:
                 volume=int(tick.volume),
                 buy_volume=buy_vol,
                 sell_volume=sell_vol,
-                accumulated_volume=0, # Tick doesn't have accumulated volume
+                accumulated_volume=accumulated_volume,
                 timestamp=tick.datetime,
                 is_odd=getattr(tick, 'intraday_odd', False)
             )

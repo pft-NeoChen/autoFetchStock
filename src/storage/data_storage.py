@@ -369,6 +369,7 @@ class DataStorage:
                     "sell_volume": tick.sell_volume,
                     "accumulated_volume": tick.accumulated_volume,
                     "timestamp": tick.timestamp.isoformat() if tick.timestamp else datetime.now().isoformat(),
+                    "is_odd": getattr(tick, "is_odd", False),
                 })
                 existing_times.add(time_str)
                 new_count += 1
