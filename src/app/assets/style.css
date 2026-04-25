@@ -1220,6 +1220,94 @@ html {
     text-decoration: underline;
 }
 
+.news-chat-sidebar {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin: 12px 0;
+    padding: 12px;
+}
+
+.news-chat-title {
+    color: var(--text-primary);
+    font-size: 14px;
+    margin: 0 0 8px;
+}
+
+.news-chat-messages {
+    max-height: 260px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+}
+
+.news-chat-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.news-chat-message-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.news-chat-message {
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.news-chat-message.user {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.news-chat-message.assistant {
+    background: #1E1E1E;
+    color: var(--text-secondary);
+}
+
+.news-chat-citations {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.news-chat-citation {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+
+.news-chat-citation:hover {
+    text-decoration: underline;
+}
+
+.news-chat-controls {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+}
+
+.news-chat-input {
+    min-width: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    padding: 7px 9px;
+}
+
+.news-chat-submit {
+    background: var(--color-accent);
+    border: 0;
+    border-radius: 4px;
+    color: #FFF;
+    cursor: pointer;
+    padding: 7px 12px;
+}
+
 /* ── News page scrolling ────────────────────────────────────────────── */
 
 /* /news standalone page: needs an explicit height so the inner content

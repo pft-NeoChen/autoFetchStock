@@ -329,3 +329,21 @@ class TestBuildEventTimeline:
 
         assert result.clusters[0].is_anomaly is True
         assert result.clusters[0].anomaly_reason
+
+
+class TestNewsRagProcessor:
+    def test_update_rag_index_disabled_is_noop(self, mock_config, mock_storage):
+        mock_config.news_rag_enabled = False
+        processor = _make_processor(mock_config, mock_storage)
+
+        assert processor.update_rag_index() == 0
+        mock_storage.iter_news_articles.assert_not_called()
+
+    def test_answer_news_question_disabled_returns_failed_answer(self, mock_config, mock_storage):
+        mock_config.news_rag_enabled = False
+        processor = _make_processor(mock_config, mock_storage)
+
+        answer = processor.answer_news_question("台積電最近如何？", [])
+
+        assert answer.failed is True
+        assert "未啟用" in answer.answer

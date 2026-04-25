@@ -110,6 +110,25 @@ class AppConfig:
     news_history_window_days: int = field(
         default_factory=lambda: _env_int("NEWS_HISTORY_WINDOW_DAYS", 7)
     )
+    # News RAG settings (default off to avoid embedding quota usage)
+    news_rag_enabled: bool = field(
+        default_factory=lambda: os.getenv("NEWS_RAG_ENABLED", "false").lower() == "true"
+    )
+    news_rag_window_days: int = field(
+        default_factory=lambda: _env_int("NEWS_RAG_WINDOW_DAYS", 30)
+    )
+    news_rag_top_k: int = field(
+        default_factory=lambda: _env_int("NEWS_RAG_TOP_K", 8)
+    )
+    news_rag_max_new_embeddings_per_day: int = field(
+        default_factory=lambda: _env_int("NEWS_RAG_MAX_NEW_EMBEDDINGS_PER_DAY", 100)
+    )
+    news_rag_embedding_model: str = field(
+        default_factory=lambda: os.getenv("NEWS_RAG_EMBEDDING_MODEL", "text-embedding-004")
+    )
+    news_rag_max_chat_history_turns: int = field(
+        default_factory=lambda: _env_int("NEWS_RAG_MAX_CHAT_HISTORY_TURNS", 6)
+    )
 
     def get_shioaji_credentials(self) -> tuple[str, str]:
         """根據目前的模擬狀態回傳對應的 API Key 與 Secret."""

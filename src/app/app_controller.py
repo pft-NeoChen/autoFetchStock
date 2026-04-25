@@ -127,6 +127,12 @@ class AppController:
                 self.config.news_history_window_days
             )
         )
+        if self.config.news_rag_enabled:
+            self.scheduler.add_news_rag_index_job(
+                lambda: self.news_processor.update_rag_index(
+                    self.config.news_rag_window_days
+                )
+            )
         logger.debug("NewsProcessor initialized and news jobs registered")
 
     def _init_dash_app(self) -> None:

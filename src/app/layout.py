@@ -160,6 +160,27 @@ def create_news_page_layout() -> html.Div:
                 ],
             ),
             html.Div(id="event-timeline", className="event-timeline"),
+            html.Div(
+                id="news-chat-sidebar",
+                className="news-chat-sidebar",
+                children=[
+                    html.H3("新聞問答", className="news-chat-title"),
+                    html.Div(id="news-chat-messages", className="news-chat-messages"),
+                    html.Div(
+                        className="news-chat-controls",
+                        children=[
+                            dcc.Input(
+                                id="news-chat-input",
+                                type="text",
+                                placeholder="詢問近期新聞...",
+                                className="news-chat-input",
+                            ),
+                            html.Button("送出", id="news-chat-submit", className="news-chat-submit"),
+                        ],
+                    ),
+                    dcc.Store(id="news-chat-history", data=[]),
+                ],
+            ),
             dcc.Tabs(
                 id="news-category-tabs",
                 value="INTERNATIONAL",
@@ -732,6 +753,11 @@ COMPONENT_IDS = {
     "sector_heatmap": "sector-heatmap",
     "news_events_store": "news-events-store",
     "event_timeline": "event-timeline",
+    "news_chat_sidebar": "news-chat-sidebar",
+    "news_chat_input": "news-chat-input",
+    "news_chat_submit": "news-chat-submit",
+    "news_chat_history": "news-chat-history",
+    "news_chat_messages": "news-chat-messages",
 
     # Ticker
     "news_ticker_bar": "news-ticker-bar",
