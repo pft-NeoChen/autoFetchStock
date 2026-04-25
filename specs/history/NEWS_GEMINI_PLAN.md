@@ -177,10 +177,10 @@
   - 1 次 Gemini call，要求輸出事件 title / summary / keywords / article_urls / sectors / related_stock_ids
   - parser 必須只接受存在於 input 的 URL，未知 URL 丟棄；cluster 沒有有效 URL 則丟棄
   - `event_id` 由程式端產生，不信任 LLM 回傳
-  - **event_id 跨 build 穩定性**：先讀既有 `events.json`，對每個新 cluster 依 keywords Jaccard ≥ 0.5（或 normalized title 相似度 ≥ 0.8）匹配既有 cluster，命中則沿用舊 `event_id`，避免「台積電財報」vs「台積電 Q1 財報」被切成兩個事件。未命中才用 `sha1(sorted(keywords) + normalized_title)[:12]` 產新 ID。文件中聲明：跨 build 盡力穩定但不保證 100%
 - `src/news/news_processor.py`：新增 `build_event_timeline(window_days=None) -> NewsEventFile`
   - 從 `storage.load_news_range()` 取歷史資料
   - 呼叫 `cluster_events`
+  - **event_id 跨 build 穩定性在 processor/storage 邊界處理，不放進 summarizer/parser**：先讀既有 `events.json`，對每個新 cluster 依 keywords Jaccard ≥ 0.5（或 normalized title 相似度 ≥ 0.8）匹配既有 cluster，命中則沿用舊 `event_id`，避免「台積電財報」vs「台積電 Q1 財報」被切成兩個事件。未命中才用 `sha1(sorted(keywords) + normalized_title)[:12]` 產新 ID。文件中聲明：跨 build 盡力穩定但不保證 100%
   - 依 article published date（Asia/Taipei）回填 `first_seen`、`last_seen`、`daily_count`；明白聲明 `first_seen/last_seen` 限定於當前 window，跨 window 不持久化（events.json 為每日完全覆蓋語義）
   - **失敗回復**：LLM call 拋例外或 parser 回空 cluster 時，**保留上次 events.json 不覆蓋**，僅記錄 warning，呼應 Phase 1 graceful fallback
   - 寫入 `storage.save_news_events(event_file)`，目標 `data/news/events.json`
