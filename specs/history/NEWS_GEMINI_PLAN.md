@@ -105,12 +105,196 @@
 
 ---
 
-## Phase 3：歷史比對與 RAG 問答
+## Phase 3：歷史化、事件演進、異常偵測與 RAG 問答
 
-- 新聞歷史資料保留 ≥ 30 日
-- **事件 timeline**：同一議題跨多日的演進
-- **問答介面**：側欄 chat，使用者自然語言詢問（RAG 架構）
-- **異常偵測**：突然爆量的議題自動標記
+> Phase 3 不應一次做成一個大改版。它實際包含「歷史資料基礎建設」、「事件聚類」、「異常標記」、「RAG 問答」四條風險不同的工作流。落地順序以依賴關係為準：先讓歷史資料可讀、可清、可測；再產生穩定的事件資料；最後才把互動式問答接上。
+
+### Phase 3 整體設計決策
+
+- **資料來源標準化**：歷史分析只讀 `data/news/YYYYMMDD.json` 內的 `NewsDailyFile.runs`，先 flatten 成去重後的 article corpus。去重 key 優先使用 URL；同 URL 多次 run 只保留最新一次，避免每小時排程造成同一篇新聞被重複計數。
+- **歷史分析不阻塞每小時新聞收集**：`NewsProcessor.run()` 維持 Phase 1/2 的即時新聞流程；timeline、anomaly、RAG index 走獨立 job 或手動方法，避免手動更新新聞時被 7 日歷史分析拖慢。
+- **事件檔獨立於 latest.json**：`latest.json` 仍只放最新新聞 run；事件 timeline 寫入 `data/news/events.json`，RAG index 寫入 `data/news/rag_embeddings.npz` 與 `data/news/rag_metadata.json`。Dash 前端新增獨立 store 載入事件資料，不把 events 塞進 `news-data-store`。
+- **LLM 呼叫預算分層**：每小時新聞 run 維持目前呼叫；事件聚類每日最多 1 次 Gemini call；異常偵測純統計、0 LLM call；RAG 預設關閉，只有啟用後才做 embedding 與 answer call。
+- **可回復與可降級**：任何歷史檔損毀、LLM 失敗、RAG index 不存在，都應回空資料或停用 UI，不影響現有新聞頁與主頁自選股訊號。
+
+### Phase 3a：歷史資料基礎建設 ⬅️ **先做**
+
+**目標**：讓 `data/news/YYYYMMDD.json` 可列舉、可區間讀取、可清理，作為後續 timeline / anomaly / RAG 的唯一歷史語料來源。
+
+**後端變更**
+- `src/config.py`：新增設定
+  - `news_retention_days: int = 30`，可用 `NEWS_RETENTION_DAYS` override
+  - `news_history_window_days: int = 7`，供 event timeline / anomaly 預設使用
+- `src/storage/data_storage.py`：新增歷史檔 helper
+  - `list_news_dates() -> List[str]`：只回傳符合 `^\d{8}\.json$` 的日期檔，排除 `latest.json`、`events.json`、暫存檔，結果升冪排序
+  - `load_news_range(start_date: str, end_date: str) -> List[NewsDailyFile]`：逐日讀取，單檔 parse 失敗只記 warning 並跳過
+  - `iter_news_articles(start_date, end_date, dedupe=True)` 或同等私有 helper：flatten `runs -> categories -> articles`，以 URL 去重，給 3b/3d 共用
+  - `cleanup_old_news(retention_days: int, now: Optional[date] = None) -> int`：只依檔名日期刪除早於 cutoff 的 `YYYYMMDD.json`，永遠保留 `latest.json`、`events.json`、RAG index 檔
+- `src/scheduler/scheduler.py`：新增 `add_news_cleanup_job(cleanup_callback)`，每日 23:55 Asia/Taipei 觸發
+- `src/app/app_controller.py`：註冊 cleanup job，callback 呼叫 `storage.cleanup_old_news(config.news_retention_days)`
+
+**測試**
+- `cleanup_old_news`：用 `tmp_path` 建立日期檔、`latest.json`、`events.json`、非日期檔，驗證 cutoff 邊界與保留規則
+- `list_news_dates`：驗證排序、格式過濾、空目錄
+- `load_news_range`：驗證 start/end inclusive、缺檔跳過、單一損毀檔不影響其他日期
+- article flatten/dedupe helper：同 URL 多 run 只留最新文章，跨分類重複 URL 不重複計數
+
+**驗收標準**
+- [ ] `data/news/` 只清掉超過 retention 的日期檔，`latest.json` / `events.json` / index 檔不被刪
+- [ ] 可以從任意日期區間載入 `NewsDailyFile`，單檔損毀不會中斷整批
+- [ ] flatten 後的歷史文章沒有同 URL 重複
+- [ ] 單元測試 pass
+
+---
+
+### Phase 3b：事件 timeline（同議題跨日演進）
+
+**目標**：把過去 N 日（預設 7）的去重新聞聚類成「事件」，產出可被 UI 直接渲染的 `events.json`，呈現同一議題跨日演進。
+
+**資料模型**
+- `src/news/news_models.py`：新增 `EventCluster`
+  - `event_id: str`：穩定 ID。由 normalized title / keywords 做 hash，不能直接用 LLM 每次任意產生的流水號
+  - `title: str`
+  - `summary: str`
+  - `keywords: List[str]`
+  - `first_seen: str`、`last_seen: str`（YYYYMMDD）
+  - `article_urls: List[str]`
+  - `daily_count: Dict[str, int]`
+  - `sectors: List[str]`
+  - `related_stock_ids: List[str]`
+  - anomaly 欄位先預留預設值：`is_anomaly=False`、`anomaly_score=0.0`、`anomaly_reason=""`，Phase 3c 再填值，避免下一階段再做 schema migration
+- 新增 `NewsEventFile`
+  - `generated_at: str`
+  - `window_start: str`
+  - `window_end: str`
+  - `clusters: List[EventCluster]`
+  - `source_article_count: int`
+
+**後端變更**
+- `src/news/news_summarizer.py`：新增 `cluster_events(articles, window_days=7) -> List[EventCluster]`
+  - input 使用 Phase 3a flatten 後的文章：title、source、url、published_at、category、excerpt、related_stock_ids
+  - 1 次 Gemini call，要求輸出事件 title / summary / keywords / article_urls / sectors / related_stock_ids
+  - parser 必須只接受存在於 input 的 URL，未知 URL 丟棄；cluster 沒有有效 URL 則丟棄
+  - `event_id` 由程式端產生，不信任 LLM 回傳
+- `src/news/news_processor.py`：新增 `build_event_timeline(window_days=None) -> NewsEventFile`
+  - 從 `storage.load_news_range()` 取歷史資料
+  - 呼叫 `cluster_events`
+  - 依 article published date 回填 `first_seen`、`last_seen`、`daily_count`
+  - 寫入 `storage.save_news_events(event_file)`，目標 `data/news/events.json`
+- `src/storage/data_storage.py`：新增 `save_news_events(event_file)`、`load_news_events()`
+- `src/scheduler/scheduler.py`：新增 `add_news_event_job(event_callback)`，每日 16:05 Asia/Taipei 觸發（避開 08:00-15:00 每小時新聞收集）
+- `src/app/app_controller.py`：註冊 event job，callback 呼叫 `news_processor.build_event_timeline(config.news_history_window_days)`
+
+**UI 變更**
+- `src/app/layout.py`
+  - `/news` 新增「議題演進」區塊，dom id：`event-timeline`
+  - hidden components 新增 `dcc.Store(id="news-events-store")`
+  - `dom_ids` 補 `news_events_store`、`event_timeline`
+- `src/app/callbacks.py`
+  - 新增 `refresh_news_events_store`：定期或手動從 `storage.load_news_events()` 載入
+  - 新增 `render_event_timeline`：用 Plotly stacked bar 或 grouped bar，X 軸日期、Y 軸文章數、color 事件
+  - 圖下方顯示事件清單：title、summary、first_seen~last_seen、文章連結前 3 筆
+
+**測試**
+- `EventCluster` / `NewsEventFile` round-trip、unknown field fallback、舊 schema fallback
+- `cluster_events` parser：未知 URL 丟棄、空 URL cluster 丟棄、event_id 穩定
+- `build_event_timeline`：mock 7 日 daily files，驗證 URL dedupe、daily_count、events.json 寫入
+- UI helper：空 events、正常 events、文章連結 render
+
+**驗收標準**
+- [ ] `data/news/events.json` 產出且符合 `NewsEventFile`
+- [ ] 同一批 input 重跑時 `event_id` 穩定
+- [ ] 同 URL 多 run 不會讓 `daily_count` 膨脹
+- [ ] `/news` 顯示議題演進圖與事件摘要
+- [ ] event job 每日最多新增 1 次 Gemini call，不影響每小時新聞 run
+
+---
+
+### Phase 3c：異常偵測（議題爆量標記）
+
+**目標**：在已產生的 `EventCluster.daily_count` 上做純統計異常標記，找出「今日或最近一日突然爆量」的事件，不增加 LLM 呼叫。
+
+**後端變更**
+- 新模組 `src/news/news_anomaly.py`
+  - `mark_event_anomalies(clusters, min_history_days=3, z_threshold=2.0) -> List[EventCluster]`
+  - latest day = cluster `daily_count` 中最新日期
+  - baseline = latest day 前 N 日的平均與標準差
+  - 若歷史天數不足，`is_anomaly=False`，`anomaly_reason="歷史資料不足"`
+  - 若標準差為 0，使用保守 fallback：latest count >= max(3, mean * 2) 才標異常
+  - 計算結果寫回 `is_anomaly`、`anomaly_score`、`anomaly_reason`
+- `NewsProcessor.build_event_timeline()` 結尾呼叫 `mark_event_anomalies` 後再寫 `events.json`
+
+**UI 變更**
+- `event-timeline`：
+  - 異常事件在圖例 / 清單顯示「爆量」badge
+  - bar 顏色或 marker 增加異常提示，但不要只靠顏色，需有文字 badge
+- 主頁 `favorite-signal-strip`：
+  - 若異常事件的 `related_stock_ids` 命中目前 favorite，該股票訊號項目顯示小型異常提示
+  - 若沒有 event data，維持現有 UI，不顯示錯誤
+
+**測試**
+- `news_anomaly`：z-score 正常命中、未命中、少於 min_history_days、stdev=0 fallback
+- `EventCluster` anomaly 欄位 round-trip
+- `build_event_timeline`：確認寫入 events 前已標 anomaly
+- UI helper：有 anomaly badge / 無 anomaly / 無 events store 三種情境
+
+**驗收標準**
+- [ ] `events.json.clusters[*]` 可包含 `is_anomaly=true` 與可讀的 `anomaly_reason`
+- [ ] 異常偵測不產生任何 Gemini / embedding call
+- [ ] `/news` timeline 清楚標示爆量事件
+- [ ] 主頁自選股訊號能在有命中時顯示異常提示，無資料時優雅降級
+
+---
+
+### Phase 3d：RAG 問答側欄（最後做、預設關閉）
+
+**目標**：使用者在 `/news` 側欄用自然語言詢問歷史新聞，例如「台積電最近有什麼利多？」、「AI 板塊本週發生什麼事？」；回答必須基於檢索到的新聞並附引用來源。
+
+**設定與儲存**
+- `src/config.py`
+  - `news_rag_enabled: bool = False`，由 `NEWS_RAG_ENABLED` 控制，預設關閉
+  - `news_rag_window_days: int = 30`
+  - `news_rag_top_k: int = 8`
+  - `news_rag_max_new_embeddings_per_day: int = 100`
+- 儲存檔
+  - `data/news/rag_embeddings.npz`：embedding matrix
+  - `data/news/rag_metadata.json`：每列 embedding 對應的 url、title、source、published_at、category、excerpt、content_hash
+
+**後端變更**
+- 新模組 `src/news/news_rag.py`
+  - `build_or_update_index(historical_articles)`：只為 content hash 不存在的新文章建立 embedding；超過每日上限則跳過並記 warning
+  - `retrieve(query, top_k=8)`：query embedding × cosine similarity，回傳含 score 的 citation chunks
+  - `answer(query, chat_history)`：retrieve → 組 grounded prompt → Gemini 回答，回傳 `NewsRagAnswer(answer, citations, failed=False)`
+  - backend 不可用、index 不存在、RAG disabled 時，回 graceful response，不丟到 UI
+- `src/news/news_models.py`：新增輕量模型
+  - `NewsRagCitation(url, title, source, published_at, score)`
+  - `NewsRagAnswer(answer, citations, failed=False, error_reason="")`
+- `src/news/news_processor.py`：新增 `update_rag_index(window_days=None)`，由 scheduler 或手動維護觸發；不放進每小時 `run()`
+- `src/scheduler/scheduler.py`：新增 `add_news_rag_index_job(index_callback)`，每日 16:20 觸發；只有 `news_rag_enabled=True` 才註冊
+
+**UI 變更**
+- `src/app/layout.py`
+  - `/news` 新增 collapsible 側欄 `news-chat-sidebar`
+  - 元件：`news-chat-input`、送出 icon button、`news-chat-history` store、`news-chat-messages`
+  - RAG disabled 時顯示收合狀態或短訊息，不佔用主要新聞內容
+- `src/app/callbacks.py`
+  - `submit_chat_message`：append user message → 呼叫 `news_rag.answer` → append assistant response
+  - 回答使用 `[1] [2]` citation 標記；下方列出可點擊來源，不依賴 hover 才能看到 URL
+  - 失敗時顯示「目前無法回答」類訊息，不清空既有對話
+
+**測試**
+- `build_or_update_index`：content_hash 去重、每日上限、metadata 與 matrix row 對齊
+- `retrieve`：mock embedding，驗證 cosine 排序與 top_k
+- `answer`：mock retrieve + mock Gemini，驗證 citations、LLM 失敗 graceful response
+- disabled path：`news_rag_enabled=False` 時不建立 index、不呼叫 Gemini、不破壞 UI
+- UI callback：送出空字串、正常回答、失敗回答、多輪 history
+
+**驗收標準**
+- [ ] `news_rag_enabled=False` 時，沒有 embedding / answer call，側欄優雅停用
+- [ ] `news_rag_enabled=True` 時，可建立或增量更新 index
+- [ ] 側欄 chat 可問可答，回答至少附 1 個真實新聞 URL 引用
+- [ ] embedding 每日新增量受 `news_rag_max_new_embeddings_per_day` 控制
+- [ ] RAG backend 失敗不影響 `/news` 既有新聞、timeline、market dashboard
 
 ---
 
