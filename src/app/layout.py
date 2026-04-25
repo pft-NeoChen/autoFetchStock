@@ -146,6 +146,19 @@ def create_news_page_layout() -> html.Div:
                 ],
             ),
             html.Div(id="global-brief-card", className="global-brief-card"),
+            html.Div(
+                className="market-dashboard",
+                children=[
+                    html.Div(
+                        id="market-sentiment-gauge",
+                        className="market-sentiment-gauge",
+                    ),
+                    html.Div(
+                        id="sector-heatmap",
+                        className="sector-heatmap",
+                    ),
+                ],
+            ),
             dcc.Tabs(
                 id="news-category-tabs",
                 value="INTERNATIONAL",
@@ -711,6 +724,8 @@ COMPONENT_IDS = {
     "news_last_updated": "news-last-updated",
     "global_brief_card": "global-brief-card",
     "favorite_signal_strip": "favorite-signal-strip",
+    "market_sentiment_gauge": "market-sentiment-gauge",
+    "sector_heatmap": "sector-heatmap",
 
     # Ticker
     "news_ticker_bar": "news-ticker-bar",

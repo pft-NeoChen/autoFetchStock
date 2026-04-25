@@ -37,7 +37,7 @@
 
 ---
 
-## Phase 1：聚合分析骨架 ⬅️ **當前進行中**
+## Phase 1：聚合分析骨架 ✅ **已完成**（commit `d737cf5`、後續強化 `1ea8f97`、`2010475`、`f354ad2`）
 
 ### 目標
 重構 `NewsSummarizer`，改為聚合分析；更新資料模型；最小 UI 連接確認流程可用。
@@ -69,11 +69,39 @@
 
 ---
 
-## Phase 2：情緒與板塊指標
+## Phase 2：情緒與板塊指標 ⬅️ **已完成**（2026-04-25）
 
-- **市場情緒儀表板**：0~100 分 + Fear/Greed 式顏色標示
-- **板塊熱度**：AI / 半導體 / 電動車 / 金融 / 傳產 等熱度排名
-- 新增 UI 元件：情緒計儀表、板塊 heatmap
+### 目標
+在不增加 Gemini API 呼叫次數的前提下，把 Phase 1 已產出的市場情緒升級為視覺化儀表，並新增「板塊熱度」面向。
+
+### 後端變更
+- `src/news/news_models.py`：
+  - 新增 `SectorHeat` dataclass（`sector`, `heat_score 0~100`, `trend up/down/flat`, `summary ≤80 字`, `referenced_urls ≤3`），含 `to_dict` / `from_dict`（在 `from_dict` 內 clamp、白名單 trend、cap URL 數量）
+  - `GlobalBrief` 新增 `sector_heats: List[SectorHeat]` 欄位；序列化向下相容（缺欄位回傳空清單）
+- `src/news/news_summarizer.py`：
+  - 擴充 `_GLOBAL_BRIEF_PROMPT`：要求 LLM 在同一次呼叫中額外輸出 5 個基礎板塊（AI / 半導體 / 電動車 / 金融 / 傳產），允許再加最多 2 個熱門板塊
+  - `_parse_global_brief_response` 增加 `sector_heats` 解析：clamp `heat_score` 到 0~100、trend 落入白名單，否則 fallback `"flat"`、同名板塊 dedupe、`referenced_urls` 上限 3 個
+  - **API 預算不變**：板塊熱度 piggyback 在 global brief 同一次呼叫上，仍是 2~3 calls / run
+
+### UI 變更
+- `src/app/layout.py`：/news 頁面新增 `market-dashboard` 雙欄區塊（左：`market-sentiment-gauge`；右：`sector-heatmap`），`dom_ids` 補上對應 key
+- `src/app/callbacks.py`：
+  - 新增 `render_sentiment_gauge` callback：使用 `plotly.graph_objects.Indicator` 畫 Fear/Greed 風格儀表，分 5 段配色（極度恐慌綠 → 中性黃 → 極度樂觀紅）並加白色 threshold 指針
+  - 新增 `render_sector_heatmap` callback：使用 Plotly 橫條圖按 `heat_score` 由高至低排序，依 trend 上色（紅 ▲ / 綠 ▼ / 灰 —）
+  - 新增 `_render_sentiment_gauge` / `_render_sector_heatmap` / `_sentiment_color` helpers，與 `import dcc` + `import plotly.graph_objects as go`
+- `src/app/assets/style.css`：新增 `.market-dashboard` grid layout（900px 以下塌成單欄）、容器與標題樣式
+
+### 測試
+- `tests/test_news/test_news_models.py`：補 `SectorHeat` round-trip、score clamp、trend 白名單、URL 上限、`GlobalBrief.sector_heats` round-trip、舊版（無 `sector_heats`）payload 相容
+- `tests/test_news/test_summarizer_aggregate.py`：補 sector_heats 解析、score clamp、trend 白名單、同名 dedupe、缺欄位 fallback
+- 全套 news + app 測試 86 / 86 通過
+
+### 驗收標準
+- [x] `data/news/latest.json.global_brief` 包含 `sector_heats` 陣列
+- [x] /news 頁面顯示市場情緒儀表（Fear/Greed gauge）
+- [x] /news 頁面顯示板塊熱度橫條圖（依熱度排序、依 trend 上色）
+- [x] Gemini 呼叫次數維持與 Phase 1 相同
+- [x] 單元測試 pass（含 schema fallback 行為）
 
 ---
 

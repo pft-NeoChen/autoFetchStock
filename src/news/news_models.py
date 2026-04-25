@@ -172,12 +172,50 @@ class CategoryHighlight:
 
 
 @dataclass
+class SectorHeat:
+    """Phase 2: per-sector heat indicator extracted from today's news."""
+    sector: str                                # 板塊名稱（如「AI」、「半導體」、「電動車」、「金融」、「傳產」）
+    heat_score: int = 50                       # 熱度 0~100（0=極冷, 100=極熱）
+    trend: str = "flat"                        # "up" | "down" | "flat"
+    summary: str = ""                          # 一句話說明（≤80 字）
+    referenced_urls: List[str] = field(default_factory=list)  # 支撐判斷的新聞 URL（最多 3 個）
+
+    def to_dict(self) -> dict:
+        return {
+            "sector": self.sector,
+            "heat_score": self.heat_score,
+            "trend": self.trend,
+            "summary": self.summary,
+            "referenced_urls": self.referenced_urls,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SectorHeat":
+        score = data.get("heat_score", 50)
+        try:
+            score = max(0, min(100, int(score)))
+        except (TypeError, ValueError):
+            score = 50
+        trend = str(data.get("trend", "flat")).lower()
+        if trend not in ("up", "down", "flat"):
+            trend = "flat"
+        return cls(
+            sector=str(data.get("sector", "")).strip(),
+            heat_score=score,
+            trend=trend,
+            summary=str(data.get("summary", "")).strip(),
+            referenced_urls=[str(u) for u in data.get("referenced_urls", [])][:3],
+        )
+
+
+@dataclass
 class GlobalBrief:
     """Aggregated insight produced by a single Gemini call over all articles."""
     overall_summary: str = ""                 # 今日重點總結（≤300 字）
     category_highlights: List[CategoryHighlight] = field(default_factory=list)
     market_sentiment: int = 50                # 市場情緒 0~100（0=極度恐慌, 100=極度樂觀）
     sentiment_reason: str = ""                # 情緒分數的一句話理由
+    sector_heats: List[SectorHeat] = field(default_factory=list)  # Phase 2: 板塊熱度排名
     failed: bool = False                      # 是否整體失敗
 
     def to_dict(self) -> dict:
@@ -186,6 +224,7 @@ class GlobalBrief:
             "category_highlights": [h.to_dict() for h in self.category_highlights],
             "market_sentiment": self.market_sentiment,
             "sentiment_reason": self.sentiment_reason,
+            "sector_heats": [s.to_dict() for s in self.sector_heats],
             "failed": self.failed,
         }
 
@@ -198,6 +237,9 @@ class GlobalBrief:
             ],
             market_sentiment=int(data.get("market_sentiment", 50)),
             sentiment_reason=data.get("sentiment_reason", ""),
+            sector_heats=[
+                SectorHeat.from_dict(s) for s in data.get("sector_heats", [])
+            ],
             failed=data.get("failed", False),
         )
 
