@@ -7,8 +7,10 @@ from dataclasses import replace
 from datetime import date, datetime, timezone
 
 from src.news.news_models import (
+    EventCluster,
     NewsCategory,
     NewsDailyFile,
+    NewsEventFile,
 )
 from src.storage.data_storage import DataStorage
 from tests.test_news.conftest import make_article, make_category_result, make_run_result
@@ -106,3 +108,30 @@ def test_news_article_local_date_uses_asia_taipei_timezone():
     )
 
     assert DataStorage.news_article_local_date(article) == "20260411"
+
+
+def test_save_and_load_news_events_round_trip(tmp_path):
+    storage = DataStorage(data_dir=str(tmp_path))
+    event_file = NewsEventFile(
+        generated_at=datetime(2026, 4, 25, 16, 5, tzinfo=timezone.utc),
+        window_start="20260419",
+        window_end="20260425",
+        clusters=[
+            EventCluster(
+                event_id="abc123",
+                title="AI supply chain",
+                article_urls=["https://example.com/a"],
+                daily_count={"20260425": 3},
+            )
+        ],
+        source_article_count=12,
+    )
+
+    storage.save_news_events(event_file)
+    restored = storage.load_news_events()
+
+    assert restored is not None
+    assert restored.window_start == "20260419"
+    assert restored.source_article_count == 12
+    assert restored.clusters[0].event_id == "abc123"
+    assert restored.clusters[0].daily_count == {"20260425": 3}

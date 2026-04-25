@@ -8,8 +8,10 @@ Orchestrates the full news collection pipeline:
 """
 
 import logging
+import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -18,11 +20,13 @@ from src.exceptions import SchedulerTaskError
 from src.models import StockInfo
 from src.news.news_fetcher import NewsFetcher
 from src.news.news_models import (
+    EventCluster,
     FavoriteSignal,
     GlobalBrief,
     NewsCategory,
     NewsArticle,
     NewsCategoryResult,
+    NewsEventFile,
     NewsRunResult,
     NewsRunStats,
 )
@@ -161,6 +165,72 @@ class NewsProcessor:
         )
         return run_result
 
+    def build_event_timeline(self, window_days: Optional[int] = None) -> NewsEventFile:
+        """
+        Build the Phase 3b cross-day event timeline from historical news files.
+
+        This job is intentionally separate from run() so hourly news collection
+        remains fast. If clustering fails while historical articles exist, the
+        previous events.json is returned and left untouched.
+        """
+        window_days = window_days or self._config.news_history_window_days
+        try:
+            window_days = max(1, int(window_days))
+        except (TypeError, ValueError):
+            window_days = 7
+
+        end_day = datetime.now(TW_TIMEZONE).date()
+        start_day = end_day - timedelta(days=window_days - 1)
+        start_str = start_day.strftime("%Y%m%d")
+        end_str = end_day.strftime("%Y%m%d")
+
+        articles = list(self._storage.iter_news_articles(start_str, end_str, dedupe=True))
+        source_article_count = len(articles)
+        logger.info(
+            "建立新聞事件 timeline：%s-%s，%d 篇去重文章",
+            start_str, end_str, source_article_count,
+        )
+
+        if not articles:
+            event_file = NewsEventFile(
+                generated_at=datetime.now(TW_TIMEZONE),
+                window_start=start_str,
+                window_end=end_str,
+                clusters=[],
+                source_article_count=0,
+            )
+            self._storage.save_news_events(event_file)
+            return event_file
+
+        clusters = self._summarizer.cluster_events(articles, window_days=window_days)
+        if not clusters:
+            existing = self._load_existing_event_file()
+            if existing is not None:
+                logger.warning("事件聚類無結果，保留既有 events.json")
+                return existing
+            event_file = NewsEventFile(
+                generated_at=datetime.now(TW_TIMEZONE),
+                window_start=start_str,
+                window_end=end_str,
+                clusters=[],
+                source_article_count=source_article_count,
+            )
+            self._storage.save_news_events(event_file)
+            return event_file
+
+        existing = self._load_existing_event_file()
+        self._reconcile_event_ids(clusters, existing.clusters if existing else [])
+        self._hydrate_event_clusters(clusters, articles)
+        event_file = NewsEventFile(
+            generated_at=datetime.now(TW_TIMEZONE),
+            window_start=start_str,
+            window_end=end_str,
+            clusters=clusters,
+            source_article_count=source_article_count,
+        )
+        self._storage.save_news_events(event_file)
+        return event_file
+
     # ── 分類抓取（不再呼叫 LLM） ────────────────────────────────────────────
 
     def _fetch_category(
@@ -285,3 +355,80 @@ class NewsProcessor:
             failed_summaries=failed_summaries,
             duration_seconds=round(duration, 2),
         )
+
+    def _load_existing_event_file(self) -> Optional[NewsEventFile]:
+        try:
+            existing = self._storage.load_news_events()
+        except Exception as exc:
+            logger.warning("讀取既有 events.json 失敗: %s", exc)
+            return None
+        return existing if isinstance(existing, NewsEventFile) else None
+
+    def _hydrate_event_clusters(
+        self,
+        clusters: List[EventCluster],
+        articles: List[NewsArticle],
+    ) -> None:
+        article_by_url = {a.url: a for a in articles}
+        for cluster in clusters:
+            dates: List[str] = []
+            related_ids: List[str] = list(cluster.related_stock_ids)
+            for url in cluster.article_urls:
+                article = article_by_url.get(url)
+                if article is None:
+                    continue
+                dates.append(self._storage.news_article_local_date(article))
+                related_ids.extend(article.related_stock_ids)
+            daily_count: Dict[str, int] = {}
+            for day in dates:
+                daily_count[day] = daily_count.get(day, 0) + 1
+            cluster.daily_count = dict(sorted(daily_count.items()))
+            if daily_count:
+                cluster.first_seen = min(daily_count)
+                cluster.last_seen = max(daily_count)
+            cluster.related_stock_ids = list(dict.fromkeys(related_ids))
+
+    def _reconcile_event_ids(
+        self,
+        clusters: List[EventCluster],
+        existing_clusters: List[EventCluster],
+    ) -> None:
+        for cluster in clusters:
+            match = self._match_existing_event_cluster(cluster, existing_clusters)
+            if match:
+                cluster.event_id = match.event_id
+
+    def _match_existing_event_cluster(
+        self,
+        cluster: EventCluster,
+        existing_clusters: List[EventCluster],
+    ) -> Optional[EventCluster]:
+        best_match = None
+        best_score = 0.0
+        for existing in existing_clusters:
+            keyword_score = self._keyword_jaccard(cluster.keywords, existing.keywords)
+            title_score = SequenceMatcher(
+                None,
+                self._normalise_event_text(cluster.title),
+                self._normalise_event_text(existing.title),
+            ).ratio()
+            score = max(
+                keyword_score if keyword_score >= 0.5 else 0.0,
+                title_score if title_score >= 0.8 else 0.0,
+            )
+            if score > best_score:
+                best_score = score
+                best_match = existing
+        return best_match if best_score > 0 else None
+
+    @staticmethod
+    def _keyword_jaccard(left: List[str], right: List[str]) -> float:
+        left_set = {NewsProcessor._normalise_event_text(k) for k in left if k}
+        right_set = {NewsProcessor._normalise_event_text(k) for k in right if k}
+        if not left_set or not right_set:
+            return 0.0
+        return len(left_set & right_set) / len(left_set | right_set)
+
+    @staticmethod
+    def _normalise_event_text(text: str) -> str:
+        return re.sub(r"\s+", "", str(text).lower())

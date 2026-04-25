@@ -274,6 +274,114 @@ class FavoriteSignal:
 
 
 @dataclass
+class EventCluster:
+    """Phase 3b: cross-day event cluster for news timeline analysis."""
+    event_id: str
+    title: str
+    summary: str = ""
+    keywords: List[str] = field(default_factory=list)
+    first_seen: str = ""
+    last_seen: str = ""
+    article_urls: List[str] = field(default_factory=list)
+    daily_count: Dict[str, int] = field(default_factory=dict)
+    sectors: List[str] = field(default_factory=list)
+    related_stock_ids: List[str] = field(default_factory=list)
+    is_anomaly: bool = False
+    anomaly_score: float = 0.0
+    anomaly_reason: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "event_id": self.event_id,
+            "title": self.title,
+            "summary": self.summary,
+            "keywords": self.keywords,
+            "first_seen": self.first_seen,
+            "last_seen": self.last_seen,
+            "article_urls": self.article_urls,
+            "daily_count": self.daily_count,
+            "sectors": self.sectors,
+            "related_stock_ids": self.related_stock_ids,
+            "is_anomaly": self.is_anomaly,
+            "anomaly_score": self.anomaly_score,
+            "anomaly_reason": self.anomaly_reason,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "EventCluster":
+        daily_count: Dict[str, int] = {}
+        for day, count in (data.get("daily_count") or {}).items():
+            try:
+                daily_count[str(day)] = max(0, int(count))
+            except (TypeError, ValueError):
+                daily_count[str(day)] = 0
+        try:
+            anomaly_score = float(data.get("anomaly_score", 0.0))
+        except (TypeError, ValueError):
+            anomaly_score = 0.0
+        return cls(
+            event_id=str(data.get("event_id", "")).strip(),
+            title=str(data.get("title", "")).strip(),
+            summary=str(data.get("summary", "")).strip(),
+            keywords=[str(k).strip() for k in data.get("keywords", []) if str(k).strip()],
+            first_seen=str(data.get("first_seen", "")).strip(),
+            last_seen=str(data.get("last_seen", "")).strip(),
+            article_urls=[str(u) for u in data.get("article_urls", []) if str(u)],
+            daily_count=daily_count,
+            sectors=[str(s).strip() for s in data.get("sectors", []) if str(s).strip()],
+            related_stock_ids=[
+                str(s).strip()
+                for s in data.get("related_stock_ids", [])
+                if str(s).strip()
+            ],
+            is_anomaly=bool(data.get("is_anomaly", False)),
+            anomaly_score=anomaly_score,
+            anomaly_reason=str(data.get("anomaly_reason", "")).strip(),
+        )
+
+
+@dataclass
+class NewsEventFile:
+    """Root structure for data/news/events.json."""
+    generated_at: datetime = field(default_factory=datetime.now)
+    window_start: str = ""
+    window_end: str = ""
+    clusters: List[EventCluster] = field(default_factory=list)
+    source_article_count: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "generated_at": self.generated_at.isoformat(),
+            "window_start": self.window_start,
+            "window_end": self.window_end,
+            "clusters": [c.to_dict() for c in self.clusters],
+            "source_article_count": self.source_article_count,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "NewsEventFile":
+        try:
+            generated_at = datetime.fromisoformat(data["generated_at"])
+        except (KeyError, TypeError, ValueError):
+            generated_at = datetime.now()
+        try:
+            source_article_count = max(0, int(data.get("source_article_count", 0)))
+        except (TypeError, ValueError):
+            source_article_count = 0
+        return cls(
+            generated_at=generated_at,
+            window_start=str(data.get("window_start", "")).strip(),
+            window_end=str(data.get("window_end", "")).strip(),
+            clusters=[
+                EventCluster.from_dict(c)
+                for c in data.get("clusters", [])
+                if isinstance(c, dict)
+            ],
+            source_article_count=source_article_count,
+        )
+
+
+@dataclass
 class NewsRunResult:
     """Result of a single news collection and summarization run."""
     run_at: datetime                                              # 執行觸發時間（Asia/Taipei）

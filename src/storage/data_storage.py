@@ -756,6 +756,37 @@ class DataStorage:
             logger.error(f"Failed to parse latest news file: {e}")
             return None
 
+    def save_news_events(self, event_file: "NewsEventFile") -> None:
+        """
+        Save the news event timeline sidecar file.
+
+        events.json is independent from latest.json and daily run files.
+        """
+        self._check_disk_space()
+        events_path = self.news_dir / "events.json"
+        self._atomic_write(events_path, event_file.to_dict())
+        logger.info("Saved news events to %s", events_path.name)
+
+    def load_news_events(self) -> "Optional[NewsEventFile]":
+        """
+        Load the news event timeline sidecar file.
+
+        Returns None when the file is missing or invalid.
+        """
+        from src.news.news_models import NewsEventFile
+
+        events_path = self.news_dir / "events.json"
+        data = self._load_json_file(events_path)
+        if data is None:
+            logger.debug("No news events file found")
+            return None
+
+        try:
+            return NewsEventFile.from_dict(data)
+        except Exception as e:
+            logger.error(f"Failed to parse news events file: {e}")
+            return None
+
     def list_news_dates(self) -> List[str]:
         """
         List available daily news files.

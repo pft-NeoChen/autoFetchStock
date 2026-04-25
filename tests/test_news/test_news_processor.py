@@ -17,7 +17,13 @@ import pytest
 
 from src.models import StockInfo
 from src.news.news_fetcher import RawArticle
-from src.news.news_models import NewsCategory, NewsCategoryResult, NewsRunResult
+from src.news.news_models import (
+    EventCluster,
+    NewsCategory,
+    NewsCategoryResult,
+    NewsEventFile,
+    NewsRunResult,
+)
 from src.news.news_processor import NewsProcessor
 from tests.test_news.conftest import make_article, make_category_result, make_run_result
 
@@ -206,3 +212,81 @@ class TestRun:
         # Neither should have articles
         assert result.categories[NewsCategory.STOCK_TW].article_count == 0
         assert result.categories[NewsCategory.STOCK_US].article_count == 0
+
+
+class TestBuildEventTimeline:
+    def test_builds_event_file_and_hydrates_daily_count(self, mock_config, mock_storage):
+        mock_config.news_history_window_days = 7
+        processor = _make_processor(mock_config, mock_storage)
+        article = make_article(
+            url="https://example.com/a",
+            related=["2330"],
+        )
+        mock_storage.iter_news_articles.return_value = [article]
+        mock_storage.news_article_local_date.return_value = "20260410"
+        mock_storage.load_news_events.return_value = None
+        processor._summarizer.cluster_events.return_value = [
+            EventCluster(
+                event_id="new-id",
+                title="台積電財報",
+                keywords=["台積電", "財報"],
+                article_urls=["https://example.com/a"],
+            )
+        ]
+
+        event_file = processor.build_event_timeline(window_days=7)
+
+        mock_storage.save_news_events.assert_called_once()
+        saved = mock_storage.save_news_events.call_args[0][0]
+        assert isinstance(saved, NewsEventFile)
+        assert event_file is saved
+        assert saved.source_article_count == 1
+        assert saved.clusters[0].daily_count == {"20260410": 1}
+        assert saved.clusters[0].related_stock_ids == ["2330"]
+
+    def test_preserves_existing_events_when_clustering_returns_empty(self, mock_config, mock_storage):
+        mock_config.news_history_window_days = 7
+        processor = _make_processor(mock_config, mock_storage)
+        mock_storage.iter_news_articles.return_value = [make_article()]
+        mock_storage.news_article_local_date.return_value = "20260410"
+        existing = NewsEventFile(
+            window_start="20260401",
+            window_end="20260407",
+            clusters=[EventCluster(event_id="old", title="Old")],
+            source_article_count=3,
+        )
+        mock_storage.load_news_events.return_value = existing
+        processor._summarizer.cluster_events.return_value = []
+
+        result = processor.build_event_timeline(window_days=7)
+
+        assert result is existing
+        mock_storage.save_news_events.assert_not_called()
+
+    def test_reuses_existing_event_id_for_similar_keywords(self, mock_config, mock_storage):
+        mock_config.news_history_window_days = 7
+        processor = _make_processor(mock_config, mock_storage)
+        article = make_article(url="https://example.com/a")
+        mock_storage.iter_news_articles.return_value = [article]
+        mock_storage.news_article_local_date.return_value = "20260410"
+        mock_storage.load_news_events.return_value = NewsEventFile(
+            clusters=[
+                EventCluster(
+                    event_id="old-id",
+                    title="台積電 Q1 財報",
+                    keywords=["台積電", "財報"],
+                )
+            ]
+        )
+        processor._summarizer.cluster_events.return_value = [
+            EventCluster(
+                event_id="new-id",
+                title="台積電財報",
+                keywords=["台積電", "財報"],
+                article_urls=["https://example.com/a"],
+            )
+        ]
+
+        result = processor.build_event_timeline(window_days=7)
+
+        assert result.clusters[0].event_id == "old-id"
