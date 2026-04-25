@@ -128,8 +128,8 @@
 - `src/storage/data_storage.py`：新增歷史檔 helper
   - `list_news_dates() -> List[str]`：只回傳符合 `^\d{8}\.json$` 的日期檔，排除 `latest.json`、`events.json`、暫存檔，結果升冪排序
   - `load_news_range(start_date: str, end_date: str) -> List[NewsDailyFile]`：逐日讀取，單檔 parse 失敗只記 warning 並跳過
-  - `iter_news_articles(start_date, end_date, dedupe=True)` 或同等私有 helper：flatten `runs -> categories -> articles`，以 URL 去重，給 3b/3d 共用
-  - `cleanup_old_news(retention_days: int, now: Optional[date] = None) -> int`：只依檔名日期刪除早於 cutoff 的 `YYYYMMDD.json`，永遠保留 `latest.json`、`events.json`、RAG index 檔
+  - `iter_news_articles(start_date, end_date, dedupe=True)` 或同等私有 helper：flatten `runs -> categories -> articles`，以 URL 去重；**dedupe 規則**：同 URL 多次出現時，保留**最後一次出現的 run 的 article 物件**（`related_stock_ids`、`summary` 取最後版本，因為通常累積最完整）。**歸日規則**：article 歸屬日期 = `published_at` 轉 Asia/Taipei 後的 `YYYYMMDD`，給 Phase 3b `daily_count` 共用，避免時區錯位
+  - `cleanup_old_news(retention_days: int, now: Optional[date] = None) -> int`：實作採**白名單 match-then-delete**——只刪除符合 `^\d{8}\.json$` 且日期早於 cutoff 的檔案；任何不符合此 regex 的檔案（含 `latest.json`、`events.json`、`rag_*.json`、`rag_*.npz`、未來新增的 sidecar）一律保留
 - `src/scheduler/scheduler.py`：新增 `add_news_cleanup_job(cleanup_callback)`，每日 23:55 Asia/Taipei 觸發
 - `src/app/app_controller.py`：註冊 cleanup job，callback 呼叫 `storage.cleanup_old_news(config.news_retention_days)`
 
@@ -173,13 +173,16 @@
 **後端變更**
 - `src/news/news_summarizer.py`：新增 `cluster_events(articles, window_days=7) -> List[EventCluster]`
   - input 使用 Phase 3a flatten 後的文章：title、source、url、published_at、category、excerpt、related_stock_ids
+  - **input 上限**：文章 ≤ 800 篇（超過則依 `published_at` 降序取最近 800 篇），LLM cluster 數輸出上限 50；超量在 prompt 內限制 + parser 端再做 truncate，避免 prompt / events.json 失控
   - 1 次 Gemini call，要求輸出事件 title / summary / keywords / article_urls / sectors / related_stock_ids
   - parser 必須只接受存在於 input 的 URL，未知 URL 丟棄；cluster 沒有有效 URL 則丟棄
   - `event_id` 由程式端產生，不信任 LLM 回傳
+  - **event_id 跨 build 穩定性**：先讀既有 `events.json`，對每個新 cluster 依 keywords Jaccard ≥ 0.5（或 normalized title 相似度 ≥ 0.8）匹配既有 cluster，命中則沿用舊 `event_id`，避免「台積電財報」vs「台積電 Q1 財報」被切成兩個事件。未命中才用 `sha1(sorted(keywords) + normalized_title)[:12]` 產新 ID。文件中聲明：跨 build 盡力穩定但不保證 100%
 - `src/news/news_processor.py`：新增 `build_event_timeline(window_days=None) -> NewsEventFile`
   - 從 `storage.load_news_range()` 取歷史資料
   - 呼叫 `cluster_events`
-  - 依 article published date 回填 `first_seen`、`last_seen`、`daily_count`
+  - 依 article published date（Asia/Taipei）回填 `first_seen`、`last_seen`、`daily_count`；明白聲明 `first_seen/last_seen` 限定於當前 window，跨 window 不持久化（events.json 為每日完全覆蓋語義）
+  - **失敗回復**：LLM call 拋例外或 parser 回空 cluster 時，**保留上次 events.json 不覆蓋**，僅記錄 warning，呼應 Phase 1 graceful fallback
   - 寫入 `storage.save_news_events(event_file)`，目標 `data/news/events.json`
 - `src/storage/data_storage.py`：新增 `save_news_events(event_file)`、`load_news_events()`
 - `src/scheduler/scheduler.py`：新增 `add_news_event_job(event_callback)`，每日 16:05 Asia/Taipei 觸發（避開 08:00-15:00 每小時新聞收集）
@@ -197,8 +200,10 @@
 
 **測試**
 - `EventCluster` / `NewsEventFile` round-trip、unknown field fallback、舊 schema fallback
-- `cluster_events` parser：未知 URL 丟棄、空 URL cluster 丟棄、event_id 穩定
-- `build_event_timeline`：mock 7 日 daily files，驗證 URL dedupe、daily_count、events.json 寫入
+- `cluster_events` parser：未知 URL 丟棄、空 URL cluster 丟棄、event_id 穩定（同批重跑 stable + 跨 build 對相似 cluster 沿用舊 ID）
+- `cluster_events` 文章上限：> 800 篇 input 時 prompt 只送最近 800 篇
+- `build_event_timeline`：mock 7 日 daily files，驗證 URL dedupe、daily_count（時區轉換正確）、events.json 寫入
+- `build_event_timeline` 失敗回復：LLM 拋例外時既有 events.json 不被覆蓋
 - UI helper：空 events、正常 events、文章連結 render
 
 **驗收標準**
@@ -230,7 +235,8 @@
   - bar 顏色或 marker 增加異常提示，但不要只靠顏色，需有文字 badge
 - 主頁 `favorite-signal-strip`：
   - 若異常事件的 `related_stock_ids` 命中目前 favorite，該股票訊號項目顯示小型異常提示
-  - 若沒有 event data，維持現有 UI，不顯示錯誤
+  - **callback inputs 變動**：原本只讀 `news-data-store`，現在須額外讀 `news-events-store`，render helper 簽章與 callback decorator 都要更新
+  - 若沒有 event data 或 store 為空，維持現有 UI，不顯示錯誤
 
 **測試**
 - `news_anomaly`：z-score 正常命中、未命中、少於 min_history_days、stdev=0 fallback
@@ -244,6 +250,13 @@
 - [ ] `/news` timeline 清楚標示爆量事件
 - [ ] 主頁自選股訊號能在有命中時顯示異常提示，無資料時優雅降級
 
+### Phase 3a/3b/3c e2e 整合驗收
+
+各 sub-phase 均為 unit test，需另設一組整合測試確保串聯正確：
+- 給定 7 日 mock `YYYYMMDD.json`（含同 URL 跨日重複、含一日突發爆量主題）
+- 順序執行：`cleanup_old_news` → `iter_news_articles` → `build_event_timeline`（內含 `cluster_events` + `mark_event_anomalies`）
+- 驗收：產出的 `events.json` 包含正確 `daily_count`（時區無誤）、爆量事件被標記 `is_anomaly=true`、retention 外的檔案已刪除、`latest.json` 與 `events.json` 自身保留
+
 ---
 
 ### Phase 3d：RAG 問答側欄（最後做、預設關閉）
@@ -256,6 +269,8 @@
   - `news_rag_window_days: int = 30`
   - `news_rag_top_k: int = 8`
   - `news_rag_max_new_embeddings_per_day: int = 100`
+  - `news_rag_embedding_model: str = "text-embedding-004"`（Gemini embedding model）
+  - `news_rag_max_chat_history_turns: int = 6`（送入 prompt 的最近 user+assistant 輪數上限，避免多輪 chat prompt 暴漲）
 - 儲存檔
   - `data/news/rag_embeddings.npz`：embedding matrix
   - `data/news/rag_metadata.json`：每列 embedding 對應的 url、title、source、published_at、category、excerpt、content_hash
@@ -263,8 +278,11 @@
 **後端變更**
 - 新模組 `src/news/news_rag.py`
   - `build_or_update_index(historical_articles)`：只為 content hash 不存在的新文章建立 embedding；超過每日上限則跳過並記 warning
+  - **index garbage collection**：build/update 同時剔除 metadata 中 `published_at < now - news_rag_window_days` 的 row，並對 `rag_embeddings.npz` 做對應的 row 重寫，避免 index 無限膨脹
   - `retrieve(query, top_k=8)`：query embedding × cosine similarity，回傳含 score 的 citation chunks
   - `answer(query, chat_history)`：retrieve → 組 grounded prompt → Gemini 回答，回傳 `NewsRagAnswer(answer, citations, failed=False)`
+  - **chat_history 截斷**：傳入前先截到最近 `news_rag_max_chat_history_turns` 輪
+  - **citation validation**：LLM 回答中提到的 URL 必須屬於 `retrieve()` 結果集合；非屬集合的 URL 從 citations 移除（防 LLM 幻覺 URL）
   - backend 不可用、index 不存在、RAG disabled 時，回 graceful response，不丟到 UI
 - `src/news/news_models.py`：新增輕量模型
   - `NewsRagCitation(url, title, source, published_at, score)`
@@ -284,7 +302,10 @@
 
 **測試**
 - `build_or_update_index`：content_hash 去重、每日上限、metadata 與 matrix row 對齊
+- `build_or_update_index` GC：超出 `news_rag_window_days` 的 row 被剔除、剩餘 row 與 matrix index 仍對齊
 - `retrieve`：mock embedding，驗證 cosine 排序與 top_k
+- `answer` citation validation：LLM 回傳的 URL 不在 retrieve 集合時被剔除
+- `answer` chat_history 截斷：超過 `news_rag_max_chat_history_turns` 時 prompt 只含最近 N 輪
 - `answer`：mock retrieve + mock Gemini，驗證 citations、LLM 失敗 graceful response
 - disabled path：`news_rag_enabled=False` 時不建立 index、不呼叫 Gemini、不破壞 UI
 - UI callback：送出空字串、正常回答、失敗回答、多輪 history
