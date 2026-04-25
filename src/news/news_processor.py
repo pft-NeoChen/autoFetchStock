@@ -111,12 +111,24 @@ class NewsProcessor:
                 )
                 raw_by_category[cat] = []
 
-        # Aggregate-analysis phase：2 次 Gemini 呼叫
-        logger.info("開始全局重點分析 + 自選股影響分析")
+        # Aggregate-analysis phase：1 次全局 + N 批標籤 + 1 次自選股影響分析
+        logger.info("開始全局重點分析 + 自選股影響分析（two-stage）")
         global_brief = self._summarizer.summarize_global(raw_by_category)
         all_raw_articles = [a for arts in raw_by_category.values() for a in arts]
+
+        # Stage 1：批次標註每篇新聞與哪些自選股相關
+        tags = []
+        if favorites and all_raw_articles:
+            tags = self._summarizer.tag_articles(all_raw_articles, favorites)
+            stocks_hit = len({t.stock_id for t in tags})
+            logger.info(
+                "文章標籤完成：%d 個 (article, stock) 標籤，覆蓋 %d / %d 檔自選股",
+                len(tags), stocks_hit, len(favorites),
+            )
+
+        # Stage 2：以每檔股票各自的證據池產出最終訊號
         favorite_signals = self._summarizer.analyze_favorites_impact(
-            all_raw_articles, favorites
+            all_raw_articles, favorites, tags=tags,
         )
 
         duration = time.monotonic() - t_start
