@@ -1086,3 +1086,152 @@ html {
 .signal-bearish.fav-signal-label { background: #26A69A; color: #FFF; }
 .signal-neutral.fav-signal-label { background: #555; color: #FFF; }
 .fav-signal-reason { color: #AAA; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── News page scrolling ────────────────────────────────────────────── */
+
+/* /news standalone page: needs an explicit height so the inner content
+   becomes scrollable inside the fixed-height main-container. */
+.news-page {
+    height: calc(100vh - 100px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0 16px 16px;
+    box-sizing: border-box;
+}
+
+.news-page-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+    position: sticky;
+    top: 0;
+    background: var(--bg-primary);
+    z-index: 2;
+}
+
+.news-page-title {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 18px;
+}
+
+.news-refresh-button {
+    background-color: var(--color-accent);
+    color: #FFF;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.news-refresh-button:hover {
+    background-color: #1976D2;
+}
+
+.news-last-updated {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.news-category-content {
+    padding-top: 8px;
+}
+
+/* Stock-news tab inside main page: lives inside .tab-content (overflow:hidden, flex column).
+   Make it grow and scroll its overflow internally. */
+.news-articles-container {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.news-articles-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.news-article-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px 12px;
+}
+
+.news-article-header {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex-wrap: wrap;
+}
+
+.news-cat-badge {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+}
+
+.news-source { color: var(--text-secondary); }
+.news-pub-time { color: var(--text-muted); }
+
+.news-article-title {
+    display: block;
+    color: var(--text-primary);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    line-height: 1.4;
+}
+
+.news-article-title:hover {
+    color: var(--color-accent);
+    text-decoration: underline;
+}
+
+.news-article-summary {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+    margin: 0;
+}
+
+.no-news {
+    color: var(--text-muted);
+    text-align: center;
+    padding: 20px 0;
+    font-size: 13px;
+}
+
+/* Top nav bar (was unstyled — give it a baseline so the news page
+   height calc above is consistent across pages.) */
+.nav-bar {
+    display: flex;
+    gap: 16px;
+    padding: 10px 16px;
+    background-color: var(--bg-secondary);
+    border-radius: 8px;
+    margin-bottom: 12px;
+    flex-shrink: 0;
+}
+
+.nav-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    padding: 4px 10px;
+    border-radius: 4px;
+}
+
+.nav-link:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-tertiary);
+}

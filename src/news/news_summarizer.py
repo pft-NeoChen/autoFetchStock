@@ -466,11 +466,59 @@ class NewsSummarizer:
                     raw = raw.lstrip()[4:]
         return raw.strip()
 
-    def _parse_global_brief_response(self, raw: str) -> GlobalBrief:
+    @classmethod
+    def _extract_json_object(cls, raw: str) -> Optional[dict]:
+        """
+        Robustly extract a JSON object/array from an LLM response.
+
+        Handles:
+        - direct JSON
+        - ```json ... ``` code fences
+        - preamble/postamble text around the JSON (locates first { or [ and
+          balances brackets to find the matching close)
+        Returns None if no parseable JSON object is found.
+        """
+        candidate = cls._strip_code_fence(raw)
         try:
-            data = json.loads(self._strip_code_fence(raw))
-        except json.JSONDecodeError as exc:
-            logger.warning("全局重點 JSON 解析失敗: %s", exc)
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+        for opener, closer in (("{", "}"), ("[", "]")):
+            start = candidate.find(opener)
+            while start != -1:
+                depth = 0
+                in_str = False
+                esc = False
+                for i in range(start, len(candidate)):
+                    ch = candidate[i]
+                    if in_str:
+                        if esc:
+                            esc = False
+                        elif ch == "\\":
+                            esc = True
+                        elif ch == '"':
+                            in_str = False
+                        continue
+                    if ch == '"':
+                        in_str = True
+                    elif ch == opener:
+                        depth += 1
+                    elif ch == closer:
+                        depth -= 1
+                        if depth == 0:
+                            chunk = candidate[start:i + 1]
+                            try:
+                                return json.loads(chunk)
+                            except json.JSONDecodeError:
+                                break
+                start = candidate.find(opener, start + 1)
+        return None
+
+    def _parse_global_brief_response(self, raw: str) -> GlobalBrief:
+        data = self._extract_json_object(raw)
+        if data is None:
+            logger.warning("全局重點 JSON 解析失敗，回應前 300 字: %r", raw[:300])
             return GlobalBrief(failed=True, sentiment_reason="回應格式錯誤")
 
         highlights: List[CategoryHighlight] = []
@@ -505,10 +553,9 @@ class NewsSummarizer:
         favorites: List[StockInfo],
     ) -> List[FavoriteSignal]:
         fav_map = {s.stock_id: s for s in favorites}
-        try:
-            data = json.loads(self._strip_code_fence(raw))
-        except json.JSONDecodeError as exc:
-            logger.warning("自選股影響 JSON 解析失敗: %s", exc)
+        data = self._extract_json_object(raw)
+        if data is None:
+            logger.warning("自選股影響 JSON 解析失敗，回應前 300 字: %r", raw[:300])
             return [
                 FavoriteSignal(
                     stock_id=s.stock_id,
@@ -519,8 +566,14 @@ class NewsSummarizer:
                 for s in favorites
             ]
 
+        # Tolerate responses that drop the "signals" wrapper (a top-level array).
+        if isinstance(data, list):
+            entries = data
+        else:
+            entries = data.get("signals", [])
+
         by_id: dict = {}
-        for entry in data.get("signals", []):
+        for entry in entries:
             sid = str(entry.get("stock_id", "")).strip()
             if sid not in fav_map:
                 continue
