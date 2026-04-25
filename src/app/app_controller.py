@@ -144,6 +144,11 @@ class AppController:
         self.scheduler.add_news_cleanup_job(
             lambda: self.storage.cleanup_old_news(self.config.news_retention_days)
         )
+        self.scheduler.add_news_event_job(
+            lambda: self.news_processor.build_event_timeline(
+                self.config.news_history_window_days
+            )
+        )
         logger.debug("NewsProcessor initialized and news jobs registered")
 
     def _subscribe_saved_favorites(self) -> None:

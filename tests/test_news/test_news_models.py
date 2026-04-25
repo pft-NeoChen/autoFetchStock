@@ -12,11 +12,13 @@ import pytest
 from datetime import datetime, timezone
 
 from src.news.news_models import (
+    EventCluster,
     GlobalBrief,
     NewsArticle,
     NewsCategory,
     NewsCategoryResult,
     NewsDailyFile,
+    NewsEventFile,
     NewsRunResult,
     NewsRunStats,
     SectorHeat,
@@ -204,3 +206,73 @@ class TestGlobalBriefSectorHeats:
         }
         brief = GlobalBrief.from_dict(legacy)
         assert brief.sector_heats == []
+
+
+# ── Phase 3b: EventCluster / NewsEventFile ───────────────────────────────────
+
+class TestEventCluster:
+    def test_round_trip_preserves_event_fields(self):
+        cluster = EventCluster(
+            event_id="evt-1",
+            title="AI 供應鏈",
+            summary="AI 需求升溫",
+            keywords=["AI", "半導體"],
+            first_seen="20260424",
+            last_seen="20260425",
+            article_urls=["https://example.com/a"],
+            daily_count={"20260424": 1, "20260425": 3},
+            sectors=["AI"],
+            related_stock_ids=["2330"],
+            is_anomaly=True,
+            anomaly_score=2.5,
+            anomaly_reason="文章數高於基準",
+        )
+
+        restored = EventCluster.from_dict(cluster.to_dict())
+
+        assert restored.event_id == "evt-1"
+        assert restored.keywords == ["AI", "半導體"]
+        assert restored.daily_count == {"20260424": 1, "20260425": 3}
+        assert restored.is_anomaly is True
+        assert restored.anomaly_score == pytest.approx(2.5)
+
+    def test_from_dict_tolerates_bad_optional_values(self):
+        cluster = EventCluster.from_dict({
+            "event_id": "evt-1",
+            "title": "x",
+            "daily_count": {"20260425": "bad"},
+            "anomaly_score": "bad",
+        })
+
+        assert cluster.daily_count == {"20260425": 0}
+        assert cluster.anomaly_score == 0.0
+        assert cluster.is_anomaly is False
+
+
+class TestNewsEventFile:
+    def test_round_trip(self):
+        event_file = NewsEventFile(
+            generated_at=datetime(2026, 4, 25, 16, 5, tzinfo=timezone.utc),
+            window_start="20260419",
+            window_end="20260425",
+            clusters=[
+                EventCluster(event_id="evt-1", title="AI", daily_count={"20260425": 2}),
+            ],
+            source_article_count=10,
+        )
+
+        restored = NewsEventFile.from_dict(event_file.to_dict())
+
+        assert restored.generated_at == event_file.generated_at
+        assert restored.window_start == "20260419"
+        assert restored.window_end == "20260425"
+        assert restored.source_article_count == 10
+        assert restored.clusters[0].event_id == "evt-1"
+
+    def test_from_dict_tolerates_legacy_empty_payload(self):
+        restored = NewsEventFile.from_dict({})
+
+        assert restored.window_start == ""
+        assert restored.window_end == ""
+        assert restored.clusters == []
+        assert restored.source_article_count == 0

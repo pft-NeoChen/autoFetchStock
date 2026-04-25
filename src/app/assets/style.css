@@ -1136,6 +1136,78 @@ html {
     text-align: right;
 }
 
+.event-timeline {
+    margin: 12px 0;
+}
+
+.event-timeline-inner {
+    background: #1E1E1E;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.event-timeline-empty {
+    color: var(--text-muted);
+    font-size: 13px;
+    padding: 12px 0;
+}
+
+.event-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.event-item {
+    border-top: 1px solid #333;
+    padding-top: 8px;
+}
+
+.event-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.event-title {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.event-date-range {
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.event-summary {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+    margin: 4px 0 6px;
+}
+
+.event-source-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.event-source-link {
+    color: var(--color-accent);
+    font-size: 12px;
+    text-decoration: none;
+}
+
+.event-source-link:hover {
+    text-decoration: underline;
+}
+
 /* ── News page scrolling ────────────────────────────────────────────── */
 
 /* /news standalone page: needs an explicit height so the inner content

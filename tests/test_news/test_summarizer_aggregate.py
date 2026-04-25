@@ -2,7 +2,7 @@
 Unit tests for Phase 1 aggregate analysis methods on NewsSummarizer.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -12,6 +12,7 @@ from src.models import StockInfo
 from src.news.news_fetcher import RawArticle
 from src.news.news_models import FavoriteSignal, GlobalBrief, NewsCategory
 from src.news.news_summarizer import NewsSummarizer
+from tests.test_news.conftest import make_article
 
 
 @pytest.fixture
@@ -248,3 +249,85 @@ def test_analyze_favorites_impact_fallback_on_backend_exception(summarizer):
     assert len(signals) == 1
     assert signals[0].signal == "neutral"
     assert "分析失敗" in signals[0].reason
+
+
+# ── Phase 3b: event clustering ───────────────────────────────────────────────
+
+def test_cluster_events_parses_valid_response_and_generates_event_id(summarizer):
+    article = make_article(
+        title="台積電財報優於預期",
+        url="https://example.com/a",
+        related=["2330"],
+    )
+    summarizer._call_backend = lambda p: """{
+        "clusters": [
+            {
+                "title": "台積電財報",
+                "summary": "台積電財報優於預期",
+                "keywords": ["台積電", "財報"],
+                "article_urls": ["https://example.com/a"],
+                "sectors": ["半導體"],
+                "related_stock_ids": ["2330"]
+            }
+        ]
+    }"""
+
+    clusters = summarizer.cluster_events([article])
+
+    assert len(clusters) == 1
+    assert clusters[0].event_id
+    assert clusters[0].title == "台積電財報"
+    assert clusters[0].article_urls == ["https://example.com/a"]
+    assert clusters[0].related_stock_ids == ["2330"]
+
+
+def test_cluster_events_discards_unknown_urls(summarizer):
+    article = make_article(url="https://example.com/known")
+    summarizer._call_backend = lambda p: """{
+        "clusters": [
+            {"title": "x", "keywords": ["x"], "article_urls": ["https://bad.example/missing"]}
+        ]
+    }"""
+
+    assert summarizer.cluster_events([article]) == []
+
+
+def test_cluster_events_event_id_stable_for_same_title_and_keywords(summarizer):
+    raw = """{
+        "clusters": [
+            {"title": "AI 供應鏈", "keywords": ["AI", "半導體"], "article_urls": ["https://example.com/a"]}
+        ]
+    }"""
+    article = make_article(url="https://example.com/a")
+    summarizer._call_backend = lambda p: raw
+
+    first = summarizer.cluster_events([article])[0].event_id
+    second = summarizer.cluster_events([article])[0].event_id
+
+    assert first == second
+
+
+def test_cluster_events_limits_prompt_to_recent_800_articles(summarizer):
+    captured = {}
+
+    def fake_call(prompt):
+        captured["prompt"] = prompt
+        return '{"clusters": []}'
+
+    summarizer._call_backend = fake_call
+    base = datetime(2026, 4, 1, tzinfo=timezone.utc)
+    articles = [
+        make_article(
+            title=f"Article {idx}",
+            url=f"https://example.com/{idx}",
+            published_at=base + timedelta(minutes=idx),
+        )
+        for idx in range(805)
+    ]
+
+    summarizer.cluster_events(articles)
+
+    prompt = captured["prompt"]
+    assert "URL: https://example.com/804\n" in prompt
+    assert "URL: https://example.com/5\n" in prompt
+    assert "URL: https://example.com/4\n" not in prompt

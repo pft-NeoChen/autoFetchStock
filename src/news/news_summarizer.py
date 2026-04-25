@@ -10,6 +10,7 @@ Fallback: when news_summarizer_backend == "gemini-cli", uses subprocess.
 """
 
 import json
+import hashlib
 import logging
 import os
 import re
@@ -27,6 +28,7 @@ from src.models import StockInfo
 from src.news.news_fetcher import RawArticle
 from src.news.news_models import (
     CategoryHighlight,
+    EventCluster,
     FavoriteSignal,
     GlobalBrief,
     NewsArticle,
@@ -239,8 +241,40 @@ _FAVORITES_IMPACT_V2_PROMPT = """\
 }}
 """
 
+_EVENT_CLUSTER_PROMPT = """\
+你是一位財經新聞事件分析師。以下是過去 {window_days} 日的去重新聞清單。
+請把這些新聞聚類成「同一議題跨日演進」事件。
+
+規則：
+- 最多輸出 50 個事件，優先保留與市場、產業、股市、重大政策相關的事件
+- 每個事件必須引用至少 1 個下方新聞 URL
+- article_urls 只能使用下方輸入中存在的 URL，不要捏造 URL
+- keywords 請給 2~6 個短詞，用於事件跨日追蹤
+- sectors 可填 AI、半導體、電動車、金融、傳產、能源、航運、生技等，沒有則空陣列
+- related_stock_ids 只能使用新聞中出現的 related_stock_ids，沒有則空陣列
+
+新聞清單：
+{articles}
+
+請嚴格以下列 JSON 格式回應（不要加 markdown 程式碼框、不要加其他文字）：
+{{
+  "clusters": [
+    {{
+      "title": "事件標題",
+      "summary": "事件摘要（≤120 字）",
+      "keywords": ["關鍵詞1", "關鍵詞2"],
+      "article_urls": ["https://..."],
+      "sectors": ["半導體"],
+      "related_stock_ids": ["2330"]
+    }}
+  ]
+}}
+"""
+
 _MAX_SUMMARY_LEN = 200
 _MAX_CATEGORY_SUMMARY_LEN = 500
+_MAX_EVENT_CLUSTER_INPUT_ARTICLES = 800
+_MAX_EVENT_CLUSTERS = 50
 
 
 @dataclass
@@ -540,6 +574,38 @@ class NewsSummarizer:
             for s in favorites
         ]
 
+    # ── Phase 3b：事件聚類 ──────────────────────────────────────────────────
+
+    def cluster_events(
+        self,
+        articles: List[NewsArticle],
+        window_days: int = 7,
+    ) -> List[EventCluster]:
+        """
+        Cluster historical articles into cross-day events with one Gemini call.
+
+        The parser only accepts URLs present in the input and generates event_id
+        locally, so LLM output cannot create references to non-existent articles.
+        """
+        valid_articles = [a for a in articles if a.url and a.title]
+        if not valid_articles:
+            return []
+
+        valid_articles.sort(key=self._article_sort_key, reverse=True)
+        selected = valid_articles[:_MAX_EVENT_CLUSTER_INPUT_ARTICLES]
+        articles_block = self._format_articles_for_event_clustering(selected)
+        prompt = _EVENT_CLUSTER_PROMPT.format(
+            window_days=window_days,
+            articles=articles_block[:160000],
+        )
+
+        try:
+            raw = self._call_backend(prompt)
+            return self._parse_event_cluster_response(raw, selected)
+        except Exception as exc:
+            logger.warning("事件聚類失敗: %s", exc)
+            return []
+
     # ── 私有方法 ──────────────────────────────────────────────────────────────
 
     def _call_backend(self, prompt: str) -> str:
@@ -725,6 +791,25 @@ class NewsSummarizer:
                 )
         return "\n".join(blocks)
 
+    @staticmethod
+    def _format_articles_for_event_clustering(articles: List[NewsArticle]) -> str:
+        """Render historical articles for the event-clustering prompt."""
+        lines: List[str] = []
+        for a in articles:
+            excerpt = (a.excerpt or a.summary or a.full_text[:200]).replace("\n", " ").strip()
+            related = ",".join(a.related_stock_ids) if a.related_stock_ids else "none"
+            published_at = a.published_at.isoformat()
+            lines.append(
+                f"- URL: {a.url}\n"
+                f"  published_at: {published_at}\n"
+                f"  category: {a.category.value}\n"
+                f"  source: {a.source}\n"
+                f"  related_stock_ids: {related}\n"
+                f"  title: {a.title}\n"
+                f"  excerpt: {excerpt}"
+            )
+        return "\n".join(lines)
+
     def _parse_tag_response(
         self,
         raw: str,
@@ -869,6 +954,88 @@ class NewsSummarizer:
             sector_heats=sectors,
             failed=False,
         )
+
+    def _parse_event_cluster_response(
+        self,
+        raw: str,
+        input_articles: List[NewsArticle],
+    ) -> List[EventCluster]:
+        """Parse event-clustering JSON and discard unsupported URLs."""
+        data = self._extract_json_object(raw)
+        if data is None:
+            logger.warning("事件聚類 JSON 解析失敗，回應前 300 字: %r", raw[:300])
+            return []
+
+        if isinstance(data, list):
+            entries = data
+        else:
+            entries = data.get("clusters", [])
+
+        valid_urls = {a.url for a in input_articles}
+        valid_stock_ids = {
+            sid
+            for article in input_articles
+            for sid in article.related_stock_ids
+        }
+        clusters: List[EventCluster] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            urls = []
+            for url in entry.get("article_urls", []):
+                url = str(url).strip()
+                if url in valid_urls and url not in urls:
+                    urls.append(url)
+            if not urls:
+                continue
+
+            keywords = [
+                str(k).strip()
+                for k in entry.get("keywords", [])
+                if str(k).strip()
+            ][:6]
+            title = str(entry.get("title", "")).strip()
+            if not title:
+                title = next((a.title for a in input_articles if a.url == urls[0]), "")
+            sectors = [
+                str(s).strip()
+                for s in entry.get("sectors", [])
+                if str(s).strip()
+            ][:8]
+            related_stock_ids = [
+                str(s).strip()
+                for s in entry.get("related_stock_ids", [])
+                if str(s).strip() in valid_stock_ids
+            ][:20]
+            clusters.append(EventCluster(
+                event_id=self._stable_event_id(title, keywords),
+                title=title[:80],
+                summary=str(entry.get("summary", "")).strip()[:160],
+                keywords=keywords,
+                article_urls=urls,
+                sectors=list(dict.fromkeys(sectors)),
+                related_stock_ids=list(dict.fromkeys(related_stock_ids)),
+            ))
+            if len(clusters) >= _MAX_EVENT_CLUSTERS:
+                break
+        return clusters
+
+    @staticmethod
+    def _stable_event_id(title: str, keywords: List[str]) -> str:
+        normalized = NewsSummarizer._normalize_event_text(title)
+        keyword_part = "|".join(
+            sorted(NewsSummarizer._normalize_event_text(k) for k in keywords if k)
+        )
+        digest = hashlib.sha1(f"{keyword_part}|{normalized}".encode("utf-8")).hexdigest()
+        return digest[:12]
+
+    @staticmethod
+    def _normalize_event_text(text: str) -> str:
+        return re.sub(r"\s+", "", str(text).lower())
+
+    @staticmethod
+    def _article_sort_key(article: NewsArticle) -> str:
+        return article.published_at.isoformat()
 
     def _parse_favorites_impact_response(
         self,

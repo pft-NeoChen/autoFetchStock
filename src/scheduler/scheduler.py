@@ -321,6 +321,43 @@ class Scheduler:
                 f"News cleanup job failed: {e}\n{traceback.format_exc()}"
             )
 
+    def add_news_event_job(self, event_callback: Callable[[], object]) -> bool:
+        """
+        Add the daily news event timeline build job.
+
+        Runs at 16:05 Asia/Taipei, after the regular 08:00-15:00 hourly news
+        collection window.
+        """
+        try:
+            self._scheduler.add_job(
+                self._news_event_job,
+                trigger=CronTrigger(
+                    hour=16,
+                    minute=5,
+                    timezone=TW_TIMEZONE,
+                ),
+                id="news_events",
+                kwargs={"event_callback": event_callback},
+                name="News event timeline",
+                replace_existing=True,
+            )
+            logger.info("Registered daily news event job (16:05)")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to register news event job: {e}")
+            return False
+
+    def _news_event_job(self, event_callback: Callable[[], object]) -> None:
+        """Execute the news event job without crashing the scheduler."""
+        logger.info("Starting scheduled news event timeline build")
+        try:
+            event_callback()
+            logger.info("Scheduled news event timeline build completed")
+        except Exception as e:
+            logger.error(
+                f"News event timeline job failed: {e}\n{traceback.format_exc()}"
+            )
+
     def _fetch_job(self, stock_id: str) -> None:
         """
         Execute fetch job for a stock (REQ-063).

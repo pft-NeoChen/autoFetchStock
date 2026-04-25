@@ -147,7 +147,7 @@
 
 ---
 
-### Phase 3b：事件 timeline（同議題跨日演進）
+### Phase 3b：事件 timeline（同議題跨日演進）✅ **已完成**（2026-04-25）
 
 **目標**：把過去 N 日（預設 7）的去重新聞聚類成「事件」，產出可被 UI 直接渲染的 `events.json`，呈現同一議題跨日演進。
 
@@ -207,11 +207,11 @@
 - UI helper：空 events、正常 events、文章連結 render
 
 **驗收標準**
-- [ ] `data/news/events.json` 產出且符合 `NewsEventFile`
-- [ ] 同一批 input 重跑時 `event_id` 穩定
-- [ ] 同 URL 多 run 不會讓 `daily_count` 膨脹
-- [ ] `/news` 顯示議題演進圖與事件摘要
-- [ ] event job 每日最多新增 1 次 Gemini call，不影響每小時新聞 run
+- [x] `data/news/events.json` 產出且符合 `NewsEventFile`
+- [x] 同一批 input 重跑時 `event_id` 穩定
+- [x] 同 URL 多 run 不會讓 `daily_count` 膨脹
+- [x] `/news` 顯示議題演進圖與事件摘要
+- [x] event job 每日最多新增 1 次 Gemini call，不影響每小時新聞 run
 
 ---
 

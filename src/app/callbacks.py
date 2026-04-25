@@ -1229,6 +1229,13 @@ class CallbackManager:
             return None
         return run_result.to_dict()
 
+    def _load_news_events_store_data(self) -> Optional[dict]:
+        """Load the latest news event timeline sidecar."""
+        event_file = self.storage.load_news_events()
+        if event_file is None:
+            return None
+        return event_file.to_dict()
+
     def _save_quote_as_tick(self, quote: RealtimeQuote) -> None:
         """
         Save a realtime quote as an intraday tick.
@@ -1413,6 +1420,21 @@ class CallbackManager:
                 logger.warning(f"Failed to load latest news: {e}")
                 return no_update
 
+        # ── Phase 3b event timeline store refresh ───────────────────────────
+        @self.app.callback(
+            Output("news-events-store", "data"),
+            Input("news-ticker-interval", "n_intervals"),
+            Input("news-refresh-button", "n_clicks", allow_optional=True),
+            prevent_initial_call=False,
+        )
+        def refresh_news_events_store(n_intervals, n_clicks):
+            """Load latest news event timeline into a dedicated store."""
+            try:
+                return self._load_news_events_store_data()
+            except Exception as e:
+                logger.warning(f"Failed to load news events: {e}")
+                return no_update
+
         # ── TASK-154  Stock news tab (main page) ─────────────────────────────
         @self.app.callback(
             Output("stock-news-articles", "children"),
@@ -1554,6 +1576,15 @@ class CallbackManager:
                     className="sector-heatmap-empty",
                 )
             return _render_sector_heatmap(sectors)
+
+        # ── Phase 3b 議題演進 timeline（/news 頁） ───────────────────────────
+        @self.app.callback(
+            Output("event-timeline", "children"),
+            Input("news-events-store", "data"),
+            prevent_initial_call=False,
+        )
+        def render_event_timeline(news_events: dict):
+            return _render_event_timeline(news_events)
 
 
 # ── Module-level news helper functions ──────────────────────────────────────
@@ -1895,6 +1926,94 @@ def _render_sector_heatmap(sectors: List[dict]) -> html.Div:
             ),
         ],
         className="sector-heatmap-inner",
+    )
+
+
+def _render_event_timeline(event_data: Optional[dict]) -> html.Div:
+    """Render Phase 3b cross-day event timeline."""
+    clusters = (event_data or {}).get("clusters") or []
+    clusters = [c for c in clusters if c.get("title") and c.get("daily_count")]
+    if not clusters:
+        return html.Div("議題演進尚未產生", className="event-timeline-empty")
+
+    clusters = clusters[:10]
+    dates = sorted({
+        day
+        for cluster in clusters
+        for day in (cluster.get("daily_count") or {}).keys()
+    })
+    if not dates:
+        return html.Div("議題演進尚未產生", className="event-timeline-empty")
+
+    fig = go.Figure()
+    for cluster in clusters:
+        counts = cluster.get("daily_count") or {}
+        fig.add_trace(go.Bar(
+            name=cluster.get("title", "")[:28],
+            x=dates,
+            y=[int(counts.get(day, 0) or 0) for day in dates],
+            hovertemplate="<b>%{fullData.name}</b><br>%{x}: %{y} 篇<extra></extra>",
+        ))
+    fig.update_layout(
+        barmode="stack",
+        paper_bgcolor="#1E1E1E",
+        plot_bgcolor="#1E1E1E",
+        font={"color": "#FFFFFF"},
+        margin={"l": 40, "r": 20, "t": 8, "b": 48},
+        height=260,
+        xaxis={"tickfont": {"color": "#CCCCCC"}},
+        yaxis={
+            "title": {"text": "文章數", "font": {"color": "#CCCCCC"}},
+            "gridcolor": "#333333",
+            "tickfont": {"color": "#CCCCCC"},
+        },
+        legend={"orientation": "h", "y": -0.25, "font": {"size": 10}},
+    )
+
+    event_items = []
+    for cluster in clusters[:6]:
+        urls = cluster.get("article_urls") or []
+        event_items.append(html.Div(
+            [
+                html.Div(
+                    [
+                        html.Span(cluster.get("title", ""), className="event-title"),
+                        html.Span(
+                            f"{cluster.get('first_seen', '')}–{cluster.get('last_seen', '')}",
+                            className="event-date-range",
+                        ),
+                    ],
+                    className="event-header",
+                ),
+                html.P(cluster.get("summary", ""), className="event-summary"),
+                html.Div(
+                    [
+                        html.A(
+                            f"來源 {idx + 1}",
+                            href=url,
+                            target="_blank",
+                            rel="noopener noreferrer",
+                            className="event-source-link",
+                        )
+                        for idx, url in enumerate(urls[:3])
+                    ],
+                    className="event-source-links",
+                ),
+            ],
+            className="event-item",
+        ))
+
+    return html.Div(
+        [
+            html.H3("議題演進", className="dashboard-title"),
+            dcc.Graph(
+                figure=fig,
+                config={"displayModeBar": False, "responsive": True},
+                className="event-timeline-graph",
+            ),
+            html.Div(event_items, className="event-list"),
+        ],
+        className="event-timeline-inner",
     )
 
 

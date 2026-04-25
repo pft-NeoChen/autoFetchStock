@@ -159,6 +159,7 @@ def create_news_page_layout() -> html.Div:
                     ),
                 ],
             ),
+            html.Div(id="event-timeline", className="event-timeline"),
             dcc.Tabs(
                 id="news-category-tabs",
                 value="INTERNATIONAL",
@@ -188,6 +189,9 @@ def _create_hidden_components() -> html.Div:
 
             # Latest news data cache (shared between ticker and news tab)
             dcc.Store(id="news-data-store", data=None),
+
+            # News event timeline cache (Phase 3b)
+            dcc.Store(id="news-events-store", data=None),
 
             # Auto-update interval (1 second for real-time feel)
             dcc.Interval(
@@ -726,6 +730,8 @@ COMPONENT_IDS = {
     "favorite_signal_strip": "favorite-signal-strip",
     "market_sentiment_gauge": "market-sentiment-gauge",
     "sector_heatmap": "sector-heatmap",
+    "news_events_store": "news-events-store",
+    "event_timeline": "event-timeline",
 
     # Ticker
     "news_ticker_bar": "news-ticker-bar",
