@@ -1535,16 +1535,17 @@ class CallbackManager:
         @self.app.callback(
             Output("favorite-signal-strip", "children"),
             Input("news-data-store", "data"),
+            Input("news-events-store", "data"),
             Input("app-state-store", "data"),
             prevent_initial_call=False,
         )
-        def render_favorite_signals(news_data: dict, app_state: dict):
+        def render_favorite_signals(news_data: dict, news_events: dict, app_state: dict):
             if not news_data:
                 return ""
             signals = news_data.get("favorite_signals") or []
             if not signals:
                 return ""
-            return _render_favorite_signal_strip(signals)
+            return _render_favorite_signal_strip(signals, news_events)
 
         # ── Phase 2 市場情緒儀表板（/news 頁） ────────────────────────────────
         @self.app.callback(
@@ -1948,8 +1949,11 @@ def _render_event_timeline(event_data: Optional[dict]) -> html.Div:
     fig = go.Figure()
     for cluster in clusters:
         counts = cluster.get("daily_count") or {}
+        title = cluster.get("title", "")[:28]
+        if cluster.get("is_anomaly"):
+            title = f"{title} 爆量"
         fig.add_trace(go.Bar(
-            name=cluster.get("title", "")[:28],
+            name=title,
             x=dates,
             y=[int(counts.get(day, 0) or 0) for day in dates],
             hovertemplate="<b>%{fullData.name}</b><br>%{x}: %{y} 篇<extra></extra>",
@@ -1978,6 +1982,7 @@ def _render_event_timeline(event_data: Optional[dict]) -> html.Div:
                 html.Div(
                     [
                         html.Span(cluster.get("title", ""), className="event-title"),
+                        html.Span("爆量", className="event-anomaly-badge") if cluster.get("is_anomaly") else None,
                         html.Span(
                             f"{cluster.get('first_seen', '')}–{cluster.get('last_seen', '')}",
                             className="event-date-range",
@@ -2017,20 +2022,26 @@ def _render_event_timeline(event_data: Optional[dict]) -> html.Div:
     )
 
 
-def _render_favorite_signal_strip(signals: List[dict]) -> html.Div:
+def _render_favorite_signal_strip(
+    signals: List[dict],
+    event_data: Optional[dict] = None,
+) -> html.Div:
     """Render the 自選股訊號列 (horizontal strip) on main page."""
+    anomaly_stock_ids = _collect_anomaly_stock_ids(event_data)
     items = []
     for s in signals:
         style = _SIGNAL_STYLES.get(s.get("signal", "neutral"), _SIGNAL_STYLES["neutral"])
+        stock_id = s.get("stock_id", "")
         items.append(
             html.Div(
                 [
                     html.Span(style["emoji"], className="fav-signal-emoji"),
                     html.Span(
-                        f"{s.get('stock_id', '')} {s.get('stock_name', '')}",
+                        f"{stock_id} {s.get('stock_name', '')}",
                         className="fav-signal-stock",
                     ),
                     html.Span(style["label"], className=f"fav-signal-label {style['cls']}"),
+                    html.Span("爆量", className="fav-signal-anomaly") if stock_id in anomaly_stock_ids else None,
                     html.Span(s.get("reason", ""), className="fav-signal-reason"),
                 ],
                 className=f"fav-signal-item {style['cls']}",
@@ -2038,6 +2049,16 @@ def _render_favorite_signal_strip(signals: List[dict]) -> html.Div:
             )
         )
     return html.Div(items, className="fav-signal-items")
+
+
+def _collect_anomaly_stock_ids(event_data: Optional[dict]) -> set:
+    """Collect stock IDs linked to anomalous event clusters."""
+    stock_ids = set()
+    for cluster in (event_data or {}).get("clusters", []) or []:
+        if not cluster.get("is_anomaly"):
+            continue
+        stock_ids.update(str(s) for s in cluster.get("related_stock_ids", []) if str(s))
+    return stock_ids
 
 
 def _collect_ticker_headlines(
