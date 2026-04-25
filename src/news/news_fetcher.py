@@ -151,7 +151,8 @@ class NewsFetcher:
                 for art in articles:
                     if art.url not in seen_urls and len(results) < max_articles:
                         seen_urls.add(art.url)
-                        art.full_text, art.full_text_fetched = self.fetch_full_text(art.url)
+                        if self._should_fetch_full_text(art):
+                            art.full_text, art.full_text_fetched = self.fetch_full_text(art.url)
                         results.append(art)
             except Exception as exc:
                 state.record_failure()
@@ -163,7 +164,7 @@ class NewsFetcher:
     def fetch_stock_news(
         self,
         stock_info: StockInfo,
-        max_articles: int = 10,
+        max_articles: Optional[int] = None,
     ) -> Tuple[List[RawArticle], NewsCategory]:
         """
         Fetch news for a specific stock.
@@ -183,12 +184,16 @@ class NewsFetcher:
             logger.info("個股來源停用中，跳過 %s", stock_info.stock_id)
             return [], category
 
+        if max_articles is None:
+            max_articles = getattr(self._config, "news_max_articles_per_stock", 5)
+
         try:
             articles = self.fetch_rss(url)
             state.record_success()
             results = []
             for art in articles[:max_articles]:
-                art.full_text, art.full_text_fetched = self.fetch_full_text(art.url)
+                if self._should_fetch_full_text(art):
+                    art.full_text, art.full_text_fetched = self.fetch_full_text(art.url)
                 results.append(art)
             return results, category
         except Exception as exc:
@@ -433,6 +438,20 @@ class NewsFetcher:
         else:
             text = self._strip_html(cleaned)
         return text[:8000]  # cap at 8000 chars to keep token usage reasonable
+
+    def _should_fetch_full_text(self, art: RawArticle) -> bool:
+        """
+        Per-article full-text fetching is disabled by default because:
+        - It triggers one extra HTTP request per article (with 2s rate limit), which makes
+          a single category take many minutes.
+        - Downstream summarisation only uses full_text as an excerpt fallback.
+
+        Set NEWS_FETCH_FULL_TEXT=true to opt back in (or pass news_fetch_full_text=True
+        in AppConfig). Even when on, we skip when the RSS excerpt is already substantial.
+        """
+        if not getattr(self._config, "news_fetch_full_text", False):
+            return False
+        return len(art.excerpt or "") < 80
 
     def _rate_limit(self, url: str) -> None:
         """Enforce minimum 2-second interval between requests to the same domain."""

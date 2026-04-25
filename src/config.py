@@ -85,6 +85,12 @@ class AppConfig:
     news_request_interval: float = 2.0   # 同網域請求間隔（秒）
     news_summarizer_timeout: int = 30     # 摘要 API 逾時（秒）
     news_max_run_minutes: int = 30        # 單次執行時間上限（分鐘）
+    # 是否逐篇抓全文（極慢且非必要：摘要與分析皆用 RSS excerpt 即可）
+    news_fetch_full_text: bool = field(
+        default_factory=lambda: os.getenv("NEWS_FETCH_FULL_TEXT", "false").lower() == "true"
+    )
+    # 個股分類每檔最多抓幾篇（避免最愛太多時超慢）
+    news_max_articles_per_stock: int = 5
 
     def get_shioaji_credentials(self) -> tuple[str, str]:
         """根據目前的模擬狀態回傳對應的 API Key 與 Secret."""
