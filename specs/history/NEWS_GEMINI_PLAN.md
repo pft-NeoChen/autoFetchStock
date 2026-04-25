@@ -117,21 +117,21 @@
 - **LLM 呼叫預算分層**：每小時新聞 run 維持目前呼叫；事件聚類每日最多 1 次 Gemini call；異常偵測純統計、0 LLM call；RAG 預設關閉，只有啟用後才做 embedding 與 answer call。
 - **可回復與可降級**：任何歷史檔損毀、LLM 失敗、RAG index 不存在，都應回空資料或停用 UI，不影響現有新聞頁與主頁自選股訊號。
 
-### Phase 3a：歷史資料基礎建設 ⬅️ **先做**
+### Phase 3a：歷史資料基礎建設 ✅ **已完成**（2026-04-25）
 
 **目標**：讓 `data/news/YYYYMMDD.json` 可列舉、可區間讀取、可清理，作為後續 timeline / anomaly / RAG 的唯一歷史語料來源。
 
 **後端變更**
-- `src/config.py`：新增設定
+- `src/config.py`：新增設定 ✅
   - `news_retention_days: int = 30`，可用 `NEWS_RETENTION_DAYS` override
   - `news_history_window_days: int = 7`，供 event timeline / anomaly 預設使用
-- `src/storage/data_storage.py`：新增歷史檔 helper
+- `src/storage/data_storage.py`：新增歷史檔 helper ✅
   - `list_news_dates() -> List[str]`：只回傳符合 `^\d{8}\.json$` 的日期檔，排除 `latest.json`、`events.json`、暫存檔，結果升冪排序
   - `load_news_range(start_date: str, end_date: str) -> List[NewsDailyFile]`：逐日讀取，單檔 parse 失敗只記 warning 並跳過
   - `iter_news_articles(start_date, end_date, dedupe=True)` 或同等私有 helper：flatten `runs -> categories -> articles`，以 URL 去重；**dedupe 規則**：同 URL 多次出現時，保留**最後一次出現的 run 的 article 物件**（`related_stock_ids`、`summary` 取最後版本，因為通常累積最完整）。**歸日規則**：article 歸屬日期 = `published_at` 轉 Asia/Taipei 後的 `YYYYMMDD`，給 Phase 3b `daily_count` 共用，避免時區錯位
   - `cleanup_old_news(retention_days: int, now: Optional[date] = None) -> int`：實作採**白名單 match-then-delete**——只刪除符合 `^\d{8}\.json$` 且日期早於 cutoff 的檔案；任何不符合此 regex 的檔案（含 `latest.json`、`events.json`、`rag_*.json`、`rag_*.npz`、未來新增的 sidecar）一律保留
-- `src/scheduler/scheduler.py`：新增 `add_news_cleanup_job(cleanup_callback)`，每日 23:55 Asia/Taipei 觸發
-- `src/app/app_controller.py`：註冊 cleanup job，callback 呼叫 `storage.cleanup_old_news(config.news_retention_days)`
+- `src/scheduler/scheduler.py`：新增 `add_news_cleanup_job(cleanup_callback)`，每日 23:55 Asia/Taipei 觸發 ✅
+- `src/app/app_controller.py`：註冊 cleanup job，callback 呼叫 `storage.cleanup_old_news(config.news_retention_days)` ✅
 
 **測試**
 - `cleanup_old_news`：用 `tmp_path` 建立日期檔、`latest.json`、`events.json`、非日期檔，驗證 cutoff 邊界與保留規則
@@ -140,10 +140,10 @@
 - article flatten/dedupe helper：同 URL 多 run 只留最新文章，跨分類重複 URL 不重複計數
 
 **驗收標準**
-- [ ] `data/news/` 只清掉超過 retention 的日期檔，`latest.json` / `events.json` / index 檔不被刪
-- [ ] 可以從任意日期區間載入 `NewsDailyFile`，單檔損毀不會中斷整批
-- [ ] flatten 後的歷史文章沒有同 URL 重複
-- [ ] 單元測試 pass
+- [x] `data/news/` 只清掉超過 retention 的日期檔，`latest.json` / `events.json` / index 檔不被刪
+- [x] 可以從任意日期區間載入 `NewsDailyFile`，單檔損毀不會中斷整批
+- [x] flatten 後的歷史文章沒有同 URL 重複
+- [x] 單元測試 pass
 
 ---
 

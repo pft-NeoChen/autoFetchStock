@@ -284,6 +284,43 @@ class Scheduler:
                 f"News collection job failed: {e}\n{traceback.format_exc()}"
             )
 
+    def add_news_cleanup_job(self, cleanup_callback: Callable[[], int]) -> bool:
+        """
+        Add the daily news history cleanup job.
+
+        Runs at 23:55 Asia/Taipei every day. The callback should return the
+        number of deleted daily news files.
+        """
+        try:
+            self._scheduler.add_job(
+                self._news_cleanup_job,
+                trigger=CronTrigger(
+                    hour=23,
+                    minute=55,
+                    timezone=TW_TIMEZONE,
+                ),
+                id="news_cleanup",
+                kwargs={"cleanup_callback": cleanup_callback},
+                name="News history cleanup",
+                replace_existing=True,
+            )
+            logger.info("Registered daily news cleanup job (23:55)")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to register news cleanup job: {e}")
+            return False
+
+    def _news_cleanup_job(self, cleanup_callback: Callable[[], int]) -> None:
+        """Execute the news cleanup job without crashing the scheduler."""
+        logger.info("Starting scheduled news cleanup")
+        try:
+            deleted_count = cleanup_callback()
+            logger.info("Scheduled news cleanup completed: %d files deleted", deleted_count)
+        except Exception as e:
+            logger.error(
+                f"News cleanup job failed: {e}\n{traceback.format_exc()}"
+            )
+
     def _fetch_job(self, stock_id: str) -> None:
         """
         Execute fetch job for a stock (REQ-063).

@@ -14,6 +14,18 @@ import logging.config
 import os
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read a positive integer from env, falling back to default."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
 @dataclass
 class AppConfig:
     """Application configuration settings."""
@@ -91,6 +103,13 @@ class AppConfig:
     )
     # 個股分類每檔最多抓幾篇（避免最愛太多時超慢）
     news_max_articles_per_stock: int = 5
+    # News history settings
+    news_retention_days: int = field(
+        default_factory=lambda: _env_int("NEWS_RETENTION_DAYS", 30)
+    )
+    news_history_window_days: int = field(
+        default_factory=lambda: _env_int("NEWS_HISTORY_WINDOW_DAYS", 7)
+    )
 
     def get_shioaji_credentials(self) -> tuple[str, str]:
         """根據目前的模擬狀態回傳對應的 API Key 與 Secret."""

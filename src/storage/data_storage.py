@@ -14,11 +14,13 @@ This module handles all local JSON file operations:
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from src.models import (
     DailyOHLC,
@@ -32,6 +34,8 @@ from src.exceptions import (
 )
 
 logger = logging.getLogger("autofetchstock.storage")
+_NEWS_DATE_FILE_RE = re.compile(r"^\d{8}\.json$")
+_TW_TIMEZONE = ZoneInfo("Asia/Taipei")
 
 
 class DataStorage:
@@ -751,3 +755,148 @@ class DataStorage:
         except Exception as e:
             logger.error(f"Failed to parse latest news file: {e}")
             return None
+
+    def list_news_dates(self) -> List[str]:
+        """
+        List available daily news files.
+
+        Only files named YYYYMMDD.json are returned. Sidecar files such as
+        latest.json, events.json, and future RAG index files are ignored.
+        """
+        dates: List[str] = []
+        for file_path in self.news_dir.glob("*.json"):
+            if _NEWS_DATE_FILE_RE.match(file_path.name):
+                dates.append(file_path.stem)
+        return sorted(dates)
+
+    def load_news_range(
+        self,
+        start_date: str,
+        end_date: str,
+    ) -> "List[NewsDailyFile]":
+        """
+        Load daily news files in an inclusive YYYYMMDD date range.
+
+        Missing or corrupted files are skipped so one bad historical file does
+        not break timeline, anomaly, or RAG jobs.
+        """
+        if not start_date or not end_date or start_date > end_date:
+            return []
+
+        daily_files = []
+        for date_str in self.list_news_dates():
+            if start_date <= date_str <= end_date:
+                daily = self.load_news(date_str)
+                if daily is None:
+                    logger.warning("Skipping unreadable news file for date %s", date_str)
+                    continue
+                daily_files.append(daily)
+        return daily_files
+
+    def iter_news_articles(
+        self,
+        start_date: str,
+        end_date: str,
+        dedupe: bool = True,
+    ) -> "Iterator[NewsArticle]":
+        """
+        Iterate flattened news articles from daily files in an inclusive range.
+
+        With dedupe=True, articles with the same URL keep the last occurrence
+        encountered across daily files and runs. This prevents hourly news runs
+        from inflating historical event counts while preserving the most recent
+        article metadata.
+        """
+        daily_files = self.load_news_range(start_date, end_date)
+
+        if not dedupe:
+            for daily in daily_files:
+                yield from self._iter_news_daily_articles(daily)
+            return
+
+        by_key = {}
+        for daily in daily_files:
+            for article in self._iter_news_daily_articles(daily):
+                key = self._news_article_dedupe_key(article)
+                if key in by_key:
+                    # Move the key to the end so iteration order reflects the
+                    # final run where this article appeared.
+                    by_key.pop(key)
+                by_key[key] = article
+
+        yield from by_key.values()
+
+    def cleanup_old_news(
+        self,
+        retention_days: int,
+        now: Optional[date] = None,
+    ) -> int:
+        """
+        Delete daily news files older than the retention cutoff.
+
+        This method uses a whitelist delete rule: only YYYYMMDD.json files can
+        be removed. latest.json, events.json, RAG files, temp files, and any
+        future sidecars are always preserved.
+        """
+        try:
+            retention_days = int(retention_days)
+        except (TypeError, ValueError):
+            logger.warning("Invalid news retention_days=%r; skipping cleanup", retention_days)
+            return 0
+        if retention_days <= 0:
+            logger.warning("Non-positive news retention_days=%r; skipping cleanup", retention_days)
+            return 0
+
+        today = now or datetime.now(_TW_TIMEZONE).date()
+        cutoff_date = today - timedelta(days=retention_days)
+        deleted_count = 0
+
+        for file_path in self.news_dir.glob("*.json"):
+            if not _NEWS_DATE_FILE_RE.match(file_path.name):
+                continue
+            try:
+                file_date = datetime.strptime(file_path.stem, "%Y%m%d").date()
+            except ValueError:
+                continue
+            if file_date >= cutoff_date:
+                continue
+            try:
+                file_path.unlink()
+                deleted_count += 1
+            except OSError as exc:
+                logger.warning("Failed to delete old news file %s: %s", file_path, exc)
+
+        if deleted_count:
+            logger.info("Cleaned up %d old news files", deleted_count)
+        return deleted_count
+
+    @staticmethod
+    def news_article_local_date(
+        article: "NewsArticle",
+        timezone_name: str = "Asia/Taipei",
+    ) -> str:
+        """Return an article's published date as YYYYMMDD in the target timezone."""
+        tz = ZoneInfo(timezone_name)
+        published_at = article.published_at
+        if published_at.tzinfo is None:
+            local_time = published_at.replace(tzinfo=tz)
+        else:
+            local_time = published_at.astimezone(tz)
+        return local_time.strftime("%Y%m%d")
+
+    @staticmethod
+    def _iter_news_daily_articles(
+        daily_file: "NewsDailyFile",
+    ) -> "Iterator[NewsArticle]":
+        for run in daily_file.runs:
+            for result in run.categories.values():
+                yield from result.articles
+
+    @staticmethod
+    def _news_article_dedupe_key(article: "NewsArticle") -> str:
+        if article.url:
+            return f"url:{article.url}"
+        return (
+            "fallback:"
+            f"{article.title}|{article.source}|{article.published_at.isoformat()}"
+        )
