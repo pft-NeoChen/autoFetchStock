@@ -17,8 +17,9 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections import deque
-from typing import Deque, List, Optional, Tuple
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from typing import Deque, Dict, List, Optional, Tuple
 
 from src.config import AppConfig
 from src.exceptions import SummarizationError
@@ -140,8 +141,97 @@ _FAVORITES_IMPACT_PROMPT = """\
 }}
 """
 
+_TAG_BATCH_SIZE = 40
+
+_TAG_ARTICLES_PROMPT = """\
+你是新聞關聯標籤助手。給定一批新聞與使用者自選股清單，請判斷每則新聞與哪些自選股有
+直接或間接關聯，並標註該關聯的極性。
+
+判斷範圍包含：
+- 直接：新聞明確提到此股代號 / 公司名 / 主要產品
+- 間接：同產業趨勢、上下游供應鏈、主要客戶或競爭對手、總體經濟對該股的影響、
+  政策法規對該股所在產業的影響等
+
+極性定義：
+- "bullish"：對此股有正面影響
+- "bearish"：對此股有負面影響
+- "neutral"：相關但影響不明 / 中性報導
+
+---
+
+自選股清單：
+{favorites}
+
+---
+
+新聞列表（含 URL）：
+{articles}
+
+---
+
+請嚴格以下列 JSON 格式回應（不要加 markdown 程式碼框、不要加其他文字）：
+{{
+  "items": [
+    {{"url": "https://...", "impacts": [
+      {{"stock_id": "2330", "polarity": "bullish"}},
+      {{"stock_id": "AAPL", "polarity": "neutral"}}
+    ]}}
+  ]
+}}
+
+規則：
+- 一則新聞可同時關聯多檔股票，極性可不同
+- 若新聞與所有自選股皆無關聯，impacts 為空陣列
+- stock_id 必須來自上方清單，不要捏造
+- 寧缺勿濫：找不到合理依據時不要硬標
+"""
+
+_FAVORITES_IMPACT_V2_PROMPT = """\
+你是一位專業投資分析師。以下是今日針對使用者自選股**逐檔預先篩選並做極性標註**的相關新聞證據。
+請根據每檔股票自己的證據區塊，產出該股的最終訊號與理由。
+
+訊號僅能使用 "bullish" / "bearish" / "neutral"。
+中立性護欄（任一不符合一律降為 neutral）：
+1. 「無相關」是合法答案：若該股的證據區塊為「無」或所有新聞皆無實質影響，回 neutral，
+   reason 寫「今日新聞無明顯關聯」、referenced_urls 留空陣列。不要為了給答案而硬找關聯。
+2. 證據強度：bullish 或 bearish 必須有 ≥ 2 篇來源不同（source 不同）的新聞支持；
+   只有 1 篇或多篇同來源轉載，必須降為 "neutral"。
+3. 雙面論證：reason 須先簡述支持訊號的證據，若有反向證據也須提及；
+   找不到反向證據時可寫「未見明顯反向訊息」。整段仍限 ≤ 120 字。
+4. referenced_urls：bullish/bearish 至少引用 2 個不同 source 的 URL（最多 3 個）；
+   neutral 可留空或最多 1 個。
+5. 預先標註的極性僅供參考，你應自行檢視證據後判斷最終訊號。
+
+---
+
+各自選股證據區塊：
+{evidence_blocks}
+
+---
+
+請嚴格以下列 JSON 格式回應（陣列順序與證據區塊一致，不要加 markdown 程式碼框、不要加其他文字）：
+{{
+  "signals": [
+    {{
+      "stock_id": "2330",
+      "signal": "bullish",
+      "reason": "一句話理由（≤120 字），含正反證據說明",
+      "referenced_urls": ["..."]
+    }}
+  ]
+}}
+"""
+
 _MAX_SUMMARY_LEN = 200
 _MAX_CATEGORY_SUMMARY_LEN = 500
+
+
+@dataclass
+class ArticleTag:
+    """Stage 1 output: per-(article, stock) impact tag."""
+    url: str
+    stock_id: str
+    polarity: str  # "bullish" | "bearish" | "neutral"
 
 # Free-tier gemini-3.1-flash-lite 速率限制：15 RPM
 # 保留 1 個 buffer 避免邊界 race，用 14 RPM。
@@ -268,14 +358,57 @@ class NewsSummarizer:
             logger.warning("全局重點分析失敗: %s", exc)
             return GlobalBrief(failed=True, sentiment_reason=str(exc)[:80])
 
+    def tag_articles(
+        self,
+        articles: List["RawArticle"],
+        favorites: List[StockInfo],
+    ) -> List[ArticleTag]:
+        """
+        Stage 1: classify which favorites each article impacts and the polarity.
+        Articles are processed in batches to fit prompt size and RPM budget.
+        Returns a flat list of (url, stock_id, polarity) tags.
+        """
+        if not favorites or not articles:
+            return []
+
+        valid_ids = {s.stock_id for s in favorites}
+        valid_urls = {a.url for a in articles}
+        favorites_block = "\n".join(
+            f"- {s.stock_id}: {s.stock_name}" for s in favorites
+        )
+
+        all_tags: List[ArticleTag] = []
+        total_batches = (len(articles) + _TAG_BATCH_SIZE - 1) // _TAG_BATCH_SIZE
+        for idx in range(total_batches):
+            batch = articles[idx * _TAG_BATCH_SIZE : (idx + 1) * _TAG_BATCH_SIZE]
+            articles_block = self._format_articles_for_tagging(batch)
+            prompt = _TAG_ARTICLES_PROMPT.format(
+                favorites=favorites_block,
+                articles=articles_block[:50000],
+            )
+            try:
+                raw = self._call_backend(prompt)
+                tags = self._parse_tag_response(raw, valid_ids, valid_urls)
+                all_tags.extend(tags)
+                logger.info(
+                    "文章標籤批次 %d/%d：%d 篇 → %d 個標籤",
+                    idx + 1, total_batches, len(batch), len(tags),
+                )
+            except Exception as exc:
+                logger.warning("文章標籤批次 %d/%d 失敗: %s", idx + 1, total_batches, exc)
+        return all_tags
+
     def analyze_favorites_impact(
         self,
         articles: List["RawArticle"],
         favorites: List[StockInfo],
+        tags: Optional[List[ArticleTag]] = None,
     ) -> List[FavoriteSignal]:
         """
-        One-shot impact analysis for each favorite stock based on today's news.
-        Returns one FavoriteSignal per favorite (signal: bullish/neutral/bearish).
+        Stage 2: produce a final signal per favorite.
+        When `tags` is provided, evidence is segregated per stock so each favorite
+        is judged on its own evidence pool (avoids attention-bias toward popular stocks).
+        Falls back to the legacy single-prompt design when tags is None or empty.
         """
         if not favorites:
             return []
@@ -290,6 +423,10 @@ class NewsSummarizer:
                 for s in favorites
             ]
 
+        if tags:
+            return self._analyze_with_tags(articles, favorites, tags)
+
+        # Legacy single-prompt path
         favorites_block = "\n".join(
             f"- {s.stock_id}: {s.stock_name}" for s in favorites
         )
@@ -304,7 +441,6 @@ class NewsSummarizer:
             return self._parse_favorites_impact_response(raw, favorites)
         except Exception as exc:
             logger.warning("自選股影響分析失敗: %s", exc)
-            # Fallback: 全部標中性
             return [
                 FavoriteSignal(
                     stock_id=s.stock_id,
@@ -314,6 +450,78 @@ class NewsSummarizer:
                 )
                 for s in favorites
             ]
+
+    def _analyze_with_tags(
+        self,
+        articles: List["RawArticle"],
+        favorites: List[StockInfo],
+        tags: List[ArticleTag],
+    ) -> List[FavoriteSignal]:
+        """Stage 2 path that uses pre-segregated evidence per favorite."""
+        article_by_url: Dict[str, RawArticle] = {a.url: a for a in articles}
+        evidence_by_stock: Dict[str, List[Tuple[RawArticle, str]]] = defaultdict(list)
+        seen_pairs: set = set()
+        for tag in tags:
+            key = (tag.url, tag.stock_id)
+            if key in seen_pairs:
+                continue
+            article = article_by_url.get(tag.url)
+            if article is None:
+                continue
+            seen_pairs.add(key)
+            evidence_by_stock[tag.stock_id].append((article, tag.polarity))
+
+        # Stocks with zero evidence → short-circuit to neutral, skip LLM cost.
+        stocks_with_evidence = [s for s in favorites if evidence_by_stock.get(s.stock_id)]
+        empty_signals = {
+            s.stock_id: FavoriteSignal(
+                stock_id=s.stock_id,
+                stock_name=s.stock_name,
+                signal="neutral",
+                reason="今日新聞無明顯關聯",
+            )
+            for s in favorites if not evidence_by_stock.get(s.stock_id)
+        }
+
+        if not stocks_with_evidence:
+            logger.info("自選股影響分析：所有自選股皆無相關新聞，全部標 neutral")
+            return [empty_signals[s.stock_id] for s in favorites]
+
+        evidence_blocks = self._format_evidence_blocks(
+            stocks_with_evidence, evidence_by_stock
+        )
+        prompt = _FAVORITES_IMPACT_V2_PROMPT.format(
+            evidence_blocks=evidence_blocks[:60000],
+        )
+
+        try:
+            raw = self._call_backend(prompt)
+            evaluated = self._parse_favorites_impact_response(raw, stocks_with_evidence)
+            evaluated_by_id = {sig.stock_id: sig for sig in evaluated}
+        except Exception as exc:
+            logger.warning("自選股影響分析（V2）失敗: %s", exc)
+            evaluated_by_id = {
+                s.stock_id: FavoriteSignal(
+                    stock_id=s.stock_id,
+                    stock_name=s.stock_name,
+                    signal="neutral",
+                    reason="分析失敗，暫無訊號",
+                )
+                for s in stocks_with_evidence
+            }
+
+        return [
+            evaluated_by_id.get(s.stock_id, empty_signals.get(
+                s.stock_id,
+                FavoriteSignal(
+                    stock_id=s.stock_id,
+                    stock_name=s.stock_name,
+                    signal="neutral",
+                    reason="今日新聞無明顯關聯",
+                ),
+            ))
+            for s in favorites
+        ]
 
     # ── 私有方法 ──────────────────────────────────────────────────────────────
 
@@ -469,6 +677,63 @@ class NewsSummarizer:
             excerpt = (a.excerpt or a.full_text[:200]).replace("\n", " ").strip()
             lines.append(f"- [{a.source}] {a.title}\n  URL: {a.url}\n  {excerpt}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _format_articles_for_tagging(articles: List["RawArticle"]) -> str:
+        """Render article list for the stage-1 tagging prompt (URL-keyed)."""
+        lines: List[str] = []
+        for a in articles:
+            excerpt = (a.excerpt or a.full_text[:200]).replace("\n", " ").strip()
+            lines.append(f"- URL: {a.url}\n  [{a.source}] {a.title}\n  {excerpt}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_evidence_blocks(
+        favorites: List[StockInfo],
+        evidence_by_stock: Dict[str, List[Tuple["RawArticle", str]]],
+    ) -> str:
+        """Render per-stock evidence sections for the V2 favorites-impact prompt."""
+        blocks: List[str] = []
+        for s in favorites:
+            ev = evidence_by_stock.get(s.stock_id, [])
+            blocks.append(f"\n=== {s.stock_id} {s.stock_name}（相關新聞 {len(ev)} 篇）===")
+            if not ev:
+                blocks.append("（無相關新聞）")
+                continue
+            for art, polarity in ev:
+                excerpt = (art.excerpt or art.full_text[:200]).replace("\n", " ").strip()
+                blocks.append(
+                    f"- [{art.source}] ({polarity}) {art.title}\n"
+                    f"  URL: {art.url}\n  {excerpt}"
+                )
+        return "\n".join(blocks)
+
+    def _parse_tag_response(
+        self,
+        raw: str,
+        valid_ids: set,
+        valid_urls: set,
+    ) -> List[ArticleTag]:
+        """Parse stage-1 tagging JSON response into ArticleTag list."""
+        data = self._extract_json_object(raw)
+        if data is None:
+            logger.warning("文章標籤 JSON 解析失敗，回應前 300 字: %r", raw[:300])
+            return []
+        items = data.get("items", []) if isinstance(data, dict) else data
+        tags: List[ArticleTag] = []
+        for item in items:
+            url = str(item.get("url", "")).strip()
+            if url not in valid_urls:
+                continue
+            for impact in item.get("impacts", []):
+                sid = str(impact.get("stock_id", "")).strip()
+                if sid not in valid_ids:
+                    continue
+                polarity = str(impact.get("polarity", "neutral")).lower()
+                if polarity not in ("bullish", "bearish", "neutral"):
+                    polarity = "neutral"
+                tags.append(ArticleTag(url=url, stock_id=sid, polarity=polarity))
+        return tags
 
     @staticmethod
     def _strip_code_fence(raw: str) -> str:
