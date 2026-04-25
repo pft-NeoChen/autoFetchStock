@@ -215,7 +215,7 @@
 
 ---
 
-### Phase 3c：異常偵測（議題爆量標記）
+### Phase 3c：異常偵測（議題爆量標記）✅ **已完成**（2026-04-25）
 
 **目標**：在已產生的 `EventCluster.daily_count` 上做純統計異常標記，找出「今日或最近一日突然爆量」的事件，不增加 LLM 呼叫。
 
@@ -245,10 +245,10 @@
 - UI helper：有 anomaly badge / 無 anomaly / 無 events store 三種情境
 
 **驗收標準**
-- [ ] `events.json.clusters[*]` 可包含 `is_anomaly=true` 與可讀的 `anomaly_reason`
-- [ ] 異常偵測不產生任何 Gemini / embedding call
-- [ ] `/news` timeline 清楚標示爆量事件
-- [ ] 主頁自選股訊號能在有命中時顯示異常提示，無資料時優雅降級
+- [x] `events.json.clusters[*]` 可包含 `is_anomaly=true` 與可讀的 `anomaly_reason`
+- [x] 異常偵測不產生任何 Gemini / embedding call
+- [x] `/news` timeline 清楚標示爆量事件
+- [x] 主頁自選股訊號能在有命中時顯示異常提示，無資料時優雅降級
 
 ### Phase 3a/3b/3c e2e 整合驗收
 

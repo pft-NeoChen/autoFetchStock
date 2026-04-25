@@ -12,6 +12,7 @@ Coverage targets:
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
+from datetime import datetime, timezone
 
 import pytest
 
@@ -290,3 +291,41 @@ class TestBuildEventTimeline:
         result = processor.build_event_timeline(window_days=7)
 
         assert result.clusters[0].event_id == "old-id"
+
+    def test_build_event_timeline_marks_anomalies_before_saving(self, mock_config, mock_storage):
+        mock_config.news_history_window_days = 7
+        processor = _make_processor(mock_config, mock_storage)
+        articles = [
+            make_article(url="https://example.com/a1", published_at=datetime(2026, 4, 21, tzinfo=timezone.utc)),
+            make_article(url="https://example.com/a2", published_at=datetime(2026, 4, 22, tzinfo=timezone.utc)),
+            make_article(url="https://example.com/a3", published_at=datetime(2026, 4, 23, tzinfo=timezone.utc)),
+            make_article(url="https://example.com/a4", published_at=datetime(2026, 4, 24, tzinfo=timezone.utc)),
+            make_article(url="https://example.com/a5", published_at=datetime(2026, 4, 25, tzinfo=timezone.utc)),
+            make_article(url="https://example.com/a6", published_at=datetime(2026, 4, 25, tzinfo=timezone.utc)),
+            make_article(url="https://example.com/a7", published_at=datetime(2026, 4, 25, tzinfo=timezone.utc)),
+        ]
+        date_by_url = {
+            "https://example.com/a1": "20260421",
+            "https://example.com/a2": "20260422",
+            "https://example.com/a3": "20260423",
+            "https://example.com/a4": "20260424",
+            "https://example.com/a5": "20260425",
+            "https://example.com/a6": "20260425",
+            "https://example.com/a7": "20260425",
+        }
+        mock_storage.iter_news_articles.return_value = articles
+        mock_storage.news_article_local_date.side_effect = lambda article: date_by_url[article.url]
+        mock_storage.load_news_events.return_value = None
+        processor._summarizer.cluster_events.return_value = [
+            EventCluster(
+                event_id="evt",
+                title="AI",
+                keywords=["AI"],
+                article_urls=[a.url for a in articles],
+            )
+        ]
+
+        result = processor.build_event_timeline(window_days=7)
+
+        assert result.clusters[0].is_anomaly is True
+        assert result.clusters[0].anomaly_reason

@@ -19,6 +19,7 @@ from src.config import AppConfig
 from src.exceptions import SchedulerTaskError
 from src.models import StockInfo
 from src.news.news_fetcher import NewsFetcher
+from src.news.news_anomaly import mark_event_anomalies
 from src.news.news_models import (
     EventCluster,
     FavoriteSignal,
@@ -221,6 +222,7 @@ class NewsProcessor:
         existing = self._load_existing_event_file()
         self._reconcile_event_ids(clusters, existing.clusters if existing else [])
         self._hydrate_event_clusters(clusters, articles)
+        mark_event_anomalies(clusters)
         event_file = NewsEventFile(
             generated_at=datetime.now(TW_TIMEZONE),
             window_start=start_str,

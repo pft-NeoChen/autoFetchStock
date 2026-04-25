@@ -6,6 +6,7 @@ from src.app.callbacks import (
     _collect_ticker_headlines,
     _extract_articles_from_run,
     _render_event_timeline,
+    _render_favorite_signal_strip,
 )
 
 
@@ -90,3 +91,44 @@ def test_render_event_timeline_with_cluster():
 
     assert rendered.className == "event-timeline-inner"
     assert "AI 供應鏈" in str(rendered)
+
+
+def test_render_event_timeline_with_anomaly_badge():
+    rendered = _render_event_timeline({
+        "clusters": [
+            {
+                "title": "AI 供應鏈",
+                "summary": "AI 需求升溫",
+                "first_seen": "20260424",
+                "last_seen": "20260425",
+                "article_urls": ["https://example.com/a"],
+                "daily_count": {"20260424": 1, "20260425": 3},
+                "is_anomaly": True,
+            }
+        ]
+    })
+
+    assert "爆量" in str(rendered)
+
+
+def test_render_favorite_signal_strip_marks_anomaly_stock():
+    rendered = _render_favorite_signal_strip(
+        [
+            {
+                "stock_id": "2330",
+                "stock_name": "台積電",
+                "signal": "neutral",
+                "reason": "r",
+            }
+        ],
+        {
+            "clusters": [
+                {
+                    "is_anomaly": True,
+                    "related_stock_ids": ["2330"],
+                }
+            ]
+        },
+    )
+
+    assert "爆量" in str(rendered)
