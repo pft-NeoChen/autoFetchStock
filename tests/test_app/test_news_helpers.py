@@ -7,6 +7,7 @@ from src.app.callbacks import (
     _extract_articles_from_run,
     _render_event_timeline,
     _render_favorite_signal_strip,
+    _render_news_chat_messages,
 )
 
 
@@ -132,3 +133,22 @@ def test_render_favorite_signal_strip_marks_anomaly_stock():
     )
 
     assert "爆量" in str(rendered)
+
+
+def test_render_news_chat_messages_with_citations():
+    rendered = _render_news_chat_messages([
+        {"role": "user", "content": "AI 最近如何？"},
+        {
+            "role": "assistant",
+            "content": "AI 需求升溫 [1]",
+            "citations": [
+                {
+                    "title": "AI demand",
+                    "url": "https://example.com/ai",
+                }
+            ],
+        },
+    ])
+
+    assert "AI demand" in str(rendered)
+    assert "https://example.com/ai" in str(rendered)

@@ -1587,6 +1587,41 @@ class CallbackManager:
         def render_event_timeline(news_events: dict):
             return _render_event_timeline(news_events)
 
+        # ── Phase 3d RAG chat（/news 頁） ────────────────────────────────────
+        @self.app.callback(
+            Output("news-chat-history", "data"),
+            Output("news-chat-messages", "children"),
+            Output("news-chat-input", "value"),
+            Input("news-chat-submit", "n_clicks"),
+            State("news-chat-input", "value"),
+            State("news-chat-history", "data"),
+            prevent_initial_call=False,
+        )
+        def submit_chat_message(n_clicks, query: str, history: list):
+            history = history or []
+            if not n_clicks:
+                return history, _render_news_chat_messages(history), ""
+            query = (query or "").strip()
+            if not query:
+                return history, _render_news_chat_messages(history), ""
+            next_history = history + [{"role": "user", "content": query}]
+            if self.news_processor:
+                answer = self.news_processor.answer_news_question(query, next_history)
+                answer_dict = answer.to_dict()
+            else:
+                answer_dict = {
+                    "answer": "目前無法使用新聞問答",
+                    "citations": [],
+                    "failed": True,
+                }
+            next_history.append({
+                "role": "assistant",
+                "content": answer_dict.get("answer", ""),
+                "citations": answer_dict.get("citations", []),
+                "failed": answer_dict.get("failed", False),
+            })
+            return next_history, _render_news_chat_messages(next_history), ""
+
 
 # ── Module-level news helper functions ──────────────────────────────────────
 
@@ -2049,6 +2084,35 @@ def _render_favorite_signal_strip(
             )
         )
     return html.Div(items, className="fav-signal-items")
+
+
+def _render_news_chat_messages(history: List[dict]) -> html.Div:
+    """Render news RAG chat history."""
+    if not history:
+        return html.Div("尚無對話", className="news-chat-empty")
+
+    items = []
+    for message in history:
+        role = message.get("role", "user")
+        citations = message.get("citations", []) or []
+        citation_links = [
+            html.A(
+                f"[{idx + 1}] {c.get('title', '來源')}",
+                href=c.get("url", "#"),
+                target="_blank",
+                rel="noopener noreferrer",
+                className="news-chat-citation",
+            )
+            for idx, c in enumerate(citations)
+        ]
+        items.append(html.Div(
+            [
+                html.Div(message.get("content", ""), className="news-chat-text"),
+                html.Div(citation_links, className="news-chat-citations") if citation_links else None,
+            ],
+            className=f"news-chat-message {role}",
+        ))
+    return html.Div(items, className="news-chat-message-list")
 
 
 def _collect_anomaly_stock_ids(event_data: Optional[dict]) -> set:

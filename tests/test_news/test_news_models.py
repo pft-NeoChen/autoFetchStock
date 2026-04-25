@@ -19,6 +19,8 @@ from src.news.news_models import (
     NewsCategoryResult,
     NewsDailyFile,
     NewsEventFile,
+    NewsRagAnswer,
+    NewsRagCitation,
     NewsRunResult,
     NewsRunStats,
     SectorHeat,
@@ -276,3 +278,25 @@ class TestNewsEventFile:
         assert restored.window_end == ""
         assert restored.clusters == []
         assert restored.source_article_count == 0
+
+
+class TestNewsRagModels:
+    def test_answer_round_trip(self):
+        answer = NewsRagAnswer(
+            answer="回答",
+            citations=[
+                NewsRagCitation(
+                    url="https://example.com/a",
+                    title="A",
+                    source="Src",
+                    published_at="2026-04-25T00:00:00+00:00",
+                    score=0.91,
+                )
+            ],
+        )
+
+        restored = NewsRagAnswer.from_dict(answer.to_dict())
+
+        assert restored.answer == "回答"
+        assert restored.citations[0].url == "https://example.com/a"
+        assert restored.citations[0].score == pytest.approx(0.91)

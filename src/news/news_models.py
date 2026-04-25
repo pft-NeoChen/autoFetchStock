@@ -382,6 +382,68 @@ class NewsEventFile:
 
 
 @dataclass
+class NewsRagCitation:
+    """A retrieved news source used by the RAG answer."""
+    url: str
+    title: str
+    source: str = ""
+    published_at: str = ""
+    score: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "url": self.url,
+            "title": self.title,
+            "source": self.source,
+            "published_at": self.published_at,
+            "score": self.score,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "NewsRagCitation":
+        try:
+            score = float(data.get("score", 0.0))
+        except (TypeError, ValueError):
+            score = 0.0
+        return cls(
+            url=str(data.get("url", "")),
+            title=str(data.get("title", "")),
+            source=str(data.get("source", "")),
+            published_at=str(data.get("published_at", "")),
+            score=score,
+        )
+
+
+@dataclass
+class NewsRagAnswer:
+    """Answer returned by the news RAG subsystem."""
+    answer: str
+    citations: List[NewsRagCitation] = field(default_factory=list)
+    failed: bool = False
+    error_reason: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "answer": self.answer,
+            "citations": [c.to_dict() for c in self.citations],
+            "failed": self.failed,
+            "error_reason": self.error_reason,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "NewsRagAnswer":
+        return cls(
+            answer=str(data.get("answer", "")),
+            citations=[
+                NewsRagCitation.from_dict(c) for c in data.get("citations", [])
+                if isinstance(c, dict)
+            ],
+            failed=bool(data.get("failed", False)),
+            error_reason=str(data.get("error_reason", "")),
+        )
+
+
+@dataclass
 class NewsRunResult:
     """Result of a single news collection and summarization run."""
     run_at: datetime                                              # 執行觸發時間（Asia/Taipei）

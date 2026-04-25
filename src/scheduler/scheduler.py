@@ -358,6 +358,42 @@ class Scheduler:
                 f"News event timeline job failed: {e}\n{traceback.format_exc()}"
             )
 
+    def add_news_rag_index_job(self, index_callback: Callable[[], object]) -> bool:
+        """
+        Add the daily news RAG index update job.
+
+        Runs at 16:20 Asia/Taipei, after event timeline generation.
+        """
+        try:
+            self._scheduler.add_job(
+                self._news_rag_index_job,
+                trigger=CronTrigger(
+                    hour=16,
+                    minute=20,
+                    timezone=TW_TIMEZONE,
+                ),
+                id="news_rag_index",
+                kwargs={"index_callback": index_callback},
+                name="News RAG index update",
+                replace_existing=True,
+            )
+            logger.info("Registered daily news RAG index job (16:20)")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to register news RAG index job: {e}")
+            return False
+
+    def _news_rag_index_job(self, index_callback: Callable[[], object]) -> None:
+        """Execute the news RAG index job without crashing the scheduler."""
+        logger.info("Starting scheduled news RAG index update")
+        try:
+            added_count = index_callback()
+            logger.info("Scheduled news RAG index update completed: %s new rows", added_count)
+        except Exception as e:
+            logger.error(
+                f"News RAG index job failed: {e}\n{traceback.format_exc()}"
+            )
+
     def _fetch_job(self, stock_id: str) -> None:
         """
         Execute fetch job for a stock (REQ-063).

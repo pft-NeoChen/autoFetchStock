@@ -32,6 +32,7 @@ from src.news.news_models import (
     NewsRunStats,
 )
 from src.news.news_summarizer import NewsSummarizer
+from src.news.news_rag import NewsRagService
 
 logger = logging.getLogger("autofetchstock.news.processor")
 TW_TIMEZONE = ZoneInfo("Asia/Taipei")
@@ -232,6 +233,34 @@ class NewsProcessor:
         )
         self._storage.save_news_events(event_file)
         return event_file
+
+    def update_rag_index(self, window_days: Optional[int] = None) -> int:
+        """Build or update the optional Phase 3d RAG embedding index."""
+        if not getattr(self._config, "news_rag_enabled", False):
+            return 0
+        window_days = window_days or self._config.news_rag_window_days
+        try:
+            window_days = max(1, int(window_days))
+        except (TypeError, ValueError):
+            window_days = 30
+        end_day = datetime.now(TW_TIMEZONE).date()
+        start_day = end_day - timedelta(days=window_days - 1)
+        articles = list(self._storage.iter_news_articles(
+            start_day.strftime("%Y%m%d"),
+            end_day.strftime("%Y%m%d"),
+            dedupe=True,
+        ))
+        service = NewsRagService(self._config, self._storage.news_dir)
+        return service.build_or_update_index(articles)
+
+    def answer_news_question(
+        self,
+        query: str,
+        chat_history: Optional[List[dict]] = None,
+    ):
+        """Answer a natural-language question using the optional news RAG index."""
+        service = NewsRagService(self._config, self._storage.news_dir)
+        return service.answer(query, chat_history or [])
 
     # ── 分類抓取（不再呼叫 LLM） ────────────────────────────────────────────
 

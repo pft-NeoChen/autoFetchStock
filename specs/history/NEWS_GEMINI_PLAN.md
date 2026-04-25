@@ -259,7 +259,7 @@
 
 ---
 
-### Phase 3d：RAG 問答側欄（最後做、預設關閉）
+### Phase 3d：RAG 問答側欄（最後做、預設關閉）✅ **已完成**（2026-04-25）
 
 **目標**：使用者在 `/news` 側欄用自然語言詢問歷史新聞，例如「台積電最近有什麼利多？」、「AI 板塊本週發生什麼事？」；回答必須基於檢索到的新聞並附引用來源。
 
@@ -311,11 +311,11 @@
 - UI callback：送出空字串、正常回答、失敗回答、多輪 history
 
 **驗收標準**
-- [ ] `news_rag_enabled=False` 時，沒有 embedding / answer call，側欄優雅停用
-- [ ] `news_rag_enabled=True` 時，可建立或增量更新 index
-- [ ] 側欄 chat 可問可答，回答至少附 1 個真實新聞 URL 引用
-- [ ] embedding 每日新增量受 `news_rag_max_new_embeddings_per_day` 控制
-- [ ] RAG backend 失敗不影響 `/news` 既有新聞、timeline、market dashboard
+- [x] `news_rag_enabled=False` 時，沒有 embedding / answer call，側欄優雅停用
+- [x] `news_rag_enabled=True` 時，可建立或增量更新 index
+- [x] 側欄 chat 可問可答，回答至少附 1 個真實新聞 URL 引用
+- [x] embedding 每日新增量受 `news_rag_max_new_embeddings_per_day` 控制
+- [x] RAG backend 失敗不影響 `/news` 既有新聞、timeline、market dashboard
 
 ---
 
