@@ -31,6 +31,7 @@ from src.news.news_models import (
     GlobalBrief,
     NewsArticle,
     NewsCategory,
+    SectorHeat,
 )
 
 logger = logging.getLogger("autofetchstock.news.summarizer")
@@ -65,7 +66,7 @@ _CATEGORY_PROMPT = """\
 """
 
 _GLOBAL_BRIEF_PROMPT = """\
-你是一位資深財經新聞主編。以下是今日從多來源收集的新聞（每則含標題與 excerpt）。
+你是一位資深財經新聞主編。以下是今日從多來源收集的新聞（每則含標題、來源與 excerpt）。
 請完成以下任務，全部用繁體中文回應：
 
 1. 寫出「今日重點總結」（不超過 300 字），扼要點出今天全球最重要的事件與其交互影響。
@@ -74,6 +75,15 @@ _GLOBAL_BRIEF_PROMPT = """\
    INTERNATIONAL（國際）、FINANCIAL（財經）、TECH（科技）、STOCK_TW（台股個股）、STOCK_US（美股個股）。
    若某分類完全沒有新聞則可省略；不要捏造未出現的分類。
 3. 給出一個市場情緒分數（0~100 整數）：0=極度恐慌、50=中性、100=極度樂觀，並附上一句話理由。
+4. 板塊熱度排名（sector_heats）：判斷今日新聞中以下基礎板塊的熱度，必須產出全部 5 個基礎板塊：
+   「AI」、「半導體」、「電動車」、「金融」、「傳產」。
+   若新聞中還有其他明顯熱門的板塊（如「軍工」、「生技」、「航運」等），可額外加入最多 2 個。
+   每個板塊輸出：
+   - heat_score（0~100 整數）：依據相關新聞數量、事件強度、市場關注度給分
+   - trend："up"（多空偏多/題材發酵）、"down"（利空/降溫）、"flat"（中性/無明顯方向）
+   - summary：一句話（≤80 字）說明為何給此分數
+   - referenced_urls：最多 3 個支撐判斷的新聞 URL；若該板塊今日無相關新聞，referenced_urls 留空陣列、
+     heat_score 給 30 以下、trend 給 "flat"、summary 寫「今日無相關新聞」。
 
 ---
 
@@ -93,7 +103,14 @@ _GLOBAL_BRIEF_PROMPT = """\
     {{"category": "STOCK_US", "headline_points": ["...", "...", "..."]}}
   ],
   "market_sentiment": 55,
-  "sentiment_reason": "一句話理由"
+  "sentiment_reason": "一句話理由",
+  "sector_heats": [
+    {{"sector": "AI", "heat_score": 80, "trend": "up", "summary": "...", "referenced_urls": ["..."]}},
+    {{"sector": "半導體", "heat_score": 75, "trend": "up", "summary": "...", "referenced_urls": ["..."]}},
+    {{"sector": "電動車", "heat_score": 50, "trend": "flat", "summary": "...", "referenced_urls": []}},
+    {{"sector": "金融", "heat_score": 40, "trend": "down", "summary": "...", "referenced_urls": ["..."]}},
+    {{"sector": "傳產", "heat_score": 30, "trend": "flat", "summary": "...", "referenced_urls": []}}
+  ]
 }}
 """
 
@@ -819,11 +836,37 @@ class NewsSummarizer:
         except (TypeError, ValueError):
             sentiment = 50
 
+        sectors: List[SectorHeat] = []
+        seen_sectors: set = set()
+        for s in data.get("sector_heats", []):
+            if not isinstance(s, dict):
+                continue
+            name = str(s.get("sector", "")).strip()
+            if not name or name in seen_sectors:
+                continue
+            seen_sectors.add(name)
+            score = s.get("heat_score", 50)
+            try:
+                score = max(0, min(100, int(score)))
+            except (TypeError, ValueError):
+                score = 50
+            trend = str(s.get("trend", "flat")).lower()
+            if trend not in ("up", "down", "flat"):
+                trend = "flat"
+            sectors.append(SectorHeat(
+                sector=name,
+                heat_score=score,
+                trend=trend,
+                summary=str(s.get("summary", "")).strip()[:120],
+                referenced_urls=[str(u) for u in s.get("referenced_urls", [])][:3],
+            ))
+
         return GlobalBrief(
             overall_summary=str(data.get("overall_summary", "")).strip()[:600],
             category_highlights=highlights,
             market_sentiment=sentiment,
             sentiment_reason=str(data.get("sentiment_reason", "")).strip()[:120],
+            sector_heats=sectors,
             failed=False,
         )
 

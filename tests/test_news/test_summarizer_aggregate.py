@@ -92,6 +92,86 @@ def test_summarize_global_fallback_on_backend_exception(summarizer):
     assert "boom" in brief.sentiment_reason
 
 
+# ── Phase 2: sector_heats parsing ────────────────────────────────────────────
+
+def test_summarize_global_parses_sector_heats(summarizer):
+    summarizer._call_backend = lambda p: """{
+        "overall_summary": "ok",
+        "category_highlights": [],
+        "market_sentiment": 60,
+        "sentiment_reason": "r",
+        "sector_heats": [
+            {"sector": "AI", "heat_score": 85, "trend": "up", "summary": "AI 熱", "referenced_urls": ["http://a"]},
+            {"sector": "半導體", "heat_score": 78, "trend": "up", "summary": "供應鏈緊", "referenced_urls": []},
+            {"sector": "電動車", "heat_score": 45, "trend": "flat", "summary": "持平", "referenced_urls": []},
+            {"sector": "金融", "heat_score": 30, "trend": "down", "summary": "降息壓力", "referenced_urls": []},
+            {"sector": "傳產", "heat_score": 20, "trend": "flat", "summary": "無關注", "referenced_urls": []}
+        ]
+    }"""
+
+    brief = summarizer.summarize_global({NewsCategory.TECH: [_raw("t")]})
+    assert brief.failed is False
+    assert len(brief.sector_heats) == 5
+    assert brief.sector_heats[0].sector == "AI"
+    assert brief.sector_heats[0].heat_score == 85
+    assert brief.sector_heats[3].trend == "down"
+
+
+def test_summarize_global_clamps_sector_heat_score(summarizer):
+    summarizer._call_backend = lambda p: """{
+        "overall_summary": "x",
+        "category_highlights": [],
+        "market_sentiment": 50,
+        "sector_heats": [
+            {"sector": "AI", "heat_score": 999, "trend": "up"},
+            {"sector": "金融", "heat_score": -50, "trend": "down"}
+        ]
+    }"""
+    brief = summarizer.summarize_global({NewsCategory.TECH: [_raw("t")]})
+    assert brief.sector_heats[0].heat_score == 100
+    assert brief.sector_heats[1].heat_score == 0
+
+
+def test_summarize_global_normalises_invalid_sector_trend(summarizer):
+    summarizer._call_backend = lambda p: """{
+        "overall_summary": "x",
+        "category_highlights": [],
+        "market_sentiment": 50,
+        "sector_heats": [
+            {"sector": "AI", "heat_score": 70, "trend": "skyrocket"}
+        ]
+    }"""
+    brief = summarizer.summarize_global({NewsCategory.TECH: [_raw("t")]})
+    assert brief.sector_heats[0].trend == "flat"
+
+
+def test_summarize_global_dedupes_duplicate_sectors(summarizer):
+    summarizer._call_backend = lambda p: """{
+        "overall_summary": "x",
+        "category_highlights": [],
+        "market_sentiment": 50,
+        "sector_heats": [
+            {"sector": "AI", "heat_score": 80, "trend": "up"},
+            {"sector": "AI", "heat_score": 30, "trend": "down"}
+        ]
+    }"""
+    brief = summarizer.summarize_global({NewsCategory.TECH: [_raw("t")]})
+    assert len(brief.sector_heats) == 1
+    assert brief.sector_heats[0].heat_score == 80
+
+
+def test_summarize_global_missing_sector_heats_field(summarizer):
+    """If LLM omits sector_heats entirely, brief.sector_heats == []."""
+    summarizer._call_backend = lambda p: """{
+        "overall_summary": "x",
+        "category_highlights": [],
+        "market_sentiment": 50
+    }"""
+    brief = summarizer.summarize_global({NewsCategory.TECH: [_raw("t")]})
+    assert brief.failed is False
+    assert brief.sector_heats == []
+
+
 # ── analyze_favorites_impact ─────────────────────────────────────────────────
 
 def test_analyze_favorites_impact_parses_signals(summarizer):

@@ -12,12 +12,14 @@ import pytest
 from datetime import datetime, timezone
 
 from src.news.news_models import (
+    GlobalBrief,
     NewsArticle,
     NewsCategory,
     NewsCategoryResult,
     NewsDailyFile,
     NewsRunResult,
     NewsRunStats,
+    SectorHeat,
 )
 from tests.test_news.conftest import make_article, make_category_result, make_run_result
 
@@ -132,3 +134,73 @@ class TestNewsDailyFile:
         assert restored.date == "20260410"
         assert len(restored.runs) == 1
         assert restored.runs[0].run_at == sample_run_result.run_at
+
+
+# ── Phase 2: SectorHeat ──────────────────────────────────────────────────────
+
+class TestSectorHeat:
+    def test_round_trip(self):
+        original = SectorHeat(
+            sector="AI",
+            heat_score=80,
+            trend="up",
+            summary="AI 應用持續擴散",
+            referenced_urls=["http://a", "http://b"],
+        )
+        restored = SectorHeat.from_dict(original.to_dict())
+        assert restored.sector == "AI"
+        assert restored.heat_score == 80
+        assert restored.trend == "up"
+        assert restored.summary == "AI 應用持續擴散"
+        assert restored.referenced_urls == ["http://a", "http://b"]
+
+    def test_clamps_score_out_of_range(self):
+        s = SectorHeat.from_dict({"sector": "X", "heat_score": 999, "trend": "up"})
+        assert s.heat_score == 100
+        s = SectorHeat.from_dict({"sector": "X", "heat_score": -10, "trend": "up"})
+        assert s.heat_score == 0
+
+    def test_invalid_trend_normalises_to_flat(self):
+        s = SectorHeat.from_dict({"sector": "X", "heat_score": 50, "trend": "skyrocket"})
+        assert s.trend == "flat"
+
+    def test_referenced_urls_capped_at_three(self):
+        s = SectorHeat.from_dict({
+            "sector": "X",
+            "heat_score": 50,
+            "trend": "up",
+            "referenced_urls": ["a", "b", "c", "d", "e"],
+        })
+        assert s.referenced_urls == ["a", "b", "c"]
+
+
+# ── Phase 2: GlobalBrief carries sector_heats ────────────────────────────────
+
+class TestGlobalBriefSectorHeats:
+    def test_round_trip_preserves_sector_heats(self):
+        brief = GlobalBrief(
+            overall_summary="ok",
+            market_sentiment=60,
+            sentiment_reason="r",
+            sector_heats=[
+                SectorHeat(sector="AI", heat_score=80, trend="up", summary="x"),
+                SectorHeat(sector="金融", heat_score=30, trend="down", summary="y"),
+            ],
+        )
+        restored = GlobalBrief.from_dict(brief.to_dict())
+        assert len(restored.sector_heats) == 2
+        assert restored.sector_heats[0].sector == "AI"
+        assert restored.sector_heats[0].heat_score == 80
+        assert restored.sector_heats[1].trend == "down"
+
+    def test_legacy_payload_without_sector_heats(self):
+        """from_dict on Phase-1 era payload (no sector_heats) must not crash."""
+        legacy = {
+            "overall_summary": "ok",
+            "category_highlights": [],
+            "market_sentiment": 50,
+            "sentiment_reason": "r",
+            "failed": False,
+        }
+        brief = GlobalBrief.from_dict(legacy)
+        assert brief.sector_heats == []

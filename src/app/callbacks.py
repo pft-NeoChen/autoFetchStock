@@ -15,8 +15,9 @@ from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from dash import callback, Output, Input, State, no_update, html, ctx, ALL
+from dash import callback, Output, Input, State, no_update, html, dcc, ctx, ALL
 from dash.exceptions import PreventUpdate
+import plotly.graph_objects as go
 
 from src.models import KlinePeriod, PriceDirection, IntradayTick, RealtimeQuote
 from src.exceptions import (
@@ -1483,6 +1484,37 @@ class CallbackManager:
                 return ""
             return _render_favorite_signal_strip(signals)
 
+        # ── Phase 2 市場情緒儀表板（/news 頁） ────────────────────────────────
+        @self.app.callback(
+            Output("market-sentiment-gauge", "children"),
+            Input("news-data-store", "data"),
+            prevent_initial_call=False,
+        )
+        def render_sentiment_gauge(news_data: dict):
+            brief = (news_data or {}).get("global_brief") or {}
+            if not brief or brief.get("failed"):
+                return html.Div(
+                    "市場情緒尚未產生",
+                    className="market-sentiment-empty",
+                )
+            return _render_sentiment_gauge(brief)
+
+        # ── Phase 2 板塊熱度圖（/news 頁） ────────────────────────────────────
+        @self.app.callback(
+            Output("sector-heatmap", "children"),
+            Input("news-data-store", "data"),
+            prevent_initial_call=False,
+        )
+        def render_sector_heatmap(news_data: dict):
+            brief = (news_data or {}).get("global_brief") or {}
+            sectors = brief.get("sector_heats") or []
+            if not sectors:
+                return html.Div(
+                    "板塊熱度尚未產生",
+                    className="sector-heatmap-empty",
+                )
+            return _render_sector_heatmap(sectors)
+
 
 # ── Module-level news helper functions ──────────────────────────────────────
 
@@ -1668,6 +1700,161 @@ def _render_global_brief_card(brief: dict) -> html.Div:
             html.Div(highlights_children, className="global-brief-highlights"),
         ],
         className="global-brief-card-inner",
+    )
+
+
+_SECTOR_TREND_COLORS = {
+    "up": "#EF5350",      # 紅漲
+    "down": "#26A69A",    # 綠跌
+    "flat": "#9E9E9E",    # 灰
+}
+
+
+def _sentiment_color(score: int) -> str:
+    """Return color matching Fear/Greed-style sentiment buckets."""
+    if score >= 75:
+        return "#EF5350"   # 極度樂觀（紅）
+    if score >= 55:
+        return "#FF9800"   # 偏多（橘）
+    if score >= 45:
+        return "#FFC107"   # 中性（黃）
+    if score >= 25:
+        return "#42A5F5"   # 偏空（藍）
+    return "#26A69A"       # 極度恐慌（綠）
+
+
+def _render_sentiment_gauge(brief: dict) -> html.Div:
+    """Render the Fear/Greed-style market sentiment gauge."""
+    sentiment = int(brief.get("market_sentiment", 50))
+    sentiment = max(0, min(100, sentiment))
+    color = _sentiment_color(sentiment)
+    reason = (brief.get("sentiment_reason") or "").strip()
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=sentiment,
+        number={"font": {"color": "#FFFFFF", "size": 36}},
+        gauge={
+            "axis": {
+                "range": [0, 100],
+                "tickwidth": 1,
+                "tickcolor": "#888888",
+                "tickfont": {"color": "#CCCCCC", "size": 11},
+            },
+            "bar": {"color": color, "thickness": 0.25},
+            "bgcolor": "#2A2A2A",
+            "borderwidth": 0,
+            "steps": [
+                {"range": [0, 25],   "color": "#26A69A"},
+                {"range": [25, 45],  "color": "#42A5F5"},
+                {"range": [45, 55],  "color": "#FFC107"},
+                {"range": [55, 75],  "color": "#FF9800"},
+                {"range": [75, 100], "color": "#EF5350"},
+            ],
+            "threshold": {
+                "line": {"color": "#FFFFFF", "width": 3},
+                "thickness": 0.85,
+                "value": sentiment,
+            },
+        },
+    ))
+    fig.update_layout(
+        paper_bgcolor="#1E1E1E",
+        plot_bgcolor="#1E1E1E",
+        font={"color": "#FFFFFF"},
+        margin={"l": 16, "r": 16, "t": 8, "b": 8},
+        height=220,
+    )
+
+    return html.Div(
+        [
+            html.H3("市場情緒", className="dashboard-title"),
+            dcc.Graph(
+                figure=fig,
+                config={"displayModeBar": False, "responsive": True},
+                className="sentiment-gauge-graph",
+            ),
+            html.P(
+                reason if reason else "（暫無情緒理由）",
+                className="sentiment-gauge-reason",
+            ),
+        ],
+        className="market-sentiment-gauge-inner",
+    )
+
+
+def _render_sector_heatmap(sectors: List[dict]) -> html.Div:
+    """Render a horizontal bar chart of sector heat scores."""
+    # Sort by heat_score desc for ranking effect
+    valid = [s for s in sectors if s.get("sector")]
+    valid.sort(key=lambda s: int(s.get("heat_score", 0) or 0), reverse=True)
+    if not valid:
+        return html.Div("板塊熱度尚未產生", className="sector-heatmap-empty")
+
+    names = [s.get("sector", "") for s in valid]
+    scores = [max(0, min(100, int(s.get("heat_score", 0) or 0))) for s in valid]
+    trends = [str(s.get("trend", "flat")).lower() for s in valid]
+    summaries = [str(s.get("summary", "")).strip() for s in valid]
+    colors = [_SECTOR_TREND_COLORS.get(t, _SECTOR_TREND_COLORS["flat"]) for t in trends]
+    trend_glyph = {"up": "▲", "down": "▼", "flat": "—"}
+    text_labels = [
+        f"{score}  {trend_glyph.get(trend, '—')}"
+        for score, trend in zip(scores, trends)
+    ]
+    hover_texts = [
+        f"<b>{name}</b><br>熱度 {score}　趨勢 {trend}<br>{summary or '（無說明）'}"
+        for name, score, trend, summary in zip(names, scores, trends, summaries)
+    ]
+
+    fig = go.Figure(go.Bar(
+        x=scores,
+        y=names,
+        orientation="h",
+        marker={"color": colors, "line": {"width": 0}},
+        text=text_labels,
+        textposition="outside",
+        textfont={"color": "#FFFFFF", "size": 12},
+        hovertext=hover_texts,
+        hoverinfo="text",
+        cliponaxis=False,
+    ))
+    fig.update_layout(
+        paper_bgcolor="#1E1E1E",
+        plot_bgcolor="#1E1E1E",
+        font={"color": "#FFFFFF"},
+        margin={"l": 80, "r": 60, "t": 8, "b": 24},
+        height=max(220, 36 * len(valid) + 48),
+        xaxis={
+            "range": [0, 110],
+            "showgrid": True,
+            "gridcolor": "#333333",
+            "tickfont": {"color": "#CCCCCC"},
+            "title": {"text": "熱度", "font": {"color": "#CCCCCC"}},
+        },
+        yaxis={
+            "autorange": "reversed",
+            "tickfont": {"color": "#FFFFFF", "size": 13},
+        },
+    )
+
+    return html.Div(
+        [
+            html.H3("板塊熱度", className="dashboard-title"),
+            dcc.Graph(
+                figure=fig,
+                config={"displayModeBar": False, "responsive": True},
+                className="sector-heatmap-graph",
+            ),
+            html.Div(
+                [
+                    html.Span("▲ 偏多", style={"color": _SECTOR_TREND_COLORS["up"]}),
+                    html.Span("　▼ 偏空", style={"color": _SECTOR_TREND_COLORS["down"]}),
+                    html.Span("　— 中性", style={"color": _SECTOR_TREND_COLORS["flat"]}),
+                ],
+                className="sector-heatmap-legend",
+            ),
+        ],
+        className="sector-heatmap-inner",
     )
 
 

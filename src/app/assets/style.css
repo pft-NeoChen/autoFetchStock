@@ -1087,6 +1087,55 @@ html {
 .signal-neutral.fav-signal-label { background: #555; color: #FFF; }
 .fav-signal-reason { color: #AAA; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
 
+/* ── Phase 2 Market dashboard：情緒儀表 + 板塊熱度 ────────────────────── */
+
+.market-dashboard {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(360px, 2fr);
+    gap: 16px;
+    margin: 0 0 16px 0;
+}
+@media (max-width: 900px) {
+    .market-dashboard {
+        grid-template-columns: 1fr;
+    }
+}
+.market-sentiment-gauge,
+.sector-heatmap {
+    background: #2A2A2A;
+    border: 1px solid #3A3A3A;
+    border-radius: 8px;
+    padding: 12px 14px;
+}
+.market-sentiment-empty,
+.sector-heatmap-empty {
+    color: #888;
+    font-size: 13px;
+    padding: 16px;
+}
+.dashboard-title {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    color: #FF9800;
+    font-weight: bold;
+}
+.sentiment-gauge-graph,
+.sector-heatmap-graph {
+    background: transparent;
+}
+.sentiment-gauge-reason {
+    color: #BBB;
+    font-size: 12px;
+    margin: 6px 0 0 0;
+    line-height: 1.5;
+}
+.sector-heatmap-legend {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #AAA;
+    text-align: right;
+}
+
 /* ── News page scrolling ────────────────────────────────────────────── */
 
 /* /news standalone page: needs an explicit height so the inner content
