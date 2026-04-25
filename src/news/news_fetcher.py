@@ -46,14 +46,22 @@ RSS_SOURCES: Dict[NewsCategory, List[str]] = {
     NewsCategory.INTERNATIONAL: [
         "https://news.google.com/rss/headlines/section/topic/WORLD?hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
         "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "https://www.aljazeera.com/xml/rss/all.xml",
+        "https://feeds.npr.org/1004/rss.xml",
     ],
     NewsCategory.FINANCIAL: [
         "https://finance.yahoo.com/news/rssindex",
         "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
+        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "https://feeds.marketwatch.com/marketwatch/topstories/",
+        "https://news.cnyes.com/rss/cat/headline",
     ],
     NewsCategory.TECH: [
         "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=zh-TW&gl=TW&ceid=TW:zh-Hant",
         "https://techcrunch.com/feed/",
+        "https://www.theverge.com/rss/index.xml",
+        "https://feeds.arstechnica.com/arstechnica/index",
+        "https://www.ithome.com.tw/rss",
     ],
 }
 

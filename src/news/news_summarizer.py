@@ -68,7 +68,10 @@ _GLOBAL_BRIEF_PROMPT = """\
 請完成以下任務，全部用繁體中文回應：
 
 1. 寫出「今日重點總結」（不超過 300 字），扼要點出今天全球最重要的事件與其交互影響。
-2. 各分類的「重點條列」（每個分類列 3~5 條短句，每條不超過 40 字）。
+2. 各分類的「重點條列」：**只要某分類在下方「各分類新聞」段落中有出現**，就必須為它產出一組 highlight，
+   每個分類列 3~5 條短句，每條不超過 40 字。分類代碼僅能使用：
+   INTERNATIONAL（國際）、FINANCIAL（財經）、TECH（科技）、STOCK_TW（台股個股）、STOCK_US（美股個股）。
+   若某分類完全沒有新聞則可省略；不要捏造未出現的分類。
 3. 給出一個市場情緒分數（0~100 整數）：0=極度恐慌、50=中性、100=極度樂觀，並附上一句話理由。
 
 ---
@@ -84,7 +87,9 @@ _GLOBAL_BRIEF_PROMPT = """\
   "category_highlights": [
     {{"category": "INTERNATIONAL", "headline_points": ["要點1", "要點2", "要點3"]}},
     {{"category": "FINANCIAL", "headline_points": ["...", "...", "..."]}},
-    {{"category": "TECH", "headline_points": ["...", "...", "..."]}}
+    {{"category": "TECH", "headline_points": ["...", "...", "..."]}},
+    {{"category": "STOCK_TW", "headline_points": ["...", "...", "..."]}},
+    {{"category": "STOCK_US", "headline_points": ["...", "...", "..."]}}
   ],
   "market_sentiment": 55,
   "sentiment_reason": "一句話理由"
@@ -111,6 +116,16 @@ _FAVORITES_IMPACT_PROMPT = """\
 - "bullish"（利多）：新聞對此股有明顯正面影響
 - "bearish"（利空）：新聞對此股有明顯負面影響
 - "neutral"（中性）：無明顯關聯或影響有限
+
+判斷必須遵守以下中立性護欄（任一不符合一律降為 "neutral"）：
+1. 「無相關」是合法答案：若今日新聞與此股完全無直接或間接關聯，必須回 "neutral"，
+   reason 寫「今日新聞無明顯關聯」、referenced_urls 留空陣列。不要為了給答案而硬找關聯。
+2. 證據強度：bullish 或 bearish 必須有 ≥ 2 篇來源不同（source 不同）的新聞支持；
+   只有 1 篇或多篇同來源轉載，必須降為 "neutral"。
+3. 雙面論證：reason 須先簡述支持訊號的證據，若有反向證據也須提及；
+   找不到反向證據時可寫「未見明顯反向訊息」。整段仍限 ≤ 120 字。
+4. referenced_urls：bullish/bearish 至少引用 2 個不同 source 的 URL（最多 3 個）；
+   neutral 可留空或最多 1 個。
 
 請嚴格以下列 JSON 格式回應（陣列順序與個股清單一致，不要加 markdown 程式碼框、不要加其他文字）：
 {{
