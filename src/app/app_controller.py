@@ -119,7 +119,10 @@ class AppController:
         )
         # Register hourly news job (08:00-15:00 Mon-Fri)
         self.scheduler.add_news_job(self.news_processor.run)
-        logger.debug("NewsProcessor initialized and news job registered")
+        self.scheduler.add_news_cleanup_job(
+            lambda: self.storage.cleanup_old_news(self.config.news_retention_days)
+        )
+        logger.debug("NewsProcessor initialized and news jobs registered")
 
     def _init_dash_app(self) -> None:
         """Initialize Dash application with layout and callbacks."""
