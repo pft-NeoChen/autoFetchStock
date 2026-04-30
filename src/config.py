@@ -115,7 +115,7 @@ class AppConfig:
         default_factory=lambda: os.getenv("NEWS_RAG_ENABLED", "false").lower() == "true"
     )
     news_rag_window_days: int = field(
-        default_factory=lambda: _env_int("NEWS_RAG_WINDOW_DAYS", 30)
+        default_factory=lambda: _env_int("NEWS_RAG_WINDOW_DAYS", 7)
     )
     news_rag_top_k: int = field(
         default_factory=lambda: _env_int("NEWS_RAG_TOP_K", 8)
@@ -124,10 +124,16 @@ class AppConfig:
         default_factory=lambda: _env_int("NEWS_RAG_MAX_NEW_EMBEDDINGS_PER_DAY", 100)
     )
     news_rag_embedding_model: str = field(
-        default_factory=lambda: os.getenv("NEWS_RAG_EMBEDDING_MODEL", "text-embedding-004")
+        default_factory=lambda: os.getenv("NEWS_RAG_EMBEDDING_MODEL", "gemini-embedding-2")
     )
     news_rag_max_chat_history_turns: int = field(
         default_factory=lambda: _env_int("NEWS_RAG_MAX_CHAT_HISTORY_TURNS", 6)
+    )
+    news_rag_embedding_request_interval: float = field(
+        default_factory=lambda: float(os.getenv("NEWS_RAG_EMBEDDING_REQUEST_INTERVAL", "0.7"))
+    )
+    news_rag_embedding_batch_size: int = field(
+        default_factory=lambda: _env_int("NEWS_RAG_EMBEDDING_BATCH_SIZE", 50)
     )
 
     def get_shioaji_credentials(self) -> tuple[str, str]:

@@ -360,28 +360,33 @@ class Scheduler:
 
     def add_news_rag_index_job(self, index_callback: Callable[[], object]) -> bool:
         """
-        Add the daily news RAG index update job.
+        Add the daily news RAG index update jobs.
 
-        Runs at 16:20 Asia/Taipei, after event timeline generation.
+        Runs twice per day (16:20 and 16:21 Asia/Taipei) to fit the
+        Gemini free-tier 100 contents/min embedding quota: each pass
+        embeds up to 100 new articles, separated by a one-minute gap so
+        the second pass starts in a fresh quota window.
         """
-        try:
-            self._scheduler.add_job(
-                self._news_rag_index_job,
-                trigger=CronTrigger(
-                    hour=16,
-                    minute=20,
-                    timezone=TW_TIMEZONE,
-                ),
-                id="news_rag_index",
-                kwargs={"index_callback": index_callback},
-                name="News RAG index update",
-                replace_existing=True,
-            )
-            logger.info("Registered daily news RAG index job (16:20)")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to register news RAG index job: {e}")
-            return False
+        success = True
+        for slot, minute in enumerate((20, 21), start=1):
+            try:
+                self._scheduler.add_job(
+                    self._news_rag_index_job,
+                    trigger=CronTrigger(
+                        hour=16,
+                        minute=minute,
+                        timezone=TW_TIMEZONE,
+                    ),
+                    id=f"news_rag_index_{slot}",
+                    kwargs={"index_callback": index_callback},
+                    name=f"News RAG index update #{slot}",
+                    replace_existing=True,
+                )
+                logger.info("Registered daily news RAG index job #%d (16:%02d)", slot, minute)
+            except Exception as e:
+                logger.error(f"Failed to register news RAG index job #{slot}: {e}")
+                success = False
+        return success
 
     def _news_rag_index_job(self, index_callback: Callable[[], object]) -> None:
         """Execute the news RAG index job without crashing the scheduler."""

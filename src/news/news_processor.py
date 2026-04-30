@@ -250,6 +250,10 @@ class NewsProcessor:
             end_day.strftime("%Y%m%d"),
             dedupe=True,
         ))
+        
+        # 確保優先處理最新的新聞，避免舊新聞佔用每日額度
+        articles.sort(key=lambda a: a.published_at, reverse=True)
+
         service = NewsRagService(self._config, self._storage.news_dir)
         return service.build_or_update_index(articles)
 

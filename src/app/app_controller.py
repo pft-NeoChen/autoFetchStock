@@ -157,6 +157,10 @@ class AppController:
             )
         logger.debug("NewsProcessor initialized and news jobs registered")
 
+        self._catchup_news_event_timeline()
+        if self.config.news_rag_enabled:
+            self._catchup_news_rag_index()
+
     def _subscribe_saved_favorites(self) -> None:
         """Subscribe to all saved favorites in Shioaji."""
         try:
@@ -222,6 +226,130 @@ class AppController:
                 # Return a copy to avoid mutation during iteration
                 return list(self._tick_buffer[stock_id]["ticks"])
             return []
+
+    def _catchup_news_event_timeline(self) -> None:
+        """Run the daily event timeline build if it was missed today.
+
+        APScheduler skips fired-while-offline jobs once `misfire_grace_time`
+        elapses, so a server downtime spanning 16:05 Asia/Taipei would defer
+        the timeline by a full day. Detect that gap on startup and rebuild
+        in the background.
+        """
+        import threading
+        from datetime import datetime, time
+        from zoneinfo import ZoneInfo
+
+        tw_tz = ZoneInfo("Asia/Taipei")
+        now_tw = datetime.now(tw_tz)
+        schedule_cutoff = time(16, 5)
+
+        if now_tw.time() < schedule_cutoff:
+            return
+
+        try:
+            events = self.storage.load_news_events()
+        except Exception as e:
+            logger.warning(f"Event timeline catch-up check failed: {e}")
+            return
+
+        if events is not None:
+            gen_dt = events.generated_at
+            if gen_dt.tzinfo is None:
+                gen_date = gen_dt.date()
+            else:
+                gen_date = gen_dt.astimezone(tw_tz).date()
+            if gen_date >= now_tw.date():
+                return
+
+        logger.info(
+            "Event timeline missing for today (last=%s), starting catch-up build",
+            events.generated_at.isoformat() if events else "none",
+        )
+
+        def _run() -> None:
+            try:
+                self.news_processor.build_event_timeline(
+                    self.config.news_history_window_days
+                )
+                logger.info("Event timeline catch-up build completed")
+            except Exception as exc:
+                logger.error(f"Event timeline catch-up build failed: {exc}")
+
+        threading.Thread(
+            target=_run,
+            name="event-timeline-catchup",
+            daemon=True,
+        ).start()
+
+    def _catchup_news_rag_index(self) -> None:
+        """Run the daily RAG index update if it was missed today.
+
+        Mirrors `_catchup_news_event_timeline`. The RAG job runs at 16:20
+        Asia/Taipei; freshness is detected via `updated_at` in
+        `data/news/rag_metadata.json`.
+        """
+        import json
+        import threading
+        from datetime import datetime, time
+        from zoneinfo import ZoneInfo
+
+        tw_tz = ZoneInfo("Asia/Taipei")
+        now_tw = datetime.now(tw_tz)
+        schedule_cutoff = time(16, 20)
+
+        if now_tw.time() < schedule_cutoff:
+            return
+
+        metadata_path = self.storage.news_dir / "rag_metadata.json"
+        last_updated: Optional[datetime] = None
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                ts = raw.get("updated_at")
+                if ts:
+                    last_updated = datetime.fromisoformat(ts)
+            except Exception as e:
+                logger.warning(f"RAG index catch-up check failed to read metadata: {e}")
+                return
+
+        if last_updated is not None:
+            if last_updated.tzinfo is None:
+                last_date = last_updated.date()
+            else:
+                last_date = last_updated.astimezone(tw_tz).date()
+            if last_date >= now_tw.date():
+                return
+
+        logger.info(
+            "RAG index missing for today (last=%s), starting catch-up build",
+            last_updated.isoformat() if last_updated else "none",
+        )
+
+        def _run() -> None:
+            import time as _time
+            passes = 2  # mirror the two daily scheduled jobs (16:20, 16:21)
+            for slot in range(1, passes + 1):
+                try:
+                    added = self.news_processor.update_rag_index(
+                        self.config.news_rag_window_days
+                    )
+                    logger.info(
+                        "RAG index catch-up pass %d/%d completed: %d new embeddings",
+                        slot,
+                        passes,
+                        added,
+                    )
+                except Exception as exc:
+                    logger.error(f"RAG index catch-up pass {slot} failed: {exc}")
+                if slot < passes:
+                    _time.sleep(65)  # let the per-minute embedding quota reset
+
+        threading.Thread(
+            target=_run,
+            name="rag-index-catchup",
+            daemon=True,
+        ).start()
 
     def _load_existing_data(self) -> None:
         """Load existing history data on startup (REQ-073)."""

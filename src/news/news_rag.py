@@ -6,9 +6,15 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+
+class RagRateLimitError(RuntimeError):
+    """Raised when the embedding API repeatedly rejects with 429."""
 
 import numpy as np
 
@@ -28,6 +34,7 @@ class NewsRagService:
         self._metadata_path = self._news_dir / "rag_metadata.json"
         self._client = None
         self._answer_model = "gemini-3.1-flash-lite-preview"
+        self._last_embed_call: float = 0.0
 
         if self._enabled:
             self._init_client()
@@ -58,19 +65,39 @@ class NewsRagService:
         new_items = []
         limit = int(getattr(self._config, "news_rag_max_new_embeddings_per_day", 100))
 
+        pending: List[Tuple[dict, str]] = []
         for article in historical_articles:
             item = self._article_metadata(article)
             if item["content_hash"] in existing_hashes:
                 continue
-            if len(new_items) >= limit:
+            if len(pending) >= limit:
                 logger.warning("News RAG embedding daily limit reached: %d", limit)
                 break
-            vector = self._embed_text(self._article_text(article))
-            if vector is None:
-                continue
-            new_rows.append(vector)
-            new_items.append(item)
+            pending.append((item, self._article_text(article)))
             existing_hashes.add(item["content_hash"])
+
+        batch_size = max(1, int(getattr(self._config, "news_rag_embedding_batch_size", 50)))
+        rate_limited = False
+        for start in range(0, len(pending), batch_size):
+            chunk = pending[start:start + batch_size]
+            texts = [text for _, text in chunk]
+            try:
+                vectors = self._embed_batch(texts)
+            except RagRateLimitError as exc:
+                logger.warning(
+                    "News RAG embedding aborted due to sustained rate limiting: %s",
+                    exc,
+                )
+                rate_limited = True
+                break
+            for (item, _), vector in zip(chunk, vectors):
+                if vector is None:
+                    continue
+                new_rows.append(vector)
+                new_items.append(item)
+
+        if rate_limited and not new_rows:
+            return 0
 
         if new_rows:
             new_matrix = np.vstack(new_rows)
@@ -211,21 +238,119 @@ class NewsRagService:
             return matrix, metadata
         return matrix[keep_indices] if keep_indices else np.empty((0, 0), dtype=float), kept
 
+    def _embed_batch(self, texts: List[str]) -> List[Optional[np.ndarray]]:
+        """Embed a batch of texts in a single API call.
+
+        Falls back to per-text embedding if the SDK rejects the batched
+        payload (e.g. older SDK versions that require a single content).
+        Rate-limit errors are propagated so the caller can stop the run.
+        """
+        if not texts:
+            return []
+        max_attempts = 2
+        for attempt in range(1, max_attempts + 1):
+            self._throttle_embed_call()
+            try:
+                response = self._client.models.embed_content(
+                    model=self._config.news_rag_embedding_model,
+                    contents=texts,
+                )
+                vectors: List[Optional[np.ndarray]] = []
+                embeddings = getattr(response, "embeddings", None)
+                if embeddings is None:
+                    embedding = getattr(response, "embedding", None)
+                    if embedding is not None:
+                        embeddings = [embedding]
+                if not embeddings:
+                    return [None] * len(texts)
+                for emb in embeddings:
+                    values = getattr(emb, "values", None)
+                    if values is None:
+                        vectors.append(None)
+                    else:
+                        vectors.append(np.array(values, dtype=float))
+                while len(vectors) < len(texts):
+                    vectors.append(None)
+                return vectors[:len(texts)]
+            except Exception as exc:
+                if self._is_rate_limit_error(exc):
+                    if attempt >= max_attempts:
+                        raise RagRateLimitError(str(exc)[:200]) from exc
+                    delay = self._parse_retry_delay(exc)
+                    logger.warning(
+                        "News RAG batch embedding rate-limited; sleeping %.1fs before retry",
+                        delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                logger.warning(
+                    "News RAG batch embedding failed (%d items): %s; falling back to per-item",
+                    len(texts),
+                    exc,
+                )
+                return [self._embed_text(t) for t in texts]
+        return [None] * len(texts)
+
     def _embed_text(self, text: str) -> Optional[np.ndarray]:
-        try:
-            response = self._client.models.embed_content(
-                model=self._config.news_rag_embedding_model,
-                contents=text,
-            )
-            embedding = getattr(response, "embedding", None)
-            if embedding is not None and hasattr(embedding, "values"):
-                return np.array(embedding.values, dtype=float)
-            embeddings = getattr(response, "embeddings", None)
-            if embeddings:
-                return np.array(embeddings[0].values, dtype=float)
-        except Exception as exc:
-            logger.warning("News RAG embedding failed: %s", exc)
+        max_attempts = 2
+        for attempt in range(1, max_attempts + 1):
+            self._throttle_embed_call()
+            try:
+                response = self._client.models.embed_content(
+                    model=self._config.news_rag_embedding_model,
+                    contents=text,
+                )
+                embedding = getattr(response, "embedding", None)
+                if embedding is not None and hasattr(embedding, "values"):
+                    return np.array(embedding.values, dtype=float)
+                embeddings = getattr(response, "embeddings", None)
+                if embeddings:
+                    return np.array(embeddings[0].values, dtype=float)
+                return None
+            except Exception as exc:
+                if self._is_rate_limit_error(exc):
+                    if attempt >= max_attempts:
+                        raise RagRateLimitError(str(exc)[:200]) from exc
+                    delay = self._parse_retry_delay(exc)
+                    logger.warning(
+                        "News RAG embedding rate-limited; sleeping %.1fs before retry",
+                        delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                logger.warning("News RAG embedding failed: %s", exc)
+                return None
         return None
+
+    def _throttle_embed_call(self) -> None:
+        interval = float(getattr(self._config, "news_rag_embedding_request_interval", 0.0) or 0.0)
+        if interval <= 0:
+            return
+        elapsed = time.monotonic() - self._last_embed_call
+        if elapsed < interval:
+            time.sleep(interval - elapsed)
+        self._last_embed_call = time.monotonic()
+
+    @staticmethod
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        msg = str(exc)
+        return "429" in msg or "RESOURCE_EXHAUSTED" in msg or "rate limit" in msg.lower()
+
+    @staticmethod
+    def _parse_retry_delay(exc: Exception) -> float:
+        match = re.search(r"retry in ([0-9.]+)s", str(exc), re.IGNORECASE)
+        if match:
+            try:
+                return min(60.0, max(1.0, float(match.group(1))))
+            except ValueError:
+                pass
+        match = re.search(r"'retryDelay': '([0-9.]+)s'", str(exc))
+        if match:
+            try:
+                return min(60.0, max(1.0, float(match.group(1))))
+            except ValueError:
+                pass
+        return 5.0
 
     @staticmethod
     def _article_text(article: NewsArticle) -> str:
@@ -235,7 +360,7 @@ class NewsRagService:
     def _article_metadata(self, article: NewsArticle) -> dict:
         text = self._article_text(article)
         content_hash = hashlib.sha1(
-            f"{article.url}|{text}".encode("utf-8")
+            (article.url or text).encode("utf-8")
         ).hexdigest()
         return {
             "url": article.url,
