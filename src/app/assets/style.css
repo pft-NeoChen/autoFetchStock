@@ -616,16 +616,29 @@ html {
 }
 
 .favorite-item {
+    /* Phase 3: row uses flex with explicit gaps so the leading
+       sentiment dot, main content, price, and trailing pills can
+       coexist without forcing a grid rewrite. */
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: var(--spacing-sm) var(--spacing-md);
-    background-color: var(--bg-tertiary);
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    background-color: var(--bg-3);
     border-radius: 4px;
     cursor: pointer;
     transition: all 0.2s;
     font-size: var(--font-sm);
     border: 1px solid transparent;
+}
+
+/* Sentiment dot prefix in watchlist row (Variant 3a). */
+.favorite-item > .signal-dot {
+    flex-shrink: 0;
+}
+
+/* Right-aligned trailing pill in watchlist row (Variant 3a). */
+.favorite-item-pill {
+    flex-shrink: 0;
 }
 
 .favorite-item-main {
@@ -775,6 +788,47 @@ html {
     flex-shrink: 0;
     min-width: 0;
     overflow: hidden;
+}
+
+/* Phase 3 (Variant 3b) inline signal banner — anchored right side of
+ * the stock info bar. Background tint follows sentiment.
+ */
+.signal-banner {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: 6px 10px;
+    border-radius: var(--r-button);
+    background-color: var(--bg-3);
+    border: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--txt-1);
+    max-width: 520px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.signal-banner.bull {
+    background-color: var(--up-soft);
+    border-color: var(--up-line);
+}
+.signal-banner.bear {
+    background-color: var(--down-soft);
+    border-color: var(--down-line);
+}
+.signal-banner.neu {
+    background-color: var(--bg-3);
+    border-color: var(--line);
+}
+.signal-banner-hidden {
+    display: none !important;
+}
+.signal-banner-reason {
+    color: var(--txt-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 380px;
 }
 
 .stock-header {

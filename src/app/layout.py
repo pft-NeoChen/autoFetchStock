@@ -477,6 +477,13 @@ def _create_stock_info_section() -> html.Div:
                     ),
                 ]
             ),
+            # Phase 3 — Variant 3b: inline signal banner (renders right-aligned
+            # via margin-left:auto). Hidden when current stock has no signal.
+            html.Div(
+                id="stock-signal-banner",
+                className="signal-banner signal-banner-hidden",
+                children=[],
+            ),
         ]
     )
 

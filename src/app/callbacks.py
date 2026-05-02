@@ -142,8 +142,18 @@ class CallbackManager:
             ],
         )
 
-    def _render_favorite_item(self, favorite: dict, current_stock: Optional[str]) -> html.Div:
-        """Render a single item in the favorites list."""
+    def _render_favorite_item(
+        self,
+        favorite: dict,
+        current_stock: Optional[str],
+        signal_map: Optional[Dict[str, dict]] = None,
+        anomaly_set: Optional[set] = None,
+    ) -> html.Div:
+        """Render a single item in the favorites list.
+
+        Phase 3 (Variant 3a): adds sentiment dot prefix and an optional
+        利多/利空 pill suffix when news pipeline classifies the stock.
+        """
         stock_id = favorite["id"]
         is_active = stock_id == current_stock
 
@@ -179,19 +189,34 @@ class CallbackManager:
         except Exception:
             quote = None
 
+        # Phase 3 (Variant 3a): sentiment dot + optional impact pill.
+        sig = (signal_map or {}).get(stock_id) or {}
+        sig_kind = sig.get("signal", "neutral")
+        dot_kind = {"bullish": "bull", "bearish": "bear"}.get(sig_kind, "neu")
+        is_anomaly = bool(anomaly_set and stock_id in anomaly_set)
+
+        children: List[Any] = [
+            html.Span(className=f"signal-dot {dot_kind}", title=sig.get("reason", "")),
+            html.Div(
+                className="favorite-item-main",
+                children=[
+                    self._build_favorite_kbar(quote),
+                    html.Span(favorite["name"], className="favorite-item-text"),
+                ],
+            ),
+            html.Span(price_text, className=price_class),
+        ]
+        if sig_kind == "bullish":
+            children.append(html.Span("利多", className="pill pill-up favorite-item-pill"))
+        elif sig_kind == "bearish":
+            children.append(html.Span("利空", className="pill pill-down favorite-item-pill"))
+        if is_anomaly:
+            children.append(html.Span("爆量", className="pill pill-warn favorite-item-pill"))
+
         return html.Div(
             id={"type": "favorite-item", "index": stock_id},
             className=item_class,
-            children=[
-                html.Div(
-                    className="favorite-item-main",
-                    children=[
-                        self._build_favorite_kbar(quote),
-                        html.Span(favorite["name"], className="favorite-item-text"),
-                    ],
-                ),
-                html.Span(price_text, className=price_class),
-            ],
+            children=children,
             n_clicks=0,
             draggable="true",
             **{"data-stock-id": stock_id},
@@ -280,17 +305,38 @@ class CallbackManager:
         @self.app.callback(
             Output("favorites-list", "children"),
             Input("app-state-store", "data"),
-            Input("favorites-update-interval", "n_intervals")
+            Input("favorites-update-interval", "n_intervals"),
+            Input("news-data-store", "data"),
+            Input("news-events-store", "data"),
         )
-        def render_favorites_list(app_state: dict, n_intervals: int):
-            """Render the favorites list sidebar."""
+        def render_favorites_list(
+            app_state: dict,
+            n_intervals: int,
+            news_data: Optional[dict],
+            news_events: Optional[dict],
+        ):
+            """Render the favorites list sidebar.
+
+            Phase 3: merges per-stock sentiment signals + anomaly flags
+            into each row (dot + optional pill).
+            """
             favorites = app_state.get("favorites", [])
             current_stock = app_state.get("current_stock")
 
             if not favorites:
                 return html.Div("尚未加入最愛", className="no-favorites")
 
-            return [self._render_favorite_item(fav, current_stock) for fav in favorites]
+            signal_map: Dict[str, dict] = {}
+            for s in (news_data or {}).get("favorite_signals") or []:
+                sid = s.get("stock_id")
+                if sid:
+                    signal_map[str(sid)] = s
+            anomaly_set = _collect_anomaly_stock_ids(news_events)
+
+            return [
+                self._render_favorite_item(fav, current_stock, signal_map, anomaly_set)
+                for fav in favorites
+            ]
 
         @self.app.callback(
             Output("stock-search-input", "value", allow_duplicate=True),
@@ -1530,6 +1576,56 @@ class CallbackManager:
             if not news_data or not news_data.get("global_brief"):
                 return html.Div("今日重點尚未產生", className="global-brief-empty")
             return _render_global_brief_card(news_data["global_brief"])
+
+        # ── Phase 3 (Variant 3b) inline signal banner（主頁股票資訊條） ─────
+        @self.app.callback(
+            Output("stock-signal-banner", "className"),
+            Output("stock-signal-banner", "children"),
+            Input("app-state-store", "data"),
+            Input("news-data-store", "data"),
+            Input("news-events-store", "data"),
+            prevent_initial_call=False,
+        )
+        def render_stock_signal_banner(
+            app_state: Optional[dict],
+            news_data: Optional[dict],
+            news_events: Optional[dict],
+        ):
+            current_stock = (app_state or {}).get("current_stock")
+            if not current_stock:
+                return "signal-banner signal-banner-hidden", []
+
+            sig: Optional[dict] = None
+            for s in (news_data or {}).get("favorite_signals") or []:
+                if str(s.get("stock_id")) == str(current_stock):
+                    sig = s
+                    break
+
+            anomaly_set = _collect_anomaly_stock_ids(news_events)
+            is_anomaly = current_stock in anomaly_set
+
+            # Hide entirely when there is neither signal nor anomaly to surface.
+            if not sig and not is_anomaly:
+                return "signal-banner signal-banner-hidden", []
+
+            sig_kind = (sig or {}).get("signal", "neutral")
+            kind_cls = {"bullish": "bull", "bearish": "bear"}.get(sig_kind, "neu")
+            pill_label = {"bullish": "利多", "bearish": "利空"}.get(sig_kind, "中性")
+            pill_cls = {
+                "bullish": "pill-up",
+                "bearish": "pill-down",
+            }.get(sig_kind, "pill-neu")
+
+            children: List[Any] = [
+                html.Span(pill_label, className=f"pill {pill_cls}"),
+            ]
+            if is_anomaly:
+                children.append(html.Span("爆量", className="pill pill-warn"))
+            reason = (sig or {}).get("reason") or ""
+            if reason:
+                children.append(html.Span(reason, className="signal-banner-reason"))
+
+            return f"signal-banner {kind_cls}", children
 
         # ── Phase 1 自選股訊號列（主頁） ──────────────────────────────────────
         @self.app.callback(
