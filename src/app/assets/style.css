@@ -208,36 +208,44 @@ html {
     box-sizing: border-box;
 }
 
-/* ===== Main Container ===== */
+/* ===== Main Container =====
+ * Phase 2: 1920 fluid layout. Outer padding 12px. Inner panes scroll
+ * independently; header & status bar use sticky positioning so they
+ * remain fixed while the central grid scrolls only on overflow.
+ */
 .main-container {
-    /* Full viewport — no max-width cap */
     width: 100%;
-    padding: var(--spacing-md);
-    /* Vertical flex column so content-wrapper can stretch to fill remaining height */
+    padding: 12px;
     display: flex;
     flex-direction: column;
     height: 100vh;
-    overflow: hidden;   /* inner panes scroll independently */
+    overflow: hidden;
 }
 
-/* ===== Header Section ===== */
+/* ===== Header Section (Phase 2: 56px sticky) ===== */
 .header-section {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
-    gap: var(--spacing-md);
-    padding: var(--spacing-md);
-    background-color: var(--bg-secondary);
-    border-radius: 8px;
-    margin-bottom: var(--spacing-md);
-    flex-shrink: 0;     /* never compress header */
+    gap: var(--sp-4);
+    padding: 0 14px;
+    height: var(--header-h);     /* 56px */
+    background-color: var(--bg-2);
+    border-radius: var(--r-card);
+    margin-bottom: var(--sp-4);
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 
 .app-title {
     margin: 0;
-    font-size: var(--font-xl);
+    font-size: 22px;            /* Phase 2 spec: page title h1 = 22px */
     font-weight: 600;
-    color: var(--text-primary);
+    line-height: 1.2;
+    color: var(--txt-0);
+    flex-shrink: 0;
 }
 
 /* ===== Search Components ===== */
@@ -329,53 +337,63 @@ html {
     color: var(--text-secondary);
 }
 
-/* ===== Content Layout ===== */
+/* ===== Content Layout (Phase 2: Variant A — Bloomberg 4-pane grid) =====
+ * 3 cols × 3 rows:
+ *   col: 260px | 1fr | 260px
+ *   row: 72px (stock-info) | 1fr (chart/tabs) | 220px (bottom data row)
+ * Sidebars span all rows.
+ */
 .content-wrapper {
-    display: flex;
-    gap: var(--spacing-md);
-    margin-bottom: var(--spacing-md);
-    /* Grow to fill all vertical space left by header + status bar */
+    display: grid;
+    grid-template-columns: 260px 1fr 260px;
+    grid-template-rows: 72px 1fr 220px;
+    grid-template-areas:
+        "left  top-center  right"
+        "left  mid-center  right"
+        "left  bot-center  right";
+    gap: var(--sp-4);
+    margin-bottom: var(--sp-4);
     flex: 1;
-    min-height: 0;      /* allow flex children to shrink below their content size */
+    min-height: 0;
     overflow: hidden;
 }
 
 .favorites-sidebar {
-    width: 220px;
-    flex-shrink: 0;
-    background-color: var(--bg-secondary);
-    border-radius: 8px;
-    padding: var(--spacing-md);
+    grid-area: left;
+    background-color: var(--bg-2);
+    border-radius: var(--r-card);
+    padding: var(--sp-4);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-width: 0;
 }
 
+/* Legacy .main-content wrapper (deprecated in Phase 2 layout but kept for
+   any consumer that still mounts under it; transparent passthrough). */
 .main-content {
-    flex: 1;
-    min-width: 0;       /* Prevent overflow */
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    display: contents;
 }
 
 .sidebar-title {
-    margin: 0 0 var(--spacing-md) 0;
-    font-size: var(--font-md);
-    color: var(--text-primary);
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: var(--spacing-sm);
+    margin: 0 0 var(--sp-3) 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--txt-0);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: var(--sp-2);
+    letter-spacing: 0.04em;
 }
 
 .big-orders-sidebar {
-    width: 220px;
-    flex-shrink: 0;
-    background-color: var(--bg-secondary);
-    border-radius: 8px;
-    padding: var(--spacing-md);
+    grid-area: right;
+    background-color: var(--bg-2);
+    border-radius: var(--r-card);
+    padding: var(--sp-4);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-width: 0;
 }
 
 .big-orders-header {
@@ -725,14 +743,18 @@ html {
 
 /* ===== Stock Info Section ===== */
 .stock-info-section {
+    grid-area: top-center;
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacing-lg);
-    padding: var(--spacing-lg);
-    background-color: var(--bg-secondary);
-    border-radius: 8px;
-    margin-bottom: var(--spacing-md);
-    flex-shrink: 0;     /* never compress stock info row */
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: var(--sp-5);
+    padding: 0 var(--sp-4);
+    background-color: var(--bg-2);
+    border-radius: var(--r-card);
+    margin-bottom: 0;       /* gap handled by parent grid */
+    flex-shrink: 0;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .stock-header {
@@ -799,15 +821,67 @@ html {
 
 /* ===== Tabs Section ===== */
 .tabs-section {
-    background-color: var(--bg-secondary);
-    border-radius: 8px;
-    /* Grow to fill remaining height inside .main-content */
-    flex: 1;
+    grid-area: mid-center;
+    background-color: var(--bg-2);
+    border-radius: var(--r-card);
     min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    margin-bottom: var(--spacing-md);
+    margin-bottom: 0;       /* gap handled by parent grid */
+}
+
+/* ===== Bottom data row (Phase 2) — 4 mini KPI cards =====
+ * Grid area below the chart pane. Holds chips/fund/news/etc. mini cards.
+ * Phase 2 ships with placeholder content; data wiring is Phase 3+.
+ */
+.bottom-data-row {
+    grid-area: bot-center;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--sp-4);
+    background-color: var(--bg-2);
+    border-radius: var(--r-card);
+    padding: var(--sp-4);
+    min-height: 0;
+    overflow: hidden;
+}
+
+.data-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    padding: 10px var(--sp-4);
+    background-color: var(--bg-3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.data-card-label {
+    font-size: 10px;
+    color: var(--txt-3);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.data-card-value {
+    font-family: var(--font-num);
+    font-variant-numeric: tabular-nums;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--txt-0);
+}
+
+.data-card-sub {
+    font-size: 10px;
+    color: var(--txt-2);
+    margin-top: auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .main-tabs {
@@ -952,12 +1026,17 @@ html {
 /* ===== Status Bar ===== */
 .status-bar {
     display: flex;
-    gap: var(--spacing-lg);
-    padding: var(--spacing-sm) var(--spacing-md);
-    background-color: var(--bg-secondary);
-    border-radius: 8px;
-    font-size: var(--font-sm);
-    flex-shrink: 0;     /* never compress status bar */
+    align-items: center;
+    gap: var(--sp-6);
+    padding: 0 var(--sp-4);
+    height: var(--status-h);    /* 28px */
+    background-color: var(--bg-2);
+    border-radius: var(--r-card);
+    font-size: 12px;
+    flex-shrink: 0;
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
 }
 
 .status-item {

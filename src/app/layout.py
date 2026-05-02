@@ -74,26 +74,19 @@ def create_main_page_layout() -> html.Div:
             # Favorite signal strip (自選股訊號列) — rendered by callback
             html.Div(id="favorite-signal-strip", className="favorite-signal-strip"),
 
-            # Main content area (sidebar + content)
+            # Main content area — Phase 2 grid (260 / 1fr / 260) × (72 / 1fr / 220)
             html.Div(
                 className="content-wrapper",
                 children=[
-                    # Left sidebar - Favorites
+                    # grid-area: left
                     _create_favorites_sidebar(),
-
-                    # Center content area
-                    html.Div(
-                        className="main-content",
-                        children=[
-                            # Stock info display
-                            _create_stock_info_section(),
-
-                            # Main tabs (intraday / K-line / news)
-                            _create_tabs_section(),
-                        ]
-                    ),
-
-                    # Right sidebar - Big Orders
+                    # grid-area: top-center
+                    _create_stock_info_section(),
+                    # grid-area: mid-center
+                    _create_tabs_section(),
+                    # grid-area: bot-center (Phase 2 NEW)
+                    _create_bottom_data_row(),
+                    # grid-area: right
                     _create_big_orders_sidebar(),
                 ]
             ),
@@ -485,6 +478,38 @@ def _create_stock_info_section() -> html.Div:
                 ]
             ),
         ]
+    )
+
+
+def _create_bottom_data_row() -> html.Div:
+    """Create bottom data row (Phase 2) with 4 mini KPI cards.
+
+    Cards: 外資 / 投信 / 自營 / 融資. Phase 2 ships placeholders;
+    callbacks populate values in later phases.
+    """
+    cards = [
+        ("foreign", "外資"),
+        ("trust",   "投信"),
+        ("dealer",  "自營"),
+        ("margin",  "融資"),
+    ]
+    return html.Div(
+        id="bottom-data-row",
+        className="bottom-data-row",
+        children=[_create_data_card(key, label) for key, label in cards],
+    )
+
+
+def _create_data_card(key: str, label: str) -> html.Div:
+    """Single mini KPI card for the bottom data row."""
+    return html.Div(
+        id=f"data-card-{key}",
+        className="data-card",
+        children=[
+            html.Div(label, className="data-card-label"),
+            html.Div("--", id=f"data-card-{key}-value", className="data-card-value"),
+            html.Div("等待資料", id=f"data-card-{key}-sub", className="data-card-sub"),
+        ],
     )
 
 
