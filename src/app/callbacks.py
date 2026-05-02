@@ -672,11 +672,11 @@ class CallbackManager:
 
                 return (
                     quote.stock_name,  # stock name
-                    f"({stock_id})",  # stock id
-                    f"{quote.current_price:.2f}",  # price
-                    f"stock-price {direction_class}",  # price class
+                    stock_id,  # stock id (no parentheses; sector pill follows)
+                    f"{quote.current_price:,.2f}",  # price
+                    f"stock-price num {direction_class}",  # price class
                     change_text,  # change
-                    f"stock-change {direction_class}",  # change class
+                    f"stock-change num {direction_class}",  # change class
                     f"{quote.total_volume:,} 張",  # volume
                     quote.timestamp.strftime("%H:%M:%S") if quote.timestamp else "--",  # update time
                     new_state,  # app state
@@ -1239,10 +1239,10 @@ class CallbackManager:
                         bid_total_text = f"{bid_side_total:,}"
 
                 return (
-                    f"{quote.current_price:.2f}",
-                    f"stock-price {direction_class}",
+                    f"{quote.current_price:,.2f}",
+                    f"stock-price num {direction_class}",
                     change_text,
-                    f"stock-change {direction_class}",
+                    f"stock-change num {direction_class}",
                     f"{quote.total_volume:,} 張",
                     quote.timestamp.strftime("%H:%M:%S") if quote.timestamp else "--",
                     market_text,
@@ -1681,23 +1681,24 @@ class CallbackManager:
                 return "signal-banner signal-banner-hidden", []
 
             sig_kind = (sig or {}).get("signal", "neutral")
-            kind_cls = {"bullish": "bull", "bearish": "bear"}.get(sig_kind, "neu")
             pill_label = {"bullish": "利多", "bearish": "利空"}.get(sig_kind, "中性")
             pill_cls = {
                 "bullish": "pill-up",
                 "bearish": "pill-down",
             }.get(sig_kind, "pill-neu")
 
+            # Compact inline form per StockHeadline redesign: a single
+            # pill (with optional 爆量 sibling) follows the sector pill
+            # in the LEFT block. Reason text is folded into the pill's
+            # `title` attribute as a hover tooltip.
+            reason = (sig or {}).get("reason") or ""
             children: List[Any] = [
-                html.Span(pill_label, className=f"pill {pill_cls}"),
+                html.Span(pill_label, className=f"pill {pill_cls}", title=reason),
             ]
             if is_anomaly:
                 children.append(html.Span("爆量", className="pill pill-warn"))
-            reason = (sig or {}).get("reason") or ""
-            if reason:
-                children.append(html.Span(reason, className="signal-banner-reason"))
 
-            return f"signal-banner {kind_cls}", children
+            return "signal-banner signal-banner-inline", children
 
         # ── Phase 1 自選股訊號列（主頁） ──────────────────────────────────────
         @self.app.callback(

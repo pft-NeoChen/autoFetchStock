@@ -494,14 +494,23 @@ def _create_best_five_prices() -> html.Div:
 
 
 def _create_stock_info_section() -> html.Div:
-    """Create stock information display section."""
+    """StockHeadline (atoms.jsx::StockHeadline @ size='lg').
+
+    Two siblings inside the 72px row:
+      LEFT  — ★ name id sector-pill signal-pill
+      RIGHT — price change pct (all JetBrains Mono, tabular-nums)
+    Right block uses margin-left:auto for separation.
+
+    成交量 and 更新時間 live in the bottom status bar; do not stuff
+    them back into the headline.
+    """
     return html.Div(
         id="stock-info-section",
         className="stock-info-section",
         children=[
-            # Stock name and ID with Star toggle
+            # ── LEFT: identity ───────────────────────────────────────────
             html.Div(
-                className="stock-header",
+                className="stock-headline-left",
                 children=[
                     html.Button(
                         "★",
@@ -516,59 +525,45 @@ def _create_stock_info_section() -> html.Div:
                     ),
                     html.Span(
                         id="stock-id-display",
-                        className="stock-id",
+                        className="stock-id num",
                         children="",
                     ),
-                ]
+                    # Sector pill — empty children hides via :empty CSS
+                    # rule. STUB: no sector data source yet; populated by a
+                    # future callback once StockInfo grows a `sector` field.
+                    html.Span(
+                        id="stock-sector-display",
+                        className="pill pill-neu stock-sector-pill",
+                        children="",
+                    ),
+                    # Phase 3b — inline signal pill, follows the sector
+                    # pill (or stock id when sector is empty). Renderered
+                    # by render_stock_signal_banner; empty/hidden when
+                    # the current stock has no qualifying signal.
+                    html.Span(
+                        id="stock-signal-banner",
+                        className="signal-banner signal-banner-hidden",
+                        children=[],
+                    ),
+                ],
             ),
-            # Price info
+            # ── RIGHT: price block ───────────────────────────────────────
             html.Div(
-                className="price-container",
+                className="stock-headline-right",
                 children=[
                     html.Span(
                         id="stock-price-display",
-                        className="stock-price",
+                        className="stock-price num",
                         children="--",
                     ),
                     html.Span(
                         id="stock-change-display",
-                        className="stock-change",
+                        className="stock-change num",
                         children="",
                     ),
-                ]
+                ],
             ),
-            # Volume info
-            html.Div(
-                className="volume-container",
-                children=[
-                    html.Span("成交量：", className="label"),
-                    html.Span(
-                        id="stock-volume-display",
-                        className="stock-volume",
-                        children="--",
-                    ),
-                ]
-            ),
-            # Last update time
-            html.Div(
-                className="update-time-container",
-                children=[
-                    html.Span("更新時間：", className="label"),
-                    html.Span(
-                        id="last-update-display",
-                        className="last-update",
-                        children="--",
-                    ),
-                ]
-            ),
-            # Phase 3 — Variant 3b: inline signal banner (renders right-aligned
-            # via margin-left:auto). Hidden when current stock has no signal.
-            html.Div(
-                id="stock-signal-banner",
-                className="signal-banner signal-banner-hidden",
-                children=[],
-            ),
-        ]
+        ],
     )
 
 
@@ -767,7 +762,12 @@ def _create_error_display() -> html.Div:
 
 
 def _create_status_bar() -> html.Div:
-    """Create system status bar."""
+    """Bottom status bar (28px sticky).
+
+    Hosts connection / market / scheduler indicators on the left and
+    the per-stock VOL + UPD readouts on the right (relocated from the
+    StockHeadline 72px row per Phase 3.5 redesign feedback).
+    """
     return html.Div(
         id="system-status-bar",
         className="status-bar",
@@ -775,19 +775,42 @@ def _create_status_bar() -> html.Div:
             html.Span(
                 id="connection-status",
                 className="status-item",
-                children="● 連線狀態：正常"
+                children="● 連線狀態：正常",
             ),
             html.Span(
                 id="market-status",
                 className="status-item",
-                children="● 市場狀態：--"
+                children="● 市場狀態：--",
             ),
             html.Span(
                 id="scheduler-status",
                 className="status-item",
-                children="● 排程狀態：--"
+                children="● 排程狀態：--",
             ),
-        ]
+            html.Span(className="status-spacer"),
+            html.Span(
+                className="status-item status-stock-stat",
+                children=[
+                    html.Span("VOL", className="status-stock-label"),
+                    html.Span(
+                        id="stock-volume-display",
+                        className="num status-stock-value",
+                        children="--",
+                    ),
+                ],
+            ),
+            html.Span(
+                className="status-item status-stock-stat",
+                children=[
+                    html.Span("UPD", className="status-stock-label"),
+                    html.Span(
+                        id="last-update-display",
+                        className="num status-stock-value",
+                        children="--",
+                    ),
+                ],
+            ),
+        ],
     )
 
 

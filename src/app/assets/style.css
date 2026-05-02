@@ -775,104 +775,123 @@ html {
 }
 
 /* ===== Stock Info Section ===== */
+/* StockHeadline — Phase 2/3 redesign aligned with atoms.jsx::StockHeadline.
+ * Two siblings (.stock-headline-left | .stock-headline-right) baseline-aligned
+ * inside a 72px row, padding 0 16px. Right block uses margin-left:auto so
+ * separation is flexbox-driven (no hard-coded width).
+ */
 .stock-info-section {
     grid-area: top-center;
     display: flex;
     flex-wrap: nowrap;
-    align-items: center;
+    align-items: baseline;
     gap: var(--sp-5);
-    padding: 0 var(--sp-4);
+    padding: 0 var(--sp-5);          /* 0 16px */
+    height: 72px;
     background-color: var(--bg-2);
     border-radius: var(--r-card);
-    margin-bottom: 0;       /* gap handled by parent grid */
+    margin-bottom: 0;
     flex-shrink: 0;
     min-width: 0;
     overflow: hidden;
 }
 
-/* Phase 3 (Variant 3b) inline signal banner — anchored right side of
- * the stock info bar. Background tint follows sentiment.
- */
-.signal-banner {
-    margin-left: auto;
+.stock-headline-left {
     display: flex;
-    align-items: center;
-    gap: var(--sp-3);
-    padding: 6px 10px;
-    border-radius: var(--r-button);
-    background-color: var(--bg-3);
-    border: 1px solid var(--line);
-    font-size: 12px;
-    color: var(--txt-1);
-    max-width: 520px;
-    overflow: hidden;
+    align-items: baseline;
+    gap: var(--sp-3);                /* 8 */
+    min-width: 0;
+}
+
+.stock-headline-right {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-left: auto;
     flex-shrink: 0;
 }
-.signal-banner.bull {
-    background-color: var(--up-soft);
-    border-color: var(--up-line);
+
+.star-button {
+    background: transparent;
+    border: 0;
+    color: var(--txt-3);
+    font-size: 18px;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+    -webkit-text-stroke: initial;
 }
-.signal-banner.bear {
-    background-color: var(--down-soft);
-    border-color: var(--down-line);
+.star-button.active {
+    color: var(--highlight);
+    -webkit-text-stroke: initial;
 }
-.signal-banner.neu {
-    background-color: var(--bg-3);
-    border-color: var(--line);
+
+.stock-name {
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--txt-0);
+    white-space: nowrap;
+}
+
+.stock-id {
+    font-size: 13px;
+    color: var(--txt-2);
+    /* `.num` class already supplies var(--font-num) + tabular-nums */
+    line-height: 1;
+}
+
+.stock-sector-pill {
+    flex-shrink: 0;
+    /* Hide when callback leaves children empty (no sector data yet). */
+}
+.stock-sector-pill:empty {
+    display: none;
+}
+
+.stock-price {
+    font-size: 34px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--txt-0);
+}
+.stock-price.price-up   { color: var(--up); }
+.stock-price.price-down { color: var(--down); }
+.stock-price.price-flat { color: var(--flat); }
+
+.stock-change {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--txt-1);
+}
+.stock-change.price-up   { color: var(--up); }
+.stock-change.price-down { color: var(--down); }
+.stock-change.price-flat { color: var(--flat); }
+
+/* Phase 3b inline signal pill — sits in the LEFT block after the
+ * sector pill. No background/border/padding of its own; the contained
+ * .pill children carry their own chrome.
+ */
+.signal-banner {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    flex-shrink: 0;
 }
 .signal-banner-hidden {
     display: none !important;
 }
-.signal-banner-reason {
-    color: var(--txt-1);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 380px;
-}
-
-.stock-header {
-    display: flex;
-    align-items: baseline;
-    gap: var(--spacing-sm);
-}
-
-.stock-name {
-    font-size: var(--font-xl);
-    font-weight: 700;
-}
-
-.stock-id {
-    font-size: var(--font-md);
-    color: var(--text-secondary);
-}
-
-.price-container {
-    display: flex;
-    align-items: baseline;
-    gap: var(--spacing-md);
-}
-
-.stock-price {
-    font-size: var(--font-xxl);
-    font-weight: 700;
-}
-
-.stock-change {
-    font-size: var(--font-lg);
-    font-weight: 600;
-}
-
-.volume-container,
-.update-time-container {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
+.signal-banner-inline {
+    /* explicit inline form — no tint background */
 }
 
 .label {
-    color: var(--text-secondary);
-    font-size: var(--font-sm);
+    color: var(--txt-2);
+    font-size: 12px;
 }
 
 .stock-volume,
@@ -1123,6 +1142,28 @@ html {
 
 .status-item.offline {
     color: var(--color-up);  /* Red for offline */
+}
+
+.status-spacer {
+    flex: 1;
+}
+
+.status-stock-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+}
+
+.status-stock-label {
+    font-size: 10px;
+    color: var(--txt-3);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.status-stock-value {
+    font-size: 12px;
+    color: var(--txt-1);
 }
 
 /* ===== Responsive Design ===== */
