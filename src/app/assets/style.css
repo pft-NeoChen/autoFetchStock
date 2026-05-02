@@ -7,48 +7,180 @@
  * - White (#FFFFFF) for flat
  */
 
-/* ===== CSS Variables ===== */
+/*
+ * ===== Design Tokens (Phase 1 — UX Redesign) =====
+ * Source: design_handoff_autoFetchStock/tokens.css
+ * Locked: 紅漲綠跌; MA5 #FF6F00 / MA10 #2196F3 / MA20 #E91E63 / MA60 #9C27B0
+ */
 :root {
-    /* Colors */
-    --bg-primary: #1E1E1E;
-    --bg-secondary: #2A2A2A;
-    --bg-tertiary: #333333;
-    --text-primary: #FFFFFF;
-    --text-secondary: #AAAAAA;
-    --text-muted: #666666;
+    /* ─── Backgrounds ─── */
+    --bg-0: #1E1E1E;
+    --bg-1: #252525;
+    --bg-2: #2A2A2A;
+    --bg-3: #333333;
+    --bg-4: #3A3A3A;
 
-    /* Price direction colors (Taiwan convention) */
-    --color-up: #EF5350;
-    --color-down: #26A69A;
-    --color-flat: #FFFFFF;
+    /* ─── Lines ─── */
+    --line:   #3A3A3A;
+    --line-2: #444444;
 
-    /* Accent colors */
-    --color-accent: #2196F3;
-    --color-highlight: #FFC107;
+    /* ─── Text ─── */
+    --txt-0: #FFFFFF;
+    --txt-1: #D7D7D7;
+    --txt-2: #AAAAAA;
+    --txt-3: #666666;
 
-    /* Error/Warning colors */
-    --color-error: #B71C1C;
-    --color-warning: #F57F17;
-    --color-info: #1565C0;
+    /* ─── Taiwan stock convention (DO NOT INVERT) ─── */
+    --up:        #EF5350;
+    --up-soft:   rgba(239, 83, 80, 0.14);
+    --up-line:   rgba(239, 83, 80, 0.45);
+    --down:      #26A69A;
+    --down-soft: rgba(38, 166, 154, 0.14);
+    --down-line: rgba(38, 166, 154, 0.45);
+    --flat:      #FFFFFF;
 
-    /* Borders and shadows */
-    --border-color: #444444;
-    --shadow-color: rgba(0, 0, 0, 0.3);
+    /* ─── Moving averages (locked) ─── */
+    --ma5:  #FF6F00;
+    --ma10: #2196F3;
+    --ma20: #E91E63;
+    --ma60: #9C27B0;
 
-    /* Spacing */
+    /* ─── Functional ─── */
+    --accent:    #2196F3;
+    --highlight: #FFC107;
+    --error:     #B71C1C;
+    --warn:      #F57F17;
+    --info:      #1565C0;
+
+    /* ─── AI accent (new) ─── */
+    --ai:      oklch(0.68 0.13 295);
+    --ai-soft: rgba(156, 77, 204, 0.14);
+
+    /* ─── Type ─── */
+    --font-ui:  'Inter', 'Noto Sans TC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-num: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+    /* ─── Spacing scale ─── */
+    --sp-1: 4px;
+    --sp-2: 6px;
+    --sp-3: 8px;
+    --sp-4: 12px;
+    --sp-5: 16px;
+    --sp-6: 20px;
+    --sp-7: 24px;
+    --sp-8: 32px;
+
+    /* ─── Radius ─── */
+    --r-pill:   3px;
+    --r-button: 4px;
+    --r-card:   6px;
+
+    /* ─── Density ─── */
+    --row-base:    28px;
+    --row-compact: 22px;
+    --header-h:    56px;
+    --status-h:    28px;
+
+    /* ─── Animation ─── */
+    --t-fast:  120ms;
+    --t-base:  180ms;
+    --t-flash: 600ms;
+    --ease:    cubic-bezier(.4, 0, .2, 1);
+
+    /* ─── Legacy aliases (Phase 1 backwards-compat) ─── */
+    /* Existing rules reference --bg-primary etc.; alias to new tokens
+       so the whole file points at one source of truth. */
+    --bg-primary:      var(--bg-0);
+    --bg-secondary:    var(--bg-2);
+    --bg-tertiary:     var(--bg-3);
+    --text-primary:    var(--txt-0);
+    --text-secondary:  var(--txt-2);
+    --text-muted:      var(--txt-3);
+    --color-up:        var(--up);
+    --color-down:      var(--down);
+    --color-flat:      var(--flat);
+    --color-accent:    var(--accent);
+    --color-highlight: var(--highlight);
+    --color-error:     var(--error);
+    --color-warning:   var(--warn);
+    --color-info:      var(--info);
+    --border-color:    var(--line-2);
+    --shadow-color:    rgba(0, 0, 0, 0.3);
+
+    /* Legacy spacing — kept (existing rules use these literal names) */
     --spacing-xs: 4px;
     --spacing-sm: 8px;
     --spacing-md: 16px;
     --spacing-lg: 24px;
     --spacing-xl: 32px;
 
-    /* Font sizes */
-    --font-xs: 12px;
-    --font-sm: 14px;
-    --font-md: 16px;
-    --font-lg: 20px;
-    --font-xl: 28px;
+    /* Legacy font sizes */
+    --font-xs:  12px;
+    --font-sm:  14px;
+    --font-md:  16px;
+    --font-lg:  20px;
+    --font-xl:  28px;
     --font-xxl: 36px;
+}
+
+/* ─── Numeric utility ─── */
+.num,
+[class*="num-"] {
+    font-family: var(--font-num);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+}
+
+/* ─── Direction colors (token-based; class names reserved for redesign) ─── */
+.up   { color: var(--up); }
+.down { color: var(--down); }
+.flat { color: var(--flat); }
+
+/* ─── Pills ─── */
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 1px 6px;
+    border-radius: var(--r-pill);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .04em;
+}
+.pill-up   { background: var(--up-soft);   color: var(--up);   border: 1px solid var(--up-line); }
+.pill-down { background: var(--down-soft); color: var(--down); border: 1px solid var(--down-line); }
+.pill-neu  { background: rgba(170, 170, 170, .1); color: var(--txt-1); border: 1px solid var(--line-2); }
+.pill-ai   { background: var(--ai-soft); color: var(--ai); border: 1px solid color-mix(in oklab, var(--ai) 50%, transparent); }
+.pill-warn { background: rgba(245, 127, 23, .14); color: #FFB74D; border: 1px solid rgba(245, 127, 23, .5); }
+
+/* ─── Sentiment dot ─── */
+.signal-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.signal-dot.bull { background: var(--up);   box-shadow: 0 0 6px rgba(239, 83, 80, .7); }
+.signal-dot.bear { background: var(--down); box-shadow: 0 0 6px rgba(38, 166, 154, .7); }
+.signal-dot.neu  { background: var(--txt-3); }
+.signal-dot.ai   { background: var(--ai);   box-shadow: 0 0 6px color-mix(in oklab, var(--ai) 70%, transparent); }
+
+/* ─── Price flash animations (used by Phase 2+ live updates) ─── */
+@keyframes flash-up {
+    0%   { background: var(--up-soft); }
+    100% { background: transparent; }
+}
+@keyframes flash-down {
+    0%   { background: var(--down-soft); }
+    100% { background: transparent; }
+}
+.flash-up   { animation: flash-up   var(--t-flash) var(--ease); }
+.flash-down { animation: flash-down var(--t-flash) var(--ease); }
+
+/* ─── Focus ring ─── */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 /* ===== Global Styles ===== */
@@ -338,7 +470,7 @@ html {
     left: 50%;
     transform: translate(-50%, -50%);
     font-size: 11px;
-    color: #fff;
+    color: var(--txt-0);
     font-weight: 500;
     text-shadow: 0 0 3px rgba(0,0,0,0.5);
 }
@@ -982,8 +1114,8 @@ html {
 .global-brief-card {
     margin: 16px 0;
     padding: 16px 20px;
-    background: #2A2A2A;
-    border: 1px solid #3A3A3A;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
     border-radius: 8px;
 }
 .global-brief-empty {
@@ -991,7 +1123,7 @@ html {
     font-size: 13px;
 }
 .global-brief-card-inner.failed .global-brief-error {
-    color: #EF5350;
+    color: var(--up);
 }
 .global-brief-header {
     display: flex;
@@ -1002,7 +1134,7 @@ html {
 .global-brief-title {
     margin: 0;
     font-size: 16px;
-    color: #FFF;
+    color: var(--txt-0);
 }
 .brief-sentiment-box {
     display: flex;
@@ -1012,16 +1144,16 @@ html {
 .brief-sentiment-score {
     font-size: 20px;
     font-weight: bold;
-    color: #FFF;
+    color: var(--txt-0);
 }
 .brief-sentiment-label {
     padding: 2px 10px;
     border-radius: 12px;
     font-size: 12px;
 }
-.mood-bullish { background: #EF5350; color: #FFF; }
-.mood-bearish { background: #26A69A; color: #FFF; }
-.mood-neutral { background: #555; color: #FFF; }
+.mood-bullish { background: var(--up); color: var(--txt-0); }
+.mood-bearish { background: var(--down); color: var(--txt-0); }
+.mood-neutral { background: #555; color: var(--txt-0); }
 .global-brief-summary {
     color: #DDD;
     line-height: 1.6;
@@ -1071,20 +1203,20 @@ html {
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
-    background: #2A2A2A;
-    border: 1px solid #3A3A3A;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
     border-radius: 20px;
     white-space: nowrap;
     font-size: 12px;
     flex-shrink: 0;
 }
-.fav-signal-item.signal-bullish { border-color: #EF5350; }
-.fav-signal-item.signal-bearish { border-color: #26A69A; }
-.fav-signal-stock { color: #FFF; font-weight: bold; }
+.fav-signal-item.signal-bullish { border-color: var(--up); }
+.fav-signal-item.signal-bearish { border-color: var(--down); }
+.fav-signal-stock { color: var(--txt-0); font-weight: bold; }
 .fav-signal-label { padding: 1px 8px; border-radius: 10px; font-size: 11px; }
-.signal-bullish.fav-signal-label { background: #EF5350; color: #FFF; }
-.signal-bearish.fav-signal-label { background: #26A69A; color: #FFF; }
-.signal-neutral.fav-signal-label { background: #555; color: #FFF; }
+.signal-bullish.fav-signal-label { background: var(--up); color: var(--txt-0); }
+.signal-bearish.fav-signal-label { background: var(--down); color: var(--txt-0); }
+.signal-neutral.fav-signal-label { background: #555; color: var(--txt-0); }
 .fav-signal-reason { color: #AAA; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Phase 2 Market dashboard：情緒儀表 + 板塊熱度 ────────────────────── */
@@ -1102,8 +1234,8 @@ html {
 }
 .market-sentiment-gauge,
 .sector-heatmap {
-    background: #2A2A2A;
-    border: 1px solid #3A3A3A;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
     border-radius: 8px;
     padding: 12px 14px;
 }
@@ -1141,7 +1273,7 @@ html {
 }
 
 .event-timeline-inner {
-    background: #1E1E1E;
+    background: var(--bg-0);
     border: 1px solid var(--border-color);
     border-radius: 6px;
     padding: 12px;
@@ -1161,7 +1293,7 @@ html {
 }
 
 .event-item {
-    border-top: 1px solid #333;
+    border-top: 1px solid var(--bg-3);
     padding-top: 8px;
 }
 
@@ -1264,7 +1396,7 @@ html {
 }
 
 .news-chat-message.assistant {
-    background: #1E1E1E;
+    background: var(--bg-0);
     color: var(--text-secondary);
 }
 
@@ -1303,7 +1435,7 @@ html {
     background: var(--color-accent);
     border: 0;
     border-radius: 4px;
-    color: #FFF;
+    color: var(--txt-0);
     cursor: pointer;
     padding: 7px 12px;
 }
@@ -1339,7 +1471,7 @@ html {
 
 .news-refresh-button {
     background-color: var(--color-accent);
-    color: #FFF;
+    color: var(--txt-0);
     border: none;
     padding: 6px 14px;
     border-radius: 4px;
