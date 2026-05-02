@@ -105,3 +105,5 @@ firebase-debug.log
 !.gitkeep
 config.env
 cert/
+
+design_handoff_autoFetchStock/
