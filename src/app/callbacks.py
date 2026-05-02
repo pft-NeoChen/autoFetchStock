@@ -19,13 +19,23 @@ from dash import callback, Output, Input, State, no_update, html, dcc, ctx, ALL
 from dash.exceptions import PreventUpdate
 import plotly.graph_objects as go
 
-from src.models import KlinePeriod, PriceDirection, IntradayTick, RealtimeQuote
+from src.models import (
+    KlinePeriod,
+    PriceDirection,
+    IntradayTick,
+    RealtimeQuote,
+    MarketIndexEntry,
+    ChipKpiCard,
+)
 from src.exceptions import (
     ConnectionTimeoutError,
     InvalidDataError,
     StockNotFoundError,
     ServiceUnavailableError,
 )
+from src.data.market_indices import fetch_market_strip, market_strip_tail
+from src.data.chips_kpi import build_chips_kpi
+from src.data.spark import render_spark
 
 logger = logging.getLogger("autofetchstock.app")
 
@@ -90,6 +100,7 @@ class CallbackManager:
         self._register_error_callbacks()
         self._register_favorites_callbacks()
         self._register_news_callbacks()
+        self._register_phase35_callbacks()
         logger.info("All callbacks registered")
 
     def _build_favorite_kbar(self, quote: Optional[RealtimeQuote]) -> html.Div:
@@ -149,38 +160,36 @@ class CallbackManager:
         signal_map: Optional[Dict[str, dict]] = None,
         anomaly_set: Optional[set] = None,
     ) -> html.Div:
-        """Render a single item in the favorites list.
+        """Render a single watchlist row.
 
-        Phase 3 (Variant 3a): adds sentiment dot prefix and an optional
-        利多/利空 pill suffix when news pipeline classifies the stock.
+        Phase 3.5: 4-column grid (dot / name+id+anomaly / spark / price+pct).
+        Mirrors design/afs/layout-variants.jsx::WatchlistRow.
         """
         stock_id = favorite["id"]
+        stock_name = favorite.get("name", stock_id)
         is_active = stock_id == current_stock
 
         quote = None
         price_text = "--"
-        price_class = "favorite-item-price"
-        item_class = f"favorite-item{' active' if is_active else ''}"
+        pct_text = ""
+        direction_cls = "flat"
+        item_class = f"favorite-item watch-row{' active' if is_active else ''}"
 
         try:
             if self.fetcher:
                 get_cached_quote = getattr(self.fetcher, "get_cached_quote", None)
                 if callable(get_cached_quote):
                     quote = get_cached_quote(stock_id)
-
-                # Using blocking=False to avoid UI freeze if many favorites use TWSE.
-                # The fetcher now falls back to its last cached quote instead of
-                # wiping the UI back to "--" when rate-limited.
                 if quote is None:
                     quote = self.fetcher.fetch_realtime_quote(stock_id, blocking=False)
             if quote:
                 price_text = f"{quote.current_price:.2f}"
                 if quote.change_amount > 0:
-                    price_class += " price-up"
+                    direction_cls = "up"
                 elif quote.change_amount < 0:
-                    price_class += " price-down"
-                else:
-                    price_class += " price-flat"
+                    direction_cls = "down"
+                sign = "+" if quote.change_percent >= 0 else ""
+                pct_text = f"{sign}{quote.change_percent:.2f}%"
 
                 if quote.limit_up_price > 0 and quote.current_price >= quote.limit_up_price:
                     item_class += " limit-up-bg"
@@ -189,29 +198,51 @@ class CallbackManager:
         except Exception:
             quote = None
 
-        # Phase 3 (Variant 3a): sentiment dot + optional impact pill.
+        # Sentiment dot + anomaly + impact pill (Phase 3 contract preserved).
         sig = (signal_map or {}).get(stock_id) or {}
         sig_kind = sig.get("signal", "neutral")
         dot_kind = {"bullish": "bull", "bearish": "bear"}.get(sig_kind, "neu")
         is_anomaly = bool(anomaly_set and stock_id in anomaly_set)
 
+        # Spark seed (deterministic): numeric stock id, fallback hash.
+        try:
+            seed = int(stock_id)
+        except (TypeError, ValueError):
+            seed = abs(hash(stock_id)) % 100_000 or 1
+        # STUB: spark uses seeded values until per-stock recent_closes
+        # are wired through (PHASE_3_5_INFO_DENSITY §2 follow-up).
+        spark_node = render_spark(None, direction=direction_cls, w=56, h=18, seed=seed)
+
+        # Column 2 — name + id + optional pills.
+        name_row_children: List[Any] = [
+            html.Span(stock_name, className="watch-name"),
+            html.Span(stock_id, className="watch-code num"),
+        ]
+        if is_anomaly:
+            name_row_children.append(html.Span("爆量", className="pill pill-warn watch-pill"))
+        if sig_kind == "bullish":
+            name_row_children.append(html.Span("利多", className="pill pill-up watch-pill"))
+        elif sig_kind == "bearish":
+            name_row_children.append(html.Span("利空", className="pill pill-down watch-pill"))
+
         children: List[Any] = [
-            html.Span(className=f"signal-dot {dot_kind}", title=sig.get("reason", "")),
+            html.Span(
+                className=f"signal-dot {dot_kind} watch-dot",
+                title=sig.get("reason", ""),
+            ),
             html.Div(
-                className="favorite-item-main",
+                className="watch-name-col",
+                children=[html.Div(name_row_children, className="watch-name-row")],
+            ),
+            html.Div(spark_node, className="watch-spark-col"),
+            html.Div(
+                className="watch-price-col",
                 children=[
-                    self._build_favorite_kbar(quote),
-                    html.Span(favorite["name"], className="favorite-item-text"),
+                    html.Div(price_text, className=f"num watch-price {direction_cls}"),
+                    html.Div(pct_text, className=f"num watch-pct {direction_cls}"),
                 ],
             ),
-            html.Span(price_text, className=price_class),
         ]
-        if sig_kind == "bullish":
-            children.append(html.Span("利多", className="pill pill-up favorite-item-pill"))
-        elif sig_kind == "bearish":
-            children.append(html.Span("利空", className="pill pill-down favorite-item-pill"))
-        if is_anomaly:
-            children.append(html.Span("爆量", className="pill pill-warn favorite-item-pill"))
 
         return html.Div(
             id={"type": "favorite-item", "index": stock_id},
@@ -1064,24 +1095,38 @@ class CallbackManager:
                                 uirevision=stock_id
                             )
                         
-                        # Generate Big Orders List (Newest at Top)
+                        # Generate Big Orders List — Phase 3.5: 3-column tape
+                        # (時間 / 張數 / 金額); newest at top.
                         big_orders_items = []
-                        
+
                         if "is_big_buy" in df.columns:
                             big_orders = df[df["is_big_buy"] | df["is_big_sell"]]
-                            # Reverse iteration to show newest first
                             for _, row in big_orders.iloc[::-1].iterrows():
-                                is_buy = row["is_big_buy"]
-                                vol_class = "big-order-volume big-buy" if is_buy else "big-order-volume big-sell"
-                                time_str = row["time"].strftime("%H:%M:%S") if isinstance(row["time"], datetime) else str(row["time"])
-                                
+                                is_buy = bool(row["is_big_buy"])
+                                vol_calc = float(row.get("tick_vol_calc", 0) or 0)
+                                price_val = float(row.get("price", 0) or 0)
+                                amt_val = vol_calc * price_val * 1000  # 張 → 股 → 金額
+                                time_str = (
+                                    row["time"].strftime("%H:%M:%S")
+                                    if isinstance(row["time"], datetime)
+                                    else str(row["time"])
+                                )
+                                side_cls = "up" if is_buy else "down"
+                                signed_vol = f"+{vol_calc:.0f}" if is_buy else f"-{vol_calc:.0f}"
                                 big_orders_items.append(
                                     html.Div(
-                                        className="big-order-item",
+                                        className=f"big-order-item {side_cls}",
                                         children=[
-                                            html.Span(time_str, className="big-order-time"),
-                                            html.Span(f"{row['tick_vol_calc']:.0f}", className=vol_class),
-                                        ]
+                                            html.Span(time_str, className="num big-order-time"),
+                                            html.Span(
+                                                signed_vol,
+                                                className=f"num big-order-volume {side_cls}",
+                                            ),
+                                            html.Span(
+                                                f"{amt_val:,.0f}",
+                                                className=f"num big-order-amt {side_cls}",
+                                            ),
+                                        ],
                                     )
                                 )
                             if not big_orders_items:
@@ -1130,38 +1175,60 @@ class CallbackManager:
                         ask_side_total = bidask.get("ask_side_total_vol", 0)
                         bid_side_total = bidask.get("bid_side_total_vol", 0)
 
-                        # Build five-level rows + subtotal
+                        # Build five-level rows — Phase 3.5: each cell carries
+                        # an inline linear-gradient soft-fill proportional to
+                        # its volume share, mirroring atoms layout-variants.jsx
+                        # ::Best5Mini.
                         rows = []
-                        bid_vol_sum = 0
-                        ask_vol_sum = 0
                         levels = min(5, len(bid_prices), len(ask_prices))
+                        max_v = 1
                         for i in range(levels):
                             bv = bid_volumes[i] if i < len(bid_volumes) else 0
                             av = ask_volumes[i] if i < len(ask_volumes) else 0
-                            bid_vol_sum += bv
-                            ask_vol_sum += av
+                            if bv > max_v: max_v = bv
+                            if av > max_v: max_v = av
+                        for i in range(levels):
+                            bv = bid_volumes[i] if i < len(bid_volumes) else 0
+                            av = ask_volumes[i] if i < len(ask_volumes) else 0
+                            bid_pct = (bv / max_v * 100) if max_v else 0
+                            ask_pct = (av / max_v * 100) if max_v else 0
+                            bid_bg = (
+                                f"linear-gradient(to left, var(--up-soft) "
+                                f"{bid_pct:.1f}%, transparent {bid_pct:.1f}%)"
+                            )
+                            ask_bg = (
+                                f"linear-gradient(to right, var(--down-soft) "
+                                f"{ask_pct:.1f}%, transparent {ask_pct:.1f}%)"
+                            )
                             rows.append(
                                 html.Div(
                                     className="five-price-row",
                                     children=[
-                                        html.Span(f"{bv:,}", className="five-bid-vol"),
-                                        html.Span(f"{bid_prices[i]:.2f}", className="five-bid-price"),
-                                        html.Span(f"{ask_prices[i]:.2f}", className="five-ask-price"),
-                                        html.Span(f"{av:,}", className="five-ask-vol"),
-                                    ]
+                                        html.Div(
+                                            className="five-price-cell five-cell-bid",
+                                            style={"background": bid_bg},
+                                            children=[
+                                                html.Span(f"{bv:,}", className="num five-bid-vol"),
+                                                html.Span(
+                                                    f"{bid_prices[i]:.2f}",
+                                                    className="num five-bid-price up",
+                                                ),
+                                            ],
+                                        ),
+                                        html.Div(
+                                            className="five-price-cell five-cell-ask",
+                                            style={"background": ask_bg},
+                                            children=[
+                                                html.Span(
+                                                    f"{ask_prices[i]:.2f}",
+                                                    className="num five-ask-price down",
+                                                ),
+                                                html.Span(f"{av:,}", className="num five-ask-vol"),
+                                            ],
+                                        ),
+                                    ],
                                 )
                             )
-                        # Subtotal row
-                        rows.append(
-                            html.Div(
-                                className="five-subtotal-row",
-                                children=[
-                                    html.Span(f"{bid_vol_sum:,}", className="five-subtotal-vol"),
-                                    html.Span("小計", className="five-subtotal-label"),
-                                    html.Span(f"{ask_vol_sum:,}", className="five-subtotal-vol"),
-                                ]
-                            )
-                        )
                         five_prices_body = rows
 
                         # Bid/Ask ratio bar
@@ -1550,21 +1617,26 @@ class CallbackManager:
             prevent_initial_call=False,
         )
         def rotate_ticker(n_intervals: int, news_data: dict, app_state: dict):
-            """Rotate the ticker headline every 5 seconds."""
+            """Phase 3.5 — render up to 5 inline headlines on the bottom
+            ribbon (24px). Single-line nowrap; marquee animation is a
+            Phase 6 enhancement.
+            """
             if not news_data:
                 return "--", {"display": "none"}
 
             current_stock = (app_state or {}).get("current_stock")
             current_stock_name = (app_state or {}).get("current_stock_name")
-            # Collect one headline per category (most recent)
             headlines = _collect_ticker_headlines(news_data, current_stock, current_stock_name)
             if not headlines:
                 return "--", {"display": "none"}
 
-            idx = (n_intervals or 0) % len(headlines)
-            item = headlines[idx]
-            ticker_text = f"[{item['category']}] {item['title']}"
-            return ticker_text, {"display": "flex"}
+            items: List[Any] = []
+            for i, h in enumerate(headlines[:5]):
+                if i > 0:
+                    items.append(html.Span("·", className="news-ticker-sep"))
+                items.append(html.Span(h["category"], className="news-ticker-cat num"))
+                items.append(html.Span(h["title"], className="news-ticker-headline"))
+            return items, {"display": "flex"}
 
         # ── Phase 1 今日重點卡片（/news 頁） ──────────────────────────────────
         @self.app.callback(
@@ -1717,6 +1789,29 @@ class CallbackManager:
                 "failed": answer_dict.get("failed", False),
             })
             return next_history, _render_news_chat_messages(next_history), ""
+
+    # ── Phase 3.5 — Information Density callbacks ───────────────────────
+    def _register_phase35_callbacks(self) -> None:
+        """Register MarketStrip + ChipsKpi callbacks (Phase 3.5)."""
+
+        @self.app.callback(
+            Output("market-strip", "children"),
+            Input("market-strip-interval", "n_intervals"),
+            prevent_initial_call=False,
+        )
+        def update_market_strip(_n):
+            entries = fetch_market_strip()
+            return _render_market_strip(entries, market_strip_tail())
+
+        @self.app.callback(
+            Output("bottom-data-row", "children"),
+            Input("app-state-store", "data"),
+            prevent_initial_call=False,
+        )
+        def update_bottom_data_row(app_state):
+            stock_id = (app_state or {}).get("current_stock")
+            cards = build_chips_kpi(stock_id)
+            return [_render_chip_kpi_card(card) for card in cards]
 
 
 # ── Module-level news helper functions ──────────────────────────────────────
@@ -2262,3 +2357,75 @@ def _collect_ticker_headlines(
         })
 
     return headlines
+
+
+# ── Phase 3.5 module-level renderers ──────────────────────────────────────
+
+def _dir_class(direction: str) -> str:
+    """Map 'up'/'down'/'flat' to the matching CSS color class."""
+    if direction == "up":
+        return "up"
+    if direction == "down":
+        return "down"
+    return "flat"
+
+
+def _fmt_index_value(v: float) -> str:
+    """Format an index level for the MarketStrip ribbon."""
+    if v >= 1000:
+        return f"{v:,.2f}"
+    return f"{v:,.2f}"
+
+
+def _fmt_signed(n: float, digits: int = 2) -> str:
+    """Format a signed number with explicit + prefix on positives."""
+    sign = "+" if n >= 0 else ""
+    return f"{sign}{n:,.{digits}f}"
+
+
+def _render_market_strip(
+    entries: List[MarketIndexEntry],
+    tail_text: str = "",
+) -> List[Any]:
+    """Build children for the global MarketStrip ribbon (28px)."""
+    items: List[Any] = []
+    for e in entries:
+        cls = _dir_class(e.direction)
+        items.append(
+            html.Div(
+                className="market-strip-item",
+                children=[
+                    html.Span(e.label, className="market-strip-label"),
+                    html.Span(_fmt_index_value(e.value), className="num market-strip-value"),
+                    html.Span(
+                        _fmt_signed(e.change),
+                        className=f"num market-strip-chg {cls}",
+                    ),
+                    html.Span(
+                        f"({_fmt_signed(e.pct)}%)",
+                        className=f"num market-strip-pct {cls}",
+                    ),
+                ],
+            )
+        )
+    items.append(html.Div(className="market-strip-spacer"))
+    if tail_text:
+        items.append(html.Span(tail_text, className="market-strip-tail"))
+    return items
+
+
+def _render_chip_kpi_card(card: ChipKpiCard) -> html.Div:
+    """Single KPI card in the bottom data row."""
+    cls = _dir_class(card.direction)
+    return html.Div(
+        id=f"data-card-{card.key}",
+        className="data-card",
+        children=[
+            html.Div(card.label, className="data-card-label"),
+            html.Div(
+                card.value_text,
+                className=f"data-card-value {cls}",
+            ),
+            html.Div(card.caption or "", className="data-card-sub"),
+        ],
+    )

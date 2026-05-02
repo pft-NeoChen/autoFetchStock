@@ -40,10 +40,14 @@ def create_layout() -> html.Div:
             # Top navigation bar
             _create_nav_bar(),
 
+            # Phase 3.5 — global market index ribbon (28px, between nav and
+            # page content). Fills via market-strip-interval callback.
+            _create_market_strip(),
+
             # Dynamic page content (swapped by routing callback)
             html.Div(id="page-content"),
 
-            # News ticker bar (visible on all pages)
+            # News ticker bar (visible on all pages, 24px ribbon at bottom)
             _create_news_ticker(),
         ]
     )
@@ -238,6 +242,15 @@ def _create_hidden_components() -> html.Div:
                 disabled=False,
             ),
 
+            # Phase 3.5 — MarketStrip refresh (30s; rate-limit safe for
+            # external index quotes; do not reuse the 1s tick).
+            dcc.Interval(
+                id="market-strip-interval",
+                interval=30 * 1000,
+                n_intervals=0,
+                disabled=False,
+            ),
+
             # Favorites drag-and-drop reorder support
             dcc.Store(id="favorites-order-store", data=None),
             html.Button(id="favorites-reorder-btn", n_clicks=0,
@@ -258,17 +271,34 @@ def _create_nav_bar() -> html.Div:
     )
 
 
+def _create_market_strip() -> html.Div:
+    """Phase 3.5 — top global market index ribbon (28px).
+
+    Container only; populated by the `update_market_strip` callback that
+    fires every 30s. See atoms.jsx::MarketStrip for the visual contract.
+    """
+    return html.Div(
+        id="market-strip",
+        className="market-strip",
+        children=[],  # filled by callback
+    )
+
+
 def _create_news_ticker() -> html.Div:
-    """Create the news ticker bar displayed at the bottom of every page."""
+    """Phase 3.5 — bottom global news ribbon (24px).
+
+    Holds a NEWS pill on the left and a horizontal scrolling list of
+    headlines. Hidden until news data lands.
+    """
     return html.Div(
         id="news-ticker-bar",
         className="news-ticker-bar",
         style={"display": "none"},  # hidden until news data is available
         children=[
-            html.Span("新聞：", className="ticker-label"),
+            html.Span("NEWS", className="pill pill-up news-ticker-pill"),
             html.Div(
                 id="news-ticker-content",
-                className="ticker-content",
+                className="news-ticker-content",
                 children="--",
             ),
         ],
@@ -335,42 +365,75 @@ def _create_favorites_sidebar() -> html.Div:
 
 
 def _create_big_orders_sidebar() -> html.Div:
-    """Create big orders monitoring sidebar with best five prices."""
+    """Right rail container — Best5 on top, BigOrders on bottom (Phase 3.5).
+
+    Spec: design/afs/layout-variants.jsx — Best5Mini above BigOrdersTape.
+    Reuses the same `.big-orders-sidebar` grid-area (col 3, all rows).
+    """
     return html.Div(
         id="big-orders-sidebar",
         className="big-orders-sidebar",
         children=[
-            html.H3("大戶即時監控", className="sidebar-title"),
-            html.Div(
-                className="big-orders-header",
-                children=[
-                    html.Span("時間", className="header-time"),
-                    html.Span("張數", className="header-volume"),
-                ]
-            ),
-            html.Div(
-                id="big-orders-list",
-                className="big-orders-list",
-                children=[
-                    html.Div("尚無大戶資料", className="no-data")
-                ]
-            ),
-
-            # Best Five Prices section
             _create_best_five_prices(),
+            _create_big_orders_tape(),
         ]
     )
 
 
+def _create_big_orders_tape() -> html.Div:
+    """Phase 3.5 — BigOrdersTape (大戶逐筆) panel.
+
+    Header carries a `≥300 張` pill (filter threshold) per
+    PHASE_3_5_INFO_DENSITY §1.4. Three columns: 時間 / 張數 / 金額.
+    """
+    return html.Div(
+        id="big-orders-tape",
+        className="big-orders-tape",
+        children=[
+            html.Div(
+                className="sidebar-section-title-row",
+                children=[
+                    html.H3("大戶逐筆", className="sidebar-title"),
+                    html.Span("≥300 張", className="pill pill-neu sidebar-title-pill"),
+                ],
+            ),
+            html.Div(
+                className="big-orders-header",
+                children=[
+                    html.Span("時間", className="big-orders-col-time"),
+                    html.Span("張數", className="big-orders-col-vol"),
+                    html.Span("金額", className="big-orders-col-amt"),
+                ],
+            ),
+            html.Div(
+                id="big-orders-list",
+                className="big-orders-list",
+                children=[html.Div("尚無大戶資料", className="no-data")],
+            ),
+        ],
+    )
+
+
 def _create_best_five_prices() -> html.Div:
-    """Create best five prices (最佳五檔) section."""
+    """Phase 3.5 — Best5Mini panel (最佳五檔 · 內外盤).
+
+    Layout: section title + 盤中 pill, 內外盤比 ratio bar, 5 bid/ask
+    rows (soft-fill bars rendered by callback inline style), and a
+    totals footer (合計 bid / 合計 ask) separated by a 1px line.
+    """
     return html.Div(
         id="best-five-prices-section",
         className="best-five-section",
         children=[
-            html.H3("最佳五檔", className="sidebar-title"),
+            html.Div(
+                className="sidebar-section-title-row",
+                children=[
+                    html.H3("最佳五檔 · 內外盤", className="sidebar-title"),
+                    html.Span("盤中", className="pill pill-up sidebar-title-pill"),
+                ],
+            ),
 
-            # Bid/Ask ratio bar
+            # Bid/Ask ratio bar (內外盤比)
             html.Div(
                 className="bidask-ratio-container",
                 children=[
@@ -385,17 +448,10 @@ def _create_best_five_prices() -> html.Div:
                             html.Span("內外盤比", className="bidask-ratio-label"),
                         ]
                     ),
-                    html.Div(
-                        className="bidask-ratio-values",
-                        children=[
-                            html.Span(id="ask-total-vol", className="ask-total-val", children="--"),
-                            html.Span(id="bid-total-vol", className="bid-total-val", children="--"),
-                        ]
-                    ),
                 ]
             ),
 
-            # Table header
+            # Table header (買 / 賣)
             html.Div(
                 className="five-prices-header",
                 children=[
@@ -404,13 +460,34 @@ def _create_best_five_prices() -> html.Div:
                 ]
             ),
 
-            # Five-level rows
+            # Five-level rows (filled by callback with soft-fill bars)
             html.Div(
                 id="best-five-prices-body",
                 className="five-prices-body",
                 children=[
                     html.Div("等待五檔資料...", className="no-data")
                 ]
+            ),
+
+            # Totals footer (reuses existing ID outputs from on_auto_update)
+            html.Div(
+                className="five-totals-footer",
+                children=[
+                    html.Span(
+                        children=[
+                            html.Span("合計 ", className="five-totals-label"),
+                            html.Span(id="bid-total-vol", className="num up", children="--"),
+                        ],
+                        className="five-totals-bid",
+                    ),
+                    html.Span(
+                        children=[
+                            html.Span("合計 ", className="five-totals-label"),
+                            html.Span(id="ask-total-vol", className="num down", children="--"),
+                        ],
+                        className="five-totals-ask",
+                    ),
+                ],
             ),
         ]
     )
@@ -496,34 +573,16 @@ def _create_stock_info_section() -> html.Div:
 
 
 def _create_bottom_data_row() -> html.Div:
-    """Create bottom data row (Phase 2) with 4 mini KPI cards.
+    """Phase 3.5 — bottom data row container.
 
-    Cards: 外資 / 投信 / 自營 / 融資. Phase 2 ships placeholders;
-    callbacks populate values in later phases.
+    Children populated by `render_bottom_data_row` callback from
+    `src.data.chips_kpi.build_chips_kpi(stock_id)`. The visual contract
+    matches design/afs/layout-variants.jsx::ChipsKpi.
     """
-    cards = [
-        ("foreign", "外資"),
-        ("trust",   "投信"),
-        ("dealer",  "自營"),
-        ("margin",  "融資"),
-    ]
     return html.Div(
         id="bottom-data-row",
         className="bottom-data-row",
-        children=[_create_data_card(key, label) for key, label in cards],
-    )
-
-
-def _create_data_card(key: str, label: str) -> html.Div:
-    """Single mini KPI card for the bottom data row."""
-    return html.Div(
-        id=f"data-card-{key}",
-        className="data-card",
-        children=[
-            html.Div(label, className="data-card-label"),
-            html.Div("--", id=f"data-card-{key}-value", className="data-card-value"),
-            html.Div("等待資料", id=f"data-card-{key}-sub", className="data-card-sub"),
-        ],
+        children=[],  # filled by callback
     )
 
 

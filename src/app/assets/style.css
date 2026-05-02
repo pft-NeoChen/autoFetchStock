@@ -1741,3 +1741,307 @@ html {
     color: var(--text-primary);
     background-color: var(--bg-tertiary);
 }
+
+
+/* ═════════════════════════════════════════════════════════════════════
+ * Phase 3.5 — Information Density Backfill
+ * ─────────────────────────────────────────────────────────────────── */
+
+/* ── MarketStrip (top global ribbon, 28px) ─────────────────────────── */
+.market-strip {
+    display: flex;
+    align-items: center;
+    height: 28px;
+    background-color: #161616;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 0 14px;
+    gap: 18px;
+    font-size: 12px;
+    flex-shrink: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    margin-bottom: var(--sp-4);
+}
+.market-strip-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.market-strip-label {
+    color: var(--txt-2);
+    font-size: 11px;
+}
+.market-strip-value {
+    font-weight: 600;
+}
+.market-strip-chg,
+.market-strip-pct {
+    font-size: 11px;
+}
+.market-strip-spacer {
+    flex: 1;
+}
+.market-strip-tail {
+    color: var(--txt-3);
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+/* ── Watchlist row 4-column grid (Phase 3.5 §2) ─────────────────────── */
+.favorite-item.watch-row {
+    display: grid;
+    grid-template-columns: auto 1fr 56px 60px;
+    gap: 6px;
+    align-items: center;
+    padding: 4px 8px;
+    height: 28px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 0;
+    background-color: transparent;
+    font-size: 12px;
+}
+.favorite-item.watch-row.active {
+    background-color: rgba(33, 150, 243, 0.12);
+    border-left: 2px solid var(--accent);
+    padding-left: 6px;
+}
+.favorite-item.watch-row:hover {
+    background-color: var(--bg-3);
+}
+.watch-row > .watch-dot {
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+}
+.watch-name-col {
+    min-width: 0;
+    overflow: hidden;
+}
+.watch-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.watch-name {
+    font-weight: 600;
+    color: var(--txt-0);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+.watch-code {
+    color: var(--txt-3);
+    font-size: 10px;
+    flex-shrink: 0;
+}
+.watch-pill {
+    flex-shrink: 0;
+    font-size: 9px !important;
+    padding: 0 4px !important;
+}
+.watch-spark-col {
+    width: 56px;
+    height: 18px;
+    overflow: hidden;
+}
+.watch-spark {
+    display: block;
+}
+.watch-price-col {
+    text-align: right;
+    line-height: 1.1;
+}
+.watch-price {
+    font-weight: 600;
+    font-size: 12px;
+}
+.watch-pct {
+    font-size: 10px;
+}
+
+/* ── Sidebar section title with trailing pill ─────────────────────── */
+.sidebar-section-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-3);
+    padding-bottom: var(--sp-2);
+    border-bottom: 1px solid var(--line);
+}
+.sidebar-section-title-row .sidebar-title {
+    margin: 0;
+    border-bottom: 0;
+    padding-bottom: 0;
+    flex: 1;
+}
+.sidebar-title-pill {
+    flex-shrink: 0;
+}
+
+/* ── Best5Mini (Phase 3.5 §1.3) ────────────────────────────────────── */
+.best-five-section {
+    border-top: 0;
+    margin-top: 0;
+    padding-top: 0;
+    margin-bottom: var(--sp-4);
+    padding-bottom: var(--sp-3);
+    border-bottom: 1px solid var(--line);
+}
+.five-prices-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+.five-price-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    font-size: 11px;
+}
+.five-price-cell {
+    display: flex;
+    align-items: center;
+    padding: 2px 6px;
+    gap: 8px;
+}
+.five-cell-bid {
+    justify-content: space-between;
+}
+.five-cell-ask {
+    justify-content: space-between;
+}
+.five-bid-vol,
+.five-ask-vol {
+    color: var(--txt-2);
+    font-size: 10px;
+}
+.five-bid-price {
+    font-weight: 600;
+}
+.five-ask-price {
+    font-weight: 600;
+}
+.five-totals-footer {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 6px;
+    margin-top: 4px;
+    border-top: 1px solid var(--line-2);
+    font-size: 10px;
+    color: var(--txt-2);
+}
+.five-totals-label {
+    color: var(--txt-2);
+}
+
+/* ── BigOrdersTape (Phase 3.5 §1.4) ────────────────────────────────── */
+.big-orders-tape {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+.big-orders-tape .big-orders-header {
+    display: grid;
+    grid-template-columns: 1fr 60px 1fr;
+    gap: 6px;
+    padding: 2px 6px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: var(--sp-1);
+    font-size: 10px;
+    color: var(--txt-2);
+}
+.big-orders-tape .big-orders-col-time {
+    text-align: left;
+}
+.big-orders-tape .big-orders-col-vol {
+    text-align: right;
+}
+.big-orders-tape .big-orders-col-amt {
+    text-align: right;
+}
+.big-orders-tape .big-orders-list {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+.big-orders-tape .big-order-item {
+    display: grid;
+    grid-template-columns: 1fr 60px 1fr;
+    gap: 6px;
+    padding: 3px 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    font-size: 11px;
+}
+.big-order-item .big-order-time {
+    color: var(--txt-1);
+    text-align: left;
+}
+.big-order-item .big-order-volume {
+    text-align: right;
+    font-weight: 600;
+}
+.big-order-item .big-order-amt {
+    text-align: right;
+    font-size: 10px;
+}
+
+/* ── ChipKpiCard direction colors ─────────────────────────────────── */
+.data-card-value.up   { color: var(--up); }
+.data-card-value.down { color: var(--down); }
+.data-card-value.flat { color: var(--txt-0); }
+
+/* ── NewsTicker (Phase 3.5 §1.5) ──────────────────────────────────── */
+.news-ticker-bar {
+    height: 24px;
+    display: flex;
+    align-items: center;
+    background-color: #161616;
+    border-top: 1px solid var(--line);
+    padding: 0 14px;
+    gap: 14px;
+    font-size: 11px;
+    color: var(--txt-1);
+    flex-shrink: 0;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.news-ticker-pill {
+    flex-shrink: 0;
+    font-size: 9px !important;
+    padding: 0 6px !important;
+}
+.news-ticker-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.news-ticker-cat {
+    color: var(--txt-3);
+    flex-shrink: 0;
+}
+.news-ticker-headline {
+    color: var(--txt-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+    min-width: 0;
+}
+.news-ticker-sep {
+    color: var(--line-2);
+    margin: 0 4px;
+    flex-shrink: 0;
+}

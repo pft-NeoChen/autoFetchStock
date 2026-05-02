@@ -370,3 +370,26 @@ class PriceExtremes:
                 "date": self.lowest_date.isoformat(),
             },
         }
+
+
+# ─── Phase 3.5 — Information Density models ─────────────────────────────
+
+@dataclass
+class MarketIndexEntry:
+    """Single index displayed in the global MarketStrip ribbon."""
+    label: str           # 中文短標籤，如「加權」
+    symbol: str          # 對應 yfinance / 資料源 symbol
+    value: float         # 最新點數
+    change: float        # 漲跌幅絕對值
+    pct: float           # 漲跌百分比（例：+0.60 表 +0.60%）
+    direction: str = "flat"   # "up" | "down" | "flat"
+
+
+@dataclass
+class ChipKpiCard:
+    """Single mini KPI card in the bottom data row (籌碼面 KPI)."""
+    key: str             # 'foreign' | 'trust' | 'dealer' | 'margin'
+    label: str           # 顯示文字（外資 / 投信 / 自營 / 融資）
+    value_text: str      # 已格式化的主要數字（例：'+12,485' 或 '-4.2%'）
+    direction: str = "flat"   # "up" | "down" | "flat" — 控制紅綠
+    caption: str = ""    # 副標說明，例：'連3買 · 5日 +18,420'
