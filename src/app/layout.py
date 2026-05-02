@@ -71,8 +71,15 @@ def create_main_page_layout() -> html.Div:
             # Header with search
             _create_header(),
 
-            # Favorite signal strip (自選股訊號列) — rendered by callback
-            html.Div(id="favorite-signal-strip", className="favorite-signal-strip"),
+            # Phase 3 redesign: legacy 自選股訊號列 superseded by per-row
+            # sentiment dots/pills (Variant 3a) + inline banner (Variant 3b).
+            # Kept hidden so the existing callback Output target stays valid;
+            # full removal scheduled for Phase 6 cleanup.
+            html.Div(
+                id="favorite-signal-strip",
+                className="favorite-signal-strip",
+                style={"display": "none"},
+            ),
 
             # Main content area — Phase 2 grid (260 / 1fr / 260) × (72 / 1fr / 220)
             html.Div(
