@@ -212,6 +212,12 @@ html {
  * Phase 2: 1920 fluid layout. Outer padding 12px. Inner panes scroll
  * independently; header & status bar use sticky positioning so they
  * remain fixed while the central grid scrolls only on overflow.
+ *
+ * The flex chain (main-container → page-content → stock-page →
+ * content-wrapper) must all be flex column with flex:1 + min-height:0
+ * so the grid resolves against viewport height instead of intrinsic
+ * content height — otherwise the bottom data row overflows and the
+ * sticky status bar covers it.
  */
 .main-container {
     width: 100%;
@@ -220,6 +226,20 @@ html {
     flex-direction: column;
     height: 100vh;
     overflow: hidden;
+}
+
+#page-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
+#stock-page {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
 /* ===== Header Section (Phase 2: 56px sticky) ===== */
