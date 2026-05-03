@@ -26,6 +26,10 @@ python-dotenv==1.2.1
 msgpack==1.1.2
 orjson==3.11.5
 
+# Foreign indices for MarketStrip ribbon (USD/TWD, gold, WTI, VIX).
+# Local Taiwan indices (^TWII / ^TWOII / 0050) are pulled via Shioaji.
+yfinance>=0.2.40
+
 # News collection & summarization submodule
 google-genai>=1.0          # Gemini API SDK (新版，取代已棄用的 google-generativeai)
 atoma>=0.0.17              # RSS/Atom feed 解析（feedparser 在 Python 3.11 有相依性問題）

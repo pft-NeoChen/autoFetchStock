@@ -1,49 +1,63 @@
 """
-Market index strip data source (Phase 3.5).
+Market index strip composer (Phase 3.5 #4).
 
-The redesigned UI ships a 28-pixel global ribbon below the header showing
-seven major market indices (`MarketStrip` per design/afs/atoms.jsx). The
-authoritative real source is yfinance, which is **not** currently in the
-project requirements. To keep the visual contract intact while the
-backend integration is deferred, this module exposes deterministic
-stub data matching the reference PNG values exactly.
+Combines the live entries fetched by `IndexFetcher` (Shioaji for the
+3 local indices, yfinance for the 4 foreign) into the 7-row payload
+consumed by the MarketStrip ribbon. Per-field STUB fallback ensures
+the ribbon stays whole when any single source misses.
 
-Swap-out point for the real implementation:
-    * Add `yfinance` to requirements.txt
-    * Replace `_STUB_ENTRIES` with a function that calls
-      `yfinance.Tickers([...]).history(period='1d', interval='1m')`
-      and computes change / pct from the latest two bars.
-    * Cache the result for 30 s (the dedicated dcc.Interval already
-      fires at 30 s — caching is belt-and-braces in case the callback
-      runs on multiple workers in the future).
+The STUB values double as the spec's frozen reference fixture
+(matches `design/afs/atoms.jsx::MarketStrip` and reference PNG).
 """
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from src.models import MarketIndexEntry
 
 
-# STUB: deterministic values mirroring reference/04-layout-A.png and
-# atoms.jsx::MarketStrip. Update when wiring real yfinance data.
+# STUB fallback — matches reference/04-layout-A.png + atoms.jsx exactly.
+# Order is the on-screen order; do not reorder without updating the spec.
 _STUB_ENTRIES: List[MarketIndexEntry] = [
     MarketIndexEntry(label="加權", symbol="^TWII",   value=21485.62, change=128.40, pct=0.60,  direction="up"),
     MarketIndexEntry(label="櫃買", symbol="^TWOII",  value=248.91,   change=1.85,   pct=0.75,  direction="up"),
     MarketIndexEntry(label="台50", symbol="0050.TW", value=195.20,   change=1.40,   pct=0.72,  direction="up"),
-    MarketIndexEntry(label="美元", symbol="DX-Y.NYB",value=31.485,   change=-0.025, pct=-0.08, direction="down"),
+    MarketIndexEntry(label="美元", symbol="TWD=X",   value=31.485,   change=-0.025, pct=-0.08, direction="down"),
     MarketIndexEntry(label="金價", symbol="GC=F",    value=7182.0,   change=22.0,   pct=0.31,  direction="up"),
     MarketIndexEntry(label="WTI",  symbol="CL=F",    value=82.35,    change=-0.42,  pct=-0.51, direction="down"),
     MarketIndexEntry(label="VIX",  symbol="^VIX",    value=14.82,    change=-0.21,  pct=-1.40, direction="down"),
 ]
 
 
-def fetch_market_strip() -> List[MarketIndexEntry]:
-    """Return current MarketStrip rows. STUB until yfinance is wired in."""
-    return list(_STUB_ENTRIES)
+def fetch_market_strip(
+    shioaji_fetcher=None,
+    index_fetcher=None,
+) -> List[MarketIndexEntry]:
+    """Return the 7 ribbon rows in display order.
+
+    When `index_fetcher` is None the function returns the spec STUB
+    intact — useful at app startup before Shioaji has logged in.
+    """
+    if index_fetcher is None:
+        return list(_STUB_ENTRIES)
+
+    by_label: dict[str, MarketIndexEntry] = {}
+    try:
+        for e in index_fetcher.fetch_local(shioaji_fetcher):
+            by_label[e.label] = e
+    except Exception:
+        pass
+    try:
+        for e in index_fetcher.fetch_foreign():
+            by_label[e.label] = e
+    except Exception:
+        pass
+
+    return [by_label.get(stub.label, stub) for stub in _STUB_ENTRIES]
 
 
 def market_strip_tail() -> str:
-    """Right-aligned summary string (近 1 分鐘成交)."""
-    # STUB: real value would come from ^TWII volume delta.
+    """Right-aligned summary string (近 1 分鐘成交). STUB until ^TWII
+    minute-volume delta is wired through."""
     return "近1分鐘成交 28.4 億"

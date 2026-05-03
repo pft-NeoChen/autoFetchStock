@@ -63,6 +63,7 @@ class CallbackManager:
         get_buffered_ticks=None,
         news_processor=None,
         chips_storage=None,
+        index_fetcher=None,
     ):
         """
         Initialize callback manager.
@@ -90,6 +91,7 @@ class CallbackManager:
         self.scheduler = scheduler
         self.news_processor = news_processor
         self.chips_storage = chips_storage
+        self.index_fetcher = index_fetcher
         self._current_stock_id: Optional[str] = None
         self._current_stock_name: Optional[str] = None
         # Per-stock cache for WatchlistRow sparklines: load_daily_data
@@ -1840,7 +1842,10 @@ class CallbackManager:
             prevent_initial_call=False,
         )
         def update_market_strip(_n):
-            entries = fetch_market_strip()
+            entries = fetch_market_strip(
+                shioaji_fetcher=self.shioaji_fetcher,
+                index_fetcher=self.index_fetcher,
+            )
             return _render_market_strip(entries, market_strip_tail())
 
         @self.app.callback(

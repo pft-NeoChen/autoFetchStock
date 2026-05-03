@@ -171,6 +171,10 @@ class AppController:
         self.scheduler.add_chips_t86_job(self._run_chips_t86_fetch)
         self._catchup_chips_t86()
 
+        # Phase 3.5 #4 — MarketStrip indices (Shioaji local + yfinance foreign).
+        from src.fetcher.index_fetcher import IndexFetcher
+        self.index_fetcher = IndexFetcher()
+
     def _subscribe_saved_favorites(self) -> None:
         """Subscribe to all saved favorites in Shioaji."""
         try:
@@ -223,6 +227,7 @@ class AppController:
             get_buffered_ticks=self._get_buffered_ticks,
             news_processor=self.news_processor,
             chips_storage=self.chips_storage,
+            index_fetcher=self.index_fetcher,
         )
 
         # Register all callbacks
