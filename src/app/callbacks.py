@@ -11,6 +11,7 @@ This module implements all Dash callback functions:
 """
 
 import logging
+import time
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -89,6 +90,11 @@ class CallbackManager:
         self.news_processor = news_processor
         self._current_stock_id: Optional[str] = None
         self._current_stock_name: Optional[str] = None
+        # Per-stock cache for WatchlistRow sparklines: load_daily_data
+        # touches disk; refreshing 26 favorites every second would trash
+        # the FS. 60s TTL is enough since daily closes only change once
+        # per day. Phase 3.5 #1.
+        self._spark_cache: Dict[str, Tuple[float, List[float]]] = {}
 
     def register_callbacks(self) -> None:
         """Register all Dash callbacks."""
@@ -102,6 +108,26 @@ class CallbackManager:
         self._register_news_callbacks()
         self._register_phase35_callbacks()
         logger.info("All callbacks registered")
+
+    def _get_spark_values(self, stock_id: str) -> List[float]:
+        """Return the last 20 daily closes for the WatchlistRow sparkline,
+        cached for 60 s. Returns an empty list if no history is on disk —
+        callers should fall back to a seeded line so every row still has
+        a visible spark.
+        """
+        now = time.time()
+        cached = self._spark_cache.get(stock_id)
+        if cached and now - cached[0] < 60:
+            return cached[1]
+        closes: List[float] = []
+        try:
+            daily = self.storage.load_daily_data(stock_id)
+            if daily and daily.daily_data:
+                closes = [d.close for d in daily.daily_data[-20:] if d.close]
+        except Exception:
+            closes = []
+        self._spark_cache[stock_id] = (now, closes)
+        return closes
 
     def _build_favorite_kbar(self, quote: Optional[RealtimeQuote]) -> html.Div:
         """Build a compact day-candle marker for the favorites list."""
@@ -204,14 +230,25 @@ class CallbackManager:
         dot_kind = {"bullish": "bull", "bearish": "bear"}.get(sig_kind, "neu")
         is_anomaly = bool(anomaly_set and stock_id in anomaly_set)
 
-        # Spark seed (deterministic): numeric stock id, fallback hash.
+        # Spark from real recent closes when available; seeded fallback
+        # otherwise so every row keeps a visible line on first load.
+        recent_closes = self._get_spark_values(stock_id)
         try:
             seed = int(stock_id)
         except (TypeError, ValueError):
             seed = abs(hash(stock_id)) % 100_000 or 1
-        # STUB: spark uses seeded values until per-stock recent_closes
-        # are wired through (PHASE_3_5_INFO_DENSITY §2 follow-up).
-        spark_node = render_spark(None, direction=direction_cls, w=56, h=18, seed=seed)
+        spark_dir = direction_cls
+        if recent_closes and len(recent_closes) >= 2 and direction_cls == "flat":
+            # Direction inference: last vs first sample, only when realtime
+            # quote didn't already classify it.
+            spark_dir = "up" if recent_closes[-1] >= recent_closes[0] else "down"
+        spark_node = render_spark(
+            recent_closes if recent_closes else None,
+            direction=spark_dir,
+            w=56,
+            h=18,
+            seed=seed,
+        )
 
         # Column 2 — name + id + optional pills.
         name_row_children: List[Any] = [
@@ -1813,6 +1850,24 @@ class CallbackManager:
             stock_id = (app_state or {}).get("current_stock")
             cards = build_chips_kpi(stock_id)
             return [_render_chip_kpi_card(card) for card in cards]
+
+        @self.app.callback(
+            Output("best5-market-pill", "children"),
+            Output("best5-market-pill", "className"),
+            Input("market-strip-interval", "n_intervals"),
+            prevent_initial_call=False,
+        )
+        def update_best5_market_pill(_n):
+            """Toggle the Best5 panel header pill between 盤中 / 盤後 based
+            on real scheduler market hours. Piggybacks on the 30s
+            market-strip interval to avoid yet another timer."""
+            try:
+                is_open = bool(self.scheduler and self.scheduler.is_market_open())
+            except Exception:
+                is_open = False
+            if is_open:
+                return "盤中", "pill pill-up sidebar-title-pill"
+            return "盤後", "pill pill-neu sidebar-title-pill"
 
 
 # ── Module-level news helper functions ──────────────────────────────────────

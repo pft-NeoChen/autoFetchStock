@@ -394,7 +394,9 @@ def _create_big_orders_tape() -> html.Div:
                 className="sidebar-section-title-row",
                 children=[
                     html.H3("大戶逐筆", className="sidebar-title"),
-                    html.Span("≥300 張", className="pill pill-neu sidebar-title-pill"),
+                    # Threshold reflects processor.data_processor.py:624
+                    # (`is_big_volume = tick_vol_calc >= 499`).
+                    html.Span("≥499 張", className="pill pill-neu sidebar-title-pill"),
                 ],
             ),
             html.Div(
@@ -429,7 +431,11 @@ def _create_best_five_prices() -> html.Div:
                 className="sidebar-section-title-row",
                 children=[
                     html.H3("最佳五檔 · 內外盤", className="sidebar-title"),
-                    html.Span("盤中", className="pill pill-up sidebar-title-pill"),
+                    html.Span(
+                        "盤中",
+                        id="best5-market-pill",
+                        className="pill pill-up sidebar-title-pill",
+                    ),
                 ],
             ),
 
