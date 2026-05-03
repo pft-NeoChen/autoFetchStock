@@ -37,12 +37,9 @@ def create_layout() -> html.Div:
             # Hidden stores and intervals (shared across all pages)
             _create_hidden_components(),
 
-            # Top navigation bar
-            _create_nav_bar(),
-
-            # Phase 3.5 — global market index ribbon (28px, between nav and
-            # page content). Fills via market-strip-interval callback.
-            _create_market_strip(),
+            # Phase 3.6 — single 56px app header. Brand, search,
+            # MarketStrip, session badge and clock share one row.
+            _create_header(),
 
             # Dynamic page content (swapped by routing callback)
             html.Div(id="page-content"),
@@ -72,9 +69,6 @@ def create_main_page_layout() -> html.Div:
     return html.Div(
         id="stock-page",
         children=[
-            # Header with search
-            _create_header(),
-
             # Phase 3 redesign: legacy 自選股訊號列 superseded by per-row
             # sentiment dots/pills (Variant 3a) + inline banner (Variant 3b).
             # Kept hidden so the existing callback Output target stays valid;
@@ -305,18 +299,22 @@ def _create_news_ticker() -> html.Div:
     )
 
 
-def _create_header() -> html.Div:
-    """Create header with stock search input."""
-    return html.Div(
-        id="header-section",
-        className="header-section",
+def _create_header() -> html.Header:
+    """Create the single-row app header used across pages."""
+    return html.Header(
+        id="app-header",
+        className="app-header",
         children=[
-            html.H1(
-                "台股即時資料系統",
-                className="app-title"
+            html.Div(
+                className="header-brand",
+                children=[
+                    html.A("autoFetchStock", href="/", className="brand-name"),
+                    html.Span("Bloomberg", className="brand-sub"),
+                    html.A("市場新聞", href="/news", className="header-nav-link"),
+                ],
             ),
             html.Div(
-                style={"position": "relative", "flex": "1", "max-width": "400px"},
+                className="header-search",
                 children=[
                     html.Div(
                         className="search-container",
@@ -340,9 +338,34 @@ def _create_header() -> html.Div:
                         className="match-list",
                         children=[],
                     ),
-                ]
+                ],
             ),
+            _create_market_strip(),
+            _build_session_badge(),
         ]
+    )
+
+
+def _build_session_badge() -> html.Div:
+    """Header session pill + market clock."""
+    return html.Div(
+        className="session-badge",
+        children=[
+            html.Span(
+                id="header-session-pill",
+                className="session-pill session-closed",
+                children=[
+                    html.Span("●", className="session-dot"),
+                    "盤後",
+                ],
+            ),
+            html.Span(id="market-clock", className="num", children="--:--:--"),
+            html.Span(
+                id="market-countdown",
+                className="num countdown-text",
+                children="--",
+            ),
+        ],
     )
 
 
@@ -432,9 +455,12 @@ def _create_best_five_prices() -> html.Div:
                 children=[
                     html.H3("最佳五檔 · 內外盤", className="sidebar-title"),
                     html.Span(
-                        "盤中",
                         id="best5-market-pill",
-                        className="pill pill-up sidebar-title-pill",
+                        className="session-pill session-closed sidebar-title-pill",
+                        children=[
+                            html.Span("●", className="session-dot"),
+                            "盤後",
+                        ],
                     ),
                 ],
             ),
@@ -534,9 +560,10 @@ def _create_stock_info_section() -> html.Div:
                         className="stock-id num",
                         children="",
                     ),
-                    # Sector pill — empty children hides via :empty CSS
-                    # rule. STUB: no sector data source yet; populated by a
-                    # future callback once StockInfo grows a `sector` field.
+                    # Sector pill — populated by `update_stock_display`
+                    # via `src.data.sectors.get_sector()`. Empty children
+                    # hides the pill via the `:empty` CSS rule when the
+                    # current stock is outside the curated sector map.
                     html.Span(
                         id="stock-sector-display",
                         className="pill pill-neu stock-sector-pill",

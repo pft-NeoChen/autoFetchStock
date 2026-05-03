@@ -15,7 +15,7 @@ This module defines all dataclasses and enums used throughout the application:
 from dataclasses import dataclass, field
 from datetime import datetime, date, time
 from enum import Enum
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 
 class PriceDirection(Enum):
@@ -79,6 +79,7 @@ class StockInfo:
     stock_id: str          # Stock code (e.g., "2330")
     stock_name: str        # Stock name (e.g., "台積電")
     market: str = "tse"    # Market: tse (listed) or otc (OTC)
+    sector: Optional[str] = None  # Phase 3.6: industry pill in headline
 
     def __post_init__(self):
         """Validate stock_id format."""
@@ -393,3 +394,28 @@ class ChipKpiCard:
     value_text: str      # 已格式化的主要數字（例：'+12,485' 或 '-4.2%'）
     direction: str = "flat"   # "up" | "down" | "flat" — 控制紅綠
     caption: str = ""    # 副標說明，例：'連3買 · 5日 +18,420'
+
+
+@dataclass
+class SignalEntry:
+    """Phase 3.6 signal shape separating sentiment from event trigger."""
+    stock_id: str
+    sentiment: Literal["up", "down", "neutral"]
+    sentiment_label: str
+    impact: int
+    event_label: Optional[str] = None
+    reason: str = ""
+
+
+@dataclass
+class FundamentalsSnapshot:
+    """Compact fundamentals strip shown under chip KPI cards."""
+    eps_q: Optional[float] = None
+    eps_yoy: Optional[float] = None
+    gross_margin: Optional[float] = None
+    gm_delta: Optional[float] = None
+    pe: Optional[float] = None
+    pe_avg: Optional[float] = None
+    eps_period: str = ""
+    gross_margin_period: str = ""
+    pe_period: str = ""

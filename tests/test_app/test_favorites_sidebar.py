@@ -50,7 +50,7 @@ class TestFavoritesSidebarHelpers:
             scheduler=MagicMock(),
         )
 
-    def test_render_favorite_item_hides_stock_id_and_includes_kbar(self):
+    def test_render_favorite_item_uses_phase36_grid_with_sparkline(self):
         self.fetcher.fetch_realtime_quote.return_value = _make_quote()
 
         item = self.manager._render_favorite_item(
@@ -58,15 +58,17 @@ class TestFavoritesSidebarHelpers:
             current_stock="2330",
         )
 
-        left = item.children[0]
-        kbar = left.children[0]
-        name = left.children[1]
-        price = item.children[1]
+        dot = item.children[0]
+        name_col = item.children[1]
+        spark_col = item.children[2]
+        price_col = item.children[3]
 
-        assert kbar.className == "favorite-item-kbar"
-        assert name.children == "台積電"
-        assert "2330" not in name.children
-        assert price.children == "103.00"
+        assert "signal-dot" in dot.className
+        assert name_col.children[0].children == "台積電"
+        assert name_col.children[1].children == "2330"
+        assert spark_col.className == "watch-spark-col"
+        assert price_col.children[0].children == "103.00"
+        assert price_col.children[1].children == "+5.10%"
 
     def test_render_favorite_item_uses_cached_quote_without_wiping_price(self):
         self.fetcher.get_cached_quote.return_value = _make_quote(current_price=101.5)
@@ -76,7 +78,7 @@ class TestFavoritesSidebarHelpers:
             current_stock=None,
         )
 
-        assert item.children[1].children == "101.50"
+        assert item.children[3].children[0].children == "101.50"
         self.fetcher.fetch_realtime_quote.assert_not_called()
 
     def test_save_quote_as_tick_skips_simtrade_quotes(self):

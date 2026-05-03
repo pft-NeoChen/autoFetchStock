@@ -27,6 +27,7 @@ from src.models import (
     RealtimeQuote,
     MarketIndexEntry,
     ChipKpiCard,
+    FundamentalsSnapshot,
 )
 from src.exceptions import (
     ConnectionTimeoutError,
@@ -36,6 +37,8 @@ from src.exceptions import (
 )
 from src.data.market_indices import fetch_market_strip, market_strip_tail
 from src.data.chips_kpi import build_chips_kpi
+from src.data.fundamentals import get_fundamentals
+from src.data.sectors import get_sector
 from src.data.spark import render_spark
 
 logger = logging.getLogger("autofetchstock.app")
@@ -228,11 +231,22 @@ class CallbackManager:
         except Exception:
             quote = None
 
-        # Sentiment dot + anomaly + impact pill (Phase 3 contract preserved).
+        # Phase 3.6: sentiment drives the dot; event text is kept as tooltip
+        # data only so the row grid remains clean and does not overlap sparks.
         sig = (signal_map or {}).get(stock_id) or {}
-        sig_kind = sig.get("signal", "neutral")
-        dot_kind = {"bullish": "bull", "bearish": "bear"}.get(sig_kind, "neu")
+        sig_kind = sig.get("sentiment") or sig.get("signal", "neutral")
+        dot_kind = {
+            "up": "up",
+            "down": "down",
+            "neutral": "neutral",
+            "bullish": "up",
+            "bearish": "down",
+        }.get(sig_kind, "neutral")
         is_anomaly = bool(anomaly_set and stock_id in anomaly_set)
+        event_label = sig.get("event_label") or ("爆量" if is_anomaly else "")
+        dot_title = " · ".join(
+            part for part in [event_label, sig.get("reason", "")] if part
+        )
 
         # Spark from real recent closes when available; seeded fallback
         # otherwise so every row keeps a visible line on first load.
@@ -254,26 +268,22 @@ class CallbackManager:
             seed=seed,
         )
 
-        # Column 2 — name + id + optional pills.
+        # Column 2 — vertically stacked name + id. Text event pills were
+        # removed in Phase 3.6; the leading dot carries the signal colour.
+        name_truncated = stock_name[:4] + ("…" if len(stock_name) > 4 else "")
         name_row_children: List[Any] = [
-            html.Span(stock_name, className="watch-name"),
+            html.Span(name_truncated, className="watch-name"),
             html.Span(stock_id, className="watch-code num"),
         ]
-        if is_anomaly:
-            name_row_children.append(html.Span("爆量", className="pill pill-warn watch-pill"))
-        if sig_kind == "bullish":
-            name_row_children.append(html.Span("利多", className="pill pill-up watch-pill"))
-        elif sig_kind == "bearish":
-            name_row_children.append(html.Span("利空", className="pill pill-down watch-pill"))
 
         children: List[Any] = [
             html.Span(
                 className=f"signal-dot {dot_kind} watch-dot",
-                title=sig.get("reason", ""),
+                title=dot_title,
             ),
             html.Div(
                 className="watch-name-col",
-                children=[html.Div(name_row_children, className="watch-name-row")],
+                children=name_row_children,
             ),
             html.Div(spark_node, className="watch-spark-col"),
             html.Div(
@@ -554,6 +564,7 @@ class CallbackManager:
         @self.app.callback(
             Output("stock-name-display", "children"),
             Output("stock-id-display", "children"),
+            Output("stock-sector-display", "children"),
             Output("stock-price-display", "children"),
             Output("stock-price-display", "className"),
             Output("stock-change-display", "children"),
@@ -714,6 +725,7 @@ class CallbackManager:
                 return (
                     quote.stock_name,  # stock name
                     stock_id,  # stock id (no parentheses; sector pill follows)
+                    get_sector(stock_id) or "",  # sector pill
                     f"{quote.current_price:,.2f}",  # price
                     f"stock-price num {direction_class}",  # price class
                     change_text,  # change
@@ -732,7 +744,7 @@ class CallbackManager:
                 logger.warning(f"Stock not found: {search_value}")
                 empty_fig = self.renderer.render_empty_chart("查無此股票")
                 return (
-                    "--", "", "--", "stock-price", "", "stock-change",
+                    "--", "", "", "--", "stock-price", "", "stock-change",
                     "--", "--", no_update, True, {"display": "none"}, 
                     empty_fig, empty_fig, "star-button"
                 )
@@ -741,7 +753,7 @@ class CallbackManager:
                 logger.error(f"Error fetching stock: {e}")
                 error_fig = self.renderer.render_empty_chart("搜尋發生錯誤")
                 return (
-                    "--", "", "--", "stock-price", "", "stock-change",
+                    "--", "", "", "--", "stock-price", "", "stock-change",
                     "--", "--", no_update, True, {"display": "none"}, 
                     error_fig, error_fig, "star-button"
                 )
@@ -1721,23 +1733,31 @@ class CallbackManager:
             if not sig and not is_anomaly:
                 return "signal-banner signal-banner-hidden", []
 
-            sig_kind = (sig or {}).get("signal", "neutral")
-            pill_label = {"bullish": "利多", "bearish": "利空"}.get(sig_kind, "中性")
+            if not sig:
+                return "signal-banner signal-banner-hidden", []
+
+            sig_kind = (sig or {}).get("sentiment") or (sig or {}).get("signal", "neutral")
+            pill_label = (sig or {}).get("sentiment_label") or {
+                "up": "利多",
+                "down": "利空",
+                "neutral": "中性",
+                "bullish": "利多",
+                "bearish": "利空",
+            }.get(sig_kind, "中性")
             pill_cls = {
+                "up": "pill-up",
+                "down": "pill-down",
                 "bullish": "pill-up",
                 "bearish": "pill-down",
             }.get(sig_kind, "pill-neu")
 
-            # Compact inline form per StockHeadline redesign: a single
-            # pill (with optional 爆量 sibling) follows the sector pill
-            # in the LEFT block. Reason text is folded into the pill's
-            # `title` attribute as a hover tooltip.
+            # Compact inline form per StockHeadline redesign: sentiment
+            # pill follows the sector pill. Event labels stay out of the
+            # headline to avoid conflating semantics.
             reason = (sig or {}).get("reason") or ""
             children: List[Any] = [
                 html.Span(pill_label, className=f"pill {pill_cls}", title=reason),
             ]
-            if is_anomaly:
-                children.append(html.Span("爆量", className="pill pill-warn"))
 
             return "signal-banner signal-banner-inline", children
 
@@ -1856,7 +1876,15 @@ class CallbackManager:
         def update_bottom_data_row(app_state):
             stock_id = (app_state or {}).get("current_stock")
             cards = build_chips_kpi(stock_id, self.chips_storage)
-            return [_render_chip_kpi_card(card) for card in cards]
+            fundamentals = get_fundamentals(stock_id)
+            children: List[Any] = [
+                html.Div(
+                    className="chips-kpi-grid",
+                    children=[_render_chip_kpi_card(card) for card in cards],
+                ),
+                _render_fundamentals_strip(fundamentals),
+            ]
+            return children
 
         @self.app.callback(
             Output("best5-market-pill", "children"),
@@ -1873,8 +1901,36 @@ class CallbackManager:
             except Exception:
                 is_open = False
             if is_open:
-                return "盤中", "pill pill-up sidebar-title-pill"
-            return "盤後", "pill pill-neu sidebar-title-pill"
+                return _session_pill_children("盤中"), "session-pill session-live sidebar-title-pill"
+            return _session_pill_children("盤後"), "session-pill session-closed sidebar-title-pill"
+
+        @self.app.callback(
+            Output("header-session-pill", "children"),
+            Output("header-session-pill", "className"),
+            Output("market-clock", "children"),
+            Output("market-countdown", "children"),
+            Input("auto-update-interval", "n_intervals"),
+            prevent_initial_call=False,
+        )
+        def update_header_clock(_n):
+            now = datetime.now()
+            clock = now.strftime("%H:%M:%S")
+            open_at = now.replace(hour=9, minute=0, second=0, microsecond=0)
+            close_at = now.replace(hour=13, minute=30, second=0, microsecond=0)
+            is_weekday = now.weekday() < 5
+            if is_weekday and open_at <= now <= close_at:
+                label = "盤中"
+                pill_cls = "session-pill session-live"
+                countdown = f"收盤倒數 {_fmt_duration(close_at - now)}"
+            elif is_weekday and now < open_at:
+                label = "盤前"
+                pill_cls = "session-pill session-pre"
+                countdown = f"開盤倒數 {_fmt_duration(open_at - now)}"
+            else:
+                label = "盤後"
+                pill_cls = "session-pill session-closed"
+                countdown = "已收盤"
+            return _session_pill_children(label), pill_cls, clock, countdown
 
 
 # ── Module-level news helper functions ──────────────────────────────────────
@@ -2452,11 +2508,15 @@ def _render_market_strip(
 ) -> List[Any]:
     """Build children for the global MarketStrip ribbon (28px)."""
     items: List[Any] = []
-    for e in entries:
+    for idx, e in enumerate(entries):
         cls = _dir_class(e.direction)
         items.append(
             html.Div(
-                className="market-strip-item",
+                className=(
+                    "market-strip-item market-strip-last"
+                    if idx == len(entries) - 1
+                    else "market-strip-item"
+                ),
                 children=[
                     html.Span(e.label, className="market-strip-label"),
                     html.Span(_fmt_index_value(e.value), className="num market-strip-value"),
@@ -2492,3 +2552,59 @@ def _render_chip_kpi_card(card: ChipKpiCard) -> html.Div:
             html.Div(card.caption or "", className="data-card-sub"),
         ],
     )
+
+
+def _render_fundamentals_strip(fund: FundamentalsSnapshot) -> html.Div:
+    """Three-cell fundamentals strip below the chip KPI cards."""
+    return html.Div(
+        className="fund-strip",
+        children=[
+            _fund_cell(
+                _period_label("EPS", fund.eps_period),
+                _fmt_optional(fund.eps_q, "{:.2f}"),
+                _fmt_optional(fund.eps_yoy, "{:+.0f}% YoY"),
+            ),
+            _fund_cell(
+                "毛利率",
+                _fmt_optional(fund.gross_margin, "{:.1f}%"),
+                _fmt_optional(fund.gm_delta, "{:+.1f} PP"),
+            ),
+            _fund_cell(
+                "本益比",
+                _fmt_optional(fund.pe, "{:.1f}x"),
+                _fmt_optional(fund.pe_avg, "vs avg {:.1f}"),
+            ),
+        ],
+    )
+
+
+def _fund_cell(label: str, value: str, note: str) -> html.Div:
+    return html.Div(
+        className="fund-cell",
+        children=[
+            html.Span(label, className="fund-label"),
+            html.Span(value, className="fund-value num"),
+            html.Span(note, className="fund-note"),
+        ],
+    )
+
+
+def _fmt_optional(value: Optional[float], fmt: str) -> str:
+    if value is None:
+        return "--"
+    return fmt.format(value)
+
+
+def _period_label(prefix: str, period: str) -> str:
+    return f"{prefix} {period}" if period else prefix
+
+
+def _session_pill_children(label: str) -> List[Any]:
+    return [html.Span("●", className="session-dot"), label]
+
+
+def _fmt_duration(delta) -> str:
+    seconds = max(0, int(delta.total_seconds()))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, _ = divmod(remainder, 60)
+    return f"{hours}:{minutes:02d}"

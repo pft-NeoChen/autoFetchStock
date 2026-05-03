@@ -5,10 +5,12 @@ Unit tests for stock news filtering helpers.
 from src.app.callbacks import (
     _collect_ticker_headlines,
     _extract_articles_from_run,
+    _render_fundamentals_strip,
     _render_event_timeline,
     _render_favorite_signal_strip,
     _render_news_chat_messages,
 )
+from src.models import FundamentalsSnapshot
 
 
 def _run_dict():
@@ -74,6 +76,13 @@ def test_render_event_timeline_empty_state():
     rendered = _render_event_timeline(None)
 
     assert "議題演進尚未產生" in str(rendered.children)
+
+
+def test_render_fundamentals_strip_shows_placeholders_for_missing_values():
+    rendered = _render_fundamentals_strip(FundamentalsSnapshot())
+
+    assert rendered.className == "fund-strip"
+    assert str(rendered).count("--") == 6
 
 
 def test_render_event_timeline_with_cluster():
