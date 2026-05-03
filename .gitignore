@@ -85,11 +85,7 @@ dmypy.json
 
 # Project specific ignores
 # Data directories (contain user-fetched stock data)
-data/stocks/
-data/intraday/
-data/cache/
-data/backup/
-data/news/
+data/
 
 # Log files
 logs/
