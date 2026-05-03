@@ -321,6 +321,43 @@ class Scheduler:
                 f"News cleanup job failed: {e}\n{traceback.format_exc()}"
             )
 
+    def add_chips_t86_job(self, fetch_callback: Callable[[], object]) -> bool:
+        """Daily TWSE T86 chip-flow snapshot job.
+
+        Fires at 16:30 Asia/Taipei Mon-Fri. TWSE typically publishes
+        T86 between 16:00 and 16:30; we run at the late edge to avoid
+        racing the publication.
+        """
+        try:
+            self._scheduler.add_job(
+                self._chips_t86_job,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=16,
+                    minute=30,
+                    timezone=TW_TIMEZONE,
+                ),
+                id="chips_t86",
+                kwargs={"fetch_callback": fetch_callback},
+                name="Chips T86 snapshot",
+                replace_existing=True,
+            )
+            logger.info("Registered daily chips T86 job (Mon-Fri 16:30)")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to register chips T86 job: {e}")
+            return False
+
+    def _chips_t86_job(self, fetch_callback: Callable[[], object]) -> None:
+        logger.info("Starting scheduled chips T86 fetch")
+        try:
+            fetch_callback()
+            logger.info("Scheduled chips T86 fetch completed")
+        except Exception as e:
+            logger.error(
+                f"Chips T86 job failed: {e}\n{traceback.format_exc()}"
+            )
+
     def add_news_event_job(self, event_callback: Callable[[], object]) -> bool:
         """
         Add the daily news event timeline build job.

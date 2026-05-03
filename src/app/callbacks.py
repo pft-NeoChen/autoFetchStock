@@ -62,6 +62,7 @@ class CallbackManager:
         on_init_volume=None,
         get_buffered_ticks=None,
         news_processor=None,
+        chips_storage=None,
     ):
         """
         Initialize callback manager.
@@ -88,6 +89,7 @@ class CallbackManager:
         self.renderer = renderer
         self.scheduler = scheduler
         self.news_processor = news_processor
+        self.chips_storage = chips_storage
         self._current_stock_id: Optional[str] = None
         self._current_stock_name: Optional[str] = None
         # Per-stock cache for WatchlistRow sparklines: load_daily_data
@@ -1848,7 +1850,7 @@ class CallbackManager:
         )
         def update_bottom_data_row(app_state):
             stock_id = (app_state or {}).get("current_stock")
-            cards = build_chips_kpi(stock_id)
+            cards = build_chips_kpi(stock_id, self.chips_storage)
             return [_render_chip_kpi_card(card) for card in cards]
 
         @self.app.callback(

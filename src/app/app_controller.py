@@ -161,6 +161,16 @@ class AppController:
         if self.config.news_rag_enabled:
             self._catchup_news_rag_index()
 
+        # Phase 3.5 #3 — TWSE chip-flow (T86) fetcher + per-day storage.
+        # On startup we backfill the most recent snapshot so ChipsKpi
+        # cards show real data on first paint instead of the STUB.
+        from src.fetcher.chips_fetcher import ChipsFetcher
+        from src.storage.chips_storage import ChipsStorage
+        self.chips_storage = ChipsStorage(data_dir=self.config.data_dir)
+        self.chips_fetcher = ChipsFetcher()
+        self.scheduler.add_chips_t86_job(self._run_chips_t86_fetch)
+        self._catchup_chips_t86()
+
     def _subscribe_saved_favorites(self) -> None:
         """Subscribe to all saved favorites in Shioaji."""
         try:
@@ -212,6 +222,7 @@ class AppController:
             on_init_volume=self.init_volume_cache,
             get_buffered_ticks=self._get_buffered_ticks,
             news_processor=self.news_processor,
+            chips_storage=self.chips_storage,
         )
 
         # Register all callbacks
@@ -226,6 +237,56 @@ class AppController:
                 # Return a copy to avoid mutation during iteration
                 return list(self._tick_buffer[stock_id]["ticks"])
             return []
+
+    def _run_chips_t86_fetch(self) -> None:
+        """Scheduled-job body: fetch today's T86 and persist."""
+        from datetime import date as _date
+        try:
+            today = _date.today()
+            snap = self.chips_fetcher.fetch_t86(today)
+            if not snap:
+                logger.info("Scheduled chips T86: no data for %s yet", today)
+                return
+            self.chips_storage.save_t86_snapshot(today, snap)
+            logger.info("Scheduled chips T86: saved %s (%d stocks)", today, len(snap))
+        except Exception as exc:
+            logger.warning("Scheduled chips T86 fetch failed: %s", exc)
+
+    def _catchup_chips_t86(self) -> None:
+        """Backfill the most recent T86 snapshot if storage is empty.
+
+        Runs in a background thread so the app can boot immediately;
+        TWSE responses can take a few seconds and we don't want to
+        block the Dash dev server. Walks back up to 7 calendar days
+        to land on the last actual trading day.
+        """
+        import threading
+        from datetime import date as _date
+
+        if self.chips_storage.latest_snapshot_date() is not None:
+            return
+
+        def _run() -> None:
+            try:
+                result = self.chips_fetcher.latest_available()
+                if not result:
+                    logger.info("Chips T86 catch-up: no snapshot available in last 7 days")
+                    return
+                snap_date, by_stock = result
+                self.chips_storage.save_t86_snapshot(snap_date, by_stock)
+                logger.info(
+                    "Chips T86 catch-up saved snapshot for %s (%d stocks)",
+                    snap_date,
+                    len(by_stock),
+                )
+            except Exception as exc:
+                logger.warning("Chips T86 catch-up failed: %s", exc)
+
+        threading.Thread(
+            target=_run,
+            name="chips-t86-catchup",
+            daemon=True,
+        ).start()
 
     def _catchup_news_event_timeline(self) -> None:
         """Run the daily event timeline build if it was missed today.
