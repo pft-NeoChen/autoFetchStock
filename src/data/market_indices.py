@@ -57,7 +57,19 @@ def fetch_market_strip(
     return [by_label.get(stub.label, stub) for stub in _STUB_ENTRIES]
 
 
-def market_strip_tail() -> str:
-    """Right-aligned summary string (近 1 分鐘成交). STUB until ^TWII
-    minute-volume delta is wired through."""
+def market_strip_tail(index_fetcher=None) -> str:
+    """Right-aligned summary string (近 1 分鐘 ^TWII 成交額).
+
+    When `index_fetcher` is supplied and has accumulated at least two
+    snapshot samples, returns a live per-minute amount in 億 (TWD).
+    Falls back to the spec STUB string otherwise so the ribbon never
+    blank-screens before the first sample lands.
+    """
+    if index_fetcher is not None:
+        try:
+            amt = index_fetcher.recent_twii_minute_amount()
+        except Exception:
+            amt = None
+        if amt is not None and amt > 0:
+            return f"近1分鐘成交 {amt / 1e8:.1f} 億"
     return "近1分鐘成交 28.4 億"

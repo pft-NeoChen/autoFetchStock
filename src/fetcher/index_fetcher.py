@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Dict, List, Optional, Tuple
+from collections import deque
+from typing import Deque, Dict, List, Optional, Tuple
 
 from src.models import MarketIndexEntry
 
@@ -55,6 +56,9 @@ class IndexFetcher:
     """Composite fetcher for the MarketStrip ribbon."""
 
     FOREIGN_TTL = 30.0   # seconds — yfinance polled at the 30s callback rate
+    # ^TWII minute-amount delta window. A single 30s callback won't span a
+    # full minute, so we keep ~3 samples and pick the oldest within 90s.
+    TWII_AMOUNT_WINDOW = 90.0
 
     def __init__(self) -> None:
         self._foreign_cache: List[MarketIndexEntry] = []
@@ -62,6 +66,8 @@ class IndexFetcher:
         # Lazy-imported on first use; None signals yfinance isn't available
         # at runtime (e.g. dev env without the package installed).
         self._yf = None
+        # Rolling log of (monotonic_ts, total_amount_TWD) for ^TWII.
+        self._twii_amount_log: Deque[Tuple[float, float]] = deque(maxlen=8)
 
     # ── Public ──────────────────────────────────────────────────────
 
@@ -100,9 +106,45 @@ class IndexFetcher:
                     value=close, change=change, pct=pct,
                     direction=_direction(change),
                 ))
+                # Record ^TWII running total_amount (TWD) for the
+                # `near-1-min trade amount` ribbon tail.
+                if label == "加權":
+                    amt = float(
+                        getattr(snap, "total_amount", 0)
+                        or getattr(snap, "amount", 0)
+                        or 0
+                    )
+                    if amt > 0:
+                        self._twii_amount_log.append((time.monotonic(), amt))
             except Exception as exc:
                 logger.debug("Local index %s failed: %s", label, exc)
         return out
+
+    def recent_twii_minute_amount(self) -> Optional[float]:
+        """Return the ^TWII trade amount (in 元) accumulated over the
+        most recent ~60s window. Returns None when fewer than two samples
+        exist or when the spread between samples is outside the
+        TWII_AMOUNT_WINDOW guardrail.
+        """
+        if len(self._twii_amount_log) < 2:
+            return None
+        latest_ts, latest_amt = self._twii_amount_log[-1]
+        # Find the oldest sample still within the window.
+        for ts, amt in self._twii_amount_log:
+            dt = latest_ts - ts
+            if dt <= 0:
+                continue
+            if dt > self.TWII_AMOUNT_WINDOW:
+                continue
+            delta = latest_amt - amt
+            if delta < 0:
+                # total_amount is monotonic intra-day; a drop means a
+                # session boundary or stale Shioaji frame — skip.
+                return None
+            # Normalise to a per-minute rate to keep the label honest
+            # whether dt was 30s or 90s.
+            return delta * (60.0 / dt)
+        return None
 
     def fetch_foreign(self) -> List[MarketIndexEntry]:
         now = time.time()

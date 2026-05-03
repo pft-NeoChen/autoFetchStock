@@ -28,6 +28,8 @@ class ChipsStorage:
     def __init__(self, data_dir: str | os.PathLike[str]) -> None:
         self._chips_dir = Path(data_dir) / "chips"
         self._chips_dir.mkdir(parents=True, exist_ok=True)
+        self._margin_dir = Path(data_dir) / "margin"
+        self._margin_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Write ───────────────────────────────────────────────────────
 
@@ -102,7 +104,81 @@ class ChipsStorage:
             cur -= timedelta(days=1)
         return None
 
+    # ── Margin (MI_MARGN) ───────────────────────────────────────────
+
+    def save_margin_snapshot(
+        self,
+        snapshot_date: date,
+        margin_by_stock: Dict[str, dict],
+    ) -> bool:
+        """Atomically write a day's MI_MARGN snapshot to disk."""
+        path = self._margin_path(snapshot_date)
+        payload = {
+            "date": snapshot_date.isoformat(),
+            "margin": margin_by_stock,
+        }
+        try:
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=self._margin_dir, suffix=".tmp")
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+            os.replace(tmp_path, path)
+            return True
+        except OSError as exc:
+            logger.warning("save_margin_snapshot failed (%s): %s", snapshot_date, exc)
+            return False
+
+    def load_margin_day(self, snapshot_date: date) -> Optional[Dict[str, dict]]:
+        path = self._margin_path(snapshot_date)
+        if not path.exists():
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("load_margin_day failed (%s): %s", snapshot_date, exc)
+            return None
+        return payload.get("margin") or {}
+
+    def load_recent_margin_for_stock(
+        self,
+        stock_id: str,
+        n_days: int = 20,
+        on_or_before: Optional[date] = None,
+    ) -> List[dict]:
+        """Up to `n_days` most-recent MI_MARGN rows for `stock_id`,
+        newest-first. Window default 20 covers ~1 trading month for the
+        融資 KPI 月增減 calculation.
+        """
+        cur = on_or_before or date.today()
+        out: List[dict] = []
+        budget = max(n_days * 2, 40)
+        for _ in range(budget):
+            if len(out) >= n_days:
+                break
+            day = self.load_margin_day(cur)
+            cur -= timedelta(days=1)
+            if not day:
+                continue
+            row = day.get(stock_id)
+            if not row:
+                continue
+            row = dict(row)
+            row["_date"] = (cur + timedelta(days=1)).isoformat()
+            out.append(row)
+        return out
+
+    def latest_margin_date(self, on_or_before: Optional[date] = None) -> Optional[date]:
+        cur = on_or_before or date.today()
+        for _ in range(30):
+            if self._margin_path(cur).exists():
+                return cur
+            cur -= timedelta(days=1)
+        return None
+
     # ── Internals ───────────────────────────────────────────────────
 
     def _snapshot_path(self, d: date) -> Path:
         return self._chips_dir / f"{d.strftime('%Y%m%d')}.json"
+
+    def _margin_path(self, d: date) -> Path:
+        return self._margin_dir / f"{d.strftime('%Y%m%d')}.json"

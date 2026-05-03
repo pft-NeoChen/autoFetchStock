@@ -1846,7 +1846,7 @@ class CallbackManager:
                 shioaji_fetcher=self.shioaji_fetcher,
                 index_fetcher=self.index_fetcher,
             )
-            return _render_market_strip(entries, market_strip_tail())
+            return _render_market_strip(entries, market_strip_tail(self.index_fetcher))
 
         @self.app.callback(
             Output("bottom-data-row", "children"),

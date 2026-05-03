@@ -244,18 +244,27 @@ class AppController:
             return []
 
     def _run_chips_t86_fetch(self) -> None:
-        """Scheduled-job body: fetch today's T86 and persist."""
+        """Scheduled-job body: fetch today's T86 and MI_MARGN, persist."""
         from datetime import date as _date
+        today = _date.today()
         try:
-            today = _date.today()
             snap = self.chips_fetcher.fetch_t86(today)
-            if not snap:
+            if snap:
+                self.chips_storage.save_t86_snapshot(today, snap)
+                logger.info("Scheduled chips T86: saved %s (%d stocks)", today, len(snap))
+            else:
                 logger.info("Scheduled chips T86: no data for %s yet", today)
-                return
-            self.chips_storage.save_t86_snapshot(today, snap)
-            logger.info("Scheduled chips T86: saved %s (%d stocks)", today, len(snap))
         except Exception as exc:
             logger.warning("Scheduled chips T86 fetch failed: %s", exc)
+        try:
+            margin = self.chips_fetcher.fetch_margin(today)
+            if margin:
+                self.chips_storage.save_margin_snapshot(today, margin)
+                logger.info("Scheduled MI_MARGN: saved %s (%d stocks)", today, len(margin))
+            else:
+                logger.info("Scheduled MI_MARGN: no data for %s yet", today)
+        except Exception as exc:
+            logger.warning("Scheduled MI_MARGN fetch failed: %s", exc)
 
     def _catchup_chips_t86(self) -> None:
         """Backfill the most recent T86 snapshot if storage is empty.
@@ -268,30 +277,60 @@ class AppController:
         import threading
         from datetime import date as _date
 
-        if self.chips_storage.latest_snapshot_date() is not None:
+        need_t86 = self.chips_storage.latest_snapshot_date() is None
+        need_margin = self.chips_storage.latest_margin_date() is None
+        if not need_t86 and not need_margin:
             return
 
         def _run() -> None:
-            try:
-                result = self.chips_fetcher.latest_available()
-                if not result:
-                    logger.info("Chips T86 catch-up: no snapshot available in last 7 days")
-                    return
-                snap_date, by_stock = result
-                self.chips_storage.save_t86_snapshot(snap_date, by_stock)
-                logger.info(
-                    "Chips T86 catch-up saved snapshot for %s (%d stocks)",
-                    snap_date,
-                    len(by_stock),
-                )
-            except Exception as exc:
-                logger.warning("Chips T86 catch-up failed: %s", exc)
+            if need_t86:
+                try:
+                    result = self.chips_fetcher.latest_available()
+                    if result:
+                        snap_date, by_stock = result
+                        self.chips_storage.save_t86_snapshot(snap_date, by_stock)
+                        logger.info(
+                            "Chips T86 catch-up saved snapshot for %s (%d stocks)",
+                            snap_date,
+                            len(by_stock),
+                        )
+                    else:
+                        logger.info("Chips T86 catch-up: no snapshot in last 7 days")
+                except Exception as exc:
+                    logger.warning("Chips T86 catch-up failed: %s", exc)
+            if need_margin:
+                try:
+                    self._catchup_margin_window()
+                except Exception as exc:
+                    logger.warning("MI_MARGN catch-up failed: %s", exc)
 
         threading.Thread(
             target=_run,
             name="chips-t86-catchup",
             daemon=True,
         ).start()
+
+    def _catchup_margin_window(self, max_days: int = 25) -> None:
+        """Walk back day-by-day collecting MI_MARGN snapshots until the
+        storage holds ~20 trading days. Runs only when storage is empty.
+        """
+        from datetime import date as _date, timedelta as _td
+
+        cur = _date.today()
+        saved = 0
+        for _ in range(max_days):
+            if saved >= 20:
+                break
+            try:
+                margin = self.chips_fetcher.fetch_margin(cur)
+            except Exception as exc:
+                logger.debug("MI_MARGN catch-up day %s failed: %s", cur, exc)
+                margin = None
+            if margin:
+                self.chips_storage.save_margin_snapshot(cur, margin)
+                saved += 1
+            cur -= _td(days=1)
+        logger.info("MI_MARGN catch-up saved %d days", saved)
 
     def _catchup_news_event_timeline(self) -> None:
         """Run the daily event timeline build if it was missed today.
