@@ -6,7 +6,7 @@ import os
 import threading
 import time
 from typing import Dict, List, Optional, Callable, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import shioaji as sj
 from shioaji.constant import QuoteVersion
@@ -53,29 +53,41 @@ class ShioajiFetcher:
         if value is None:
             return None
 
+        parsed = None
+
         if isinstance(value, datetime):
             if value.tzinfo is not None:
-                return value.astimezone().replace(tzinfo=None)
-            return value
-
-        if isinstance(value, (int, float)):
-            if value <= 0:
-                return None
-            # Shioaji snapshot ts is commonly epoch nanoseconds.
-            seconds = value / 1_000_000_000 if value > 10_000_000_000 else value
+                parsed = value.astimezone().replace(tzinfo=None)
+            else:
+                parsed = value
+        elif isinstance(value, (int, float)):
+            if value > 0:
+                # Shioaji snapshot ts is commonly epoch nanoseconds.
+                seconds = value / 1_000_000_000 if value > 10_000_000_000 else value
+                try:
+                    parsed = datetime.fromtimestamp(seconds)
+                except (OSError, OverflowError, ValueError):
+                    pass
+        elif isinstance(value, str) and value:
             try:
-                return datetime.fromtimestamp(seconds)
-            except (OSError, OverflowError, ValueError):
-                return None
-
-        if isinstance(value, str) and value:
-            try:
-                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-                if parsed.tzinfo is not None:
-                    return parsed.astimezone().replace(tzinfo=None)
-                return parsed
+                parsed_str = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                if parsed_str.tzinfo is not None:
+                    parsed = parsed_str.astimezone().replace(tzinfo=None)
+                else:
+                    parsed = parsed_str
             except ValueError:
-                return None
+                pass
+
+        if parsed is not None:
+            # TODO(phase 7.1): Replace hour-band heuristic with zoneinfo-based
+            # fix at source. Current band masks symptom (22:30 / 06:30 ticks)
+            # but will misfire on legit after-hours sessions (盤後定盤 14:30+,
+            # 早盤試撮 08:00–09:00). See IMPLEMENTATION_PLAN.md Phase 7.1.
+            if parsed.hour >= 15:
+                parsed -= timedelta(hours=8)
+            elif parsed.hour < 8:
+                parsed += timedelta(hours=8)
+            return parsed
 
         return None
 
@@ -430,17 +442,17 @@ class ShioajiFetcher:
             sell_vol = int(tick.volume) if tick.tick_type == 2 else 0
             accumulated_volume = int(getattr(tick, "total_volume", 0) or 0)
             
-            # if sell_vol > 0:
-            #     logger.info(f"SELL DETECTED: {tick.code}, vol={sell_vol}")
+            # Normalize datetime to fix timezone shift bug
+            corrected_dt = self._normalize_datetime(tick.datetime) or tick.datetime
             
             it_tick = IntradayTick(
-                time=tick.datetime.time(),
+                time=corrected_dt.time(),
                 price=float(tick.close),
                 volume=int(tick.volume),
                 buy_volume=buy_vol,
                 sell_volume=sell_vol,
                 accumulated_volume=accumulated_volume,
-                timestamp=tick.datetime,
+                timestamp=corrected_dt,
                 is_odd=getattr(tick, 'intraday_odd', False)
             )
             
