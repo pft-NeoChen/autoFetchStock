@@ -118,10 +118,19 @@ class NewsProcessor:
                 )
                 raw_by_category[cat] = []
 
+        # Phase 4.6 — batch per-article AI summary (with URL cache).
+        all_raw_articles = self._dedupe_raws(
+            [a for arts in raw_by_category.values() for a in arts]
+        )
+        summary_map = self._batch_summarize_articles(all_raw_articles)
+        if summary_map:
+            self._apply_summaries(categories, summary_map)
+
         # Aggregate-analysis phase：1 次全局 + N 批標籤 + 1 次自選股影響分析
         logger.info("開始全局重點分析 + 自選股影響分析（two-stage）")
-        global_brief = self._summarizer.summarize_global(raw_by_category)
-        all_raw_articles = [a for arts in raw_by_category.values() for a in arts]
+        global_brief = self._summarizer.summarize_global(
+            raw_by_category, summary_map=summary_map,
+        )
 
         # Stage 1：批次標註每篇新聞與哪些自選股相關
         tags = []
@@ -329,8 +338,13 @@ class NewsProcessor:
         category: NewsCategory,
         related_by_url: Optional[Dict[str, List[str]]] = None,
     ) -> List[NewsArticle]:
-        """Convert RawArticles to NewsArticles without LLM per-article summarization.
-        The `summary` field falls back to the RSS excerpt."""
+        """Convert RawArticles to NewsArticles.
+
+        Per-article LLM summary is wired in `run()` (Phase 4.6) via
+        `_apply_summaries()`. Initial conversion fills `summary` with the
+        RSS excerpt as a safe fallback so the article is never blank when
+        the batch step is skipped (e.g. SDK disabled, all-cached path).
+        """
         articles = []
         related_by_url = related_by_url or {}
         for raw in raw_articles:
@@ -351,6 +365,96 @@ class NewsProcessor:
             annotate_article(article)
             articles.append(article)
         return articles
+
+    # ── Phase 4.6 — batch summary helpers ────────────────────────────────────
+    _SUMMARY_CACHE_MIN_LEN = 20  # below this → treat as no cache, re-summarize
+
+    @staticmethod
+    def _dedupe_raws(raws: list) -> list:
+        """Drop duplicate URLs while preserving order."""
+        seen: set = set()
+        out: list = []
+        for r in raws:
+            if r.url in seen:
+                continue
+            seen.add(r.url)
+            out.append(r)
+        return out
+
+    def _load_summary_cache(self) -> Dict[str, str]:
+        """Load `{url: summary}` from today's saved news file, if any.
+
+        A summary is treated as cached only when it is non-trivially long
+        (>= `_SUMMARY_CACHE_MIN_LEN` chars) — older runs that fell back to
+        the RSS excerpt should be re-summarized.
+        """
+        date_str = datetime.now(tz=TW_TIMEZONE).strftime("%Y%m%d")
+        try:
+            daily = self._storage.load_news(date_str)
+        except Exception as exc:
+            logger.debug("讀取今日新聞快取失敗: %s", exc)
+            return {}
+        if daily is None:
+            return {}
+
+        cache: Dict[str, str] = {}
+        for run in (daily.runs or []):
+            for cat_result in (run.categories or {}).values():
+                for art in cat_result.articles or []:
+                    summary = (art.summary or "").strip()
+                    # Skip excerpt-shaped fallbacks: if cached summary equals
+                    # the excerpt verbatim, the LLM never ran on this URL.
+                    excerpt = (art.excerpt or "").strip()
+                    if (
+                        len(summary) >= self._SUMMARY_CACHE_MIN_LEN
+                        and summary != excerpt
+                    ):
+                        cache[art.url] = summary
+        if cache:
+            logger.info("命中今日摘要快取：%d 篇免重打 LLM", len(cache))
+        return cache
+
+    def _batch_summarize_articles(self, all_raws: list) -> Dict[str, str]:
+        """Merge today's cached summaries with a fresh batch LLM call.
+
+        Returns the merged `{url: summary}` map. Empty when no articles to
+        summarize, or when the LLM backend is disabled.
+        """
+        if not all_raws:
+            return {}
+        cache = self._load_summary_cache()
+        uncached = [r for r in all_raws if r.url not in cache]
+        if not uncached:
+            logger.info("所有 %d 篇新聞皆已有快取摘要，略過 LLM 呼叫", len(all_raws))
+            return cache
+        try:
+            new_summaries = self._summarizer.summarize_articles_batch(uncached)
+        except Exception as exc:
+            logger.warning("批次摘要呼叫失敗: %s", exc, exc_info=True)
+            new_summaries = {}
+        return {**cache, **new_summaries}
+
+    def _apply_summaries(
+        self,
+        categories: Dict[NewsCategory, NewsCategoryResult],
+        summary_map: Dict[str, str],
+    ) -> None:
+        """Overwrite each article.summary with the batch result when available.
+
+        URLs missing from `summary_map` keep their excerpt fallback; the
+        article is flagged `summary_failed=True` so the UI can surface it.
+        """
+        if not summary_map:
+            return
+        for cat_result in categories.values():
+            for art in cat_result.articles or []:
+                ai_summary = summary_map.get(art.url, "").strip()
+                if ai_summary:
+                    art.summary = ai_summary
+                    art.summary_failed = False
+                else:
+                    # Batch attempted but missed this URL → flag failure
+                    art.summary_failed = True
 
     # ── 輔助方法 ──────────────────────────────────────────────────────────────
 

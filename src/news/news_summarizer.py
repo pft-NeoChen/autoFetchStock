@@ -276,6 +276,24 @@ _MAX_CATEGORY_SUMMARY_LEN = 500
 _MAX_EVENT_CLUSTER_INPUT_ARTICLES = 800
 _MAX_EVENT_CLUSTERS = 50
 
+# Phase 4.6 — batch per-article AI summary
+_BATCH_SUMMARY_MAX_LEN = 80
+_BATCH_CHUNK_SIZE = 30
+_BATCH_CONTENT_CAP = 2500  # chars per article fed to LLM
+
+_BATCH_ARTICLE_PROMPT = """\
+你是台股新聞摘要助理。請為以下每一篇新聞各產出一段繁體中文摘要（不超過 {max_len} 字），
+摘要應點出事件、受影響對象、關鍵數據（若有）。請嚴格依照原文內容摘要，不可自行猜測。
+
+只回傳 JSON array，**不要**任何 markdown 程式碼框、不要其他說明文字。
+每筆元素格式為 {{"url": "原 URL", "summary": "繁體中文摘要"}}。
+若某篇文章資訊不足以摘要，summary 留空字串。
+
+---
+
+{articles}
+"""
+
 
 @dataclass
 class ArticleTag:
@@ -355,6 +373,125 @@ class NewsSummarizer:
             logger.warning("文章摘要失敗 [%s]: %s", article.title[:40], exc)
             return "", [], False
 
+    # ── Phase 4.6 — batch per-article summary ──────────────────────────────
+    def summarize_articles_batch(
+        self,
+        articles: List[RawArticle],
+        chunk_size: int = _BATCH_CHUNK_SIZE,
+    ) -> Dict[str, str]:
+        """Summarize many articles in chunked LLM calls.
+
+        Each chunk produces one API call returning a JSON array of
+        ``{"url": ..., "summary": ...}``. A chunk that fails to parse
+        contributes nothing — other chunks are unaffected.
+
+        Args:
+            articles: RawArticle list to summarize.
+            chunk_size: Articles per LLM call. Defaults to 30.
+
+        Returns:
+            ``{url: summary}`` mapping. URLs absent from the map should
+            fall back to ``excerpt`` at the call site.
+        """
+        if not articles:
+            return {}
+        if self._client is None and self._backend == "gemini":
+            logger.warning(
+                "summarize_articles_batch 跳過：Gemini SDK 不可用 (%s)",
+                self._disabled_reason or "client not initialized",
+            )
+            return {}
+
+        merged: Dict[str, str] = {}
+        chunks: List[List[RawArticle]] = [
+            articles[i : i + chunk_size]
+            for i in range(0, len(articles), chunk_size)
+        ]
+        logger.info(
+            "批次新聞摘要開始：%d 篇分 %d 批（每批 ≤%d 篇）",
+            len(articles), len(chunks), chunk_size,
+        )
+
+        for idx, chunk in enumerate(chunks, start=1):
+            block = self._format_articles_for_batch_summary(chunk)
+            prompt = _BATCH_ARTICLE_PROMPT.format(
+                max_len=_BATCH_SUMMARY_MAX_LEN,
+                articles=block,
+            )
+            try:
+                raw = self._call_backend(prompt)
+            except Exception as exc:
+                logger.warning("批次摘要失敗 [chunk %d/%d]: %s", idx, len(chunks), exc)
+                continue
+
+            parsed = self._parse_batch_summary_response(raw)
+            if not parsed:
+                logger.warning(
+                    "批次摘要解析失敗 [chunk %d/%d]，本批文章 fallback excerpt",
+                    idx, len(chunks),
+                )
+                continue
+            merged.update(parsed)
+
+        logger.info("批次新聞摘要完成：%d / %d 篇成功", len(merged), len(articles))
+        return merged
+
+    @staticmethod
+    def _format_articles_for_batch_summary(articles: List[RawArticle]) -> str:
+        """Render a chunk of RawArticles for the batch-summary prompt."""
+        blocks: List[str] = []
+        for i, a in enumerate(articles, start=1):
+            content = (
+                a.full_text if a.full_text_fetched and a.full_text else a.excerpt
+            ) or ""
+            content = content.replace("\n", " ").strip()[:_BATCH_CONTENT_CAP]
+            blocks.append(
+                f"[文章 {i}]\nurl: {a.url}\ntitle: {a.title}\nsource: {a.source}\n"
+                f"content: {content}"
+            )
+        return "\n\n".join(blocks)
+
+    @staticmethod
+    def _parse_batch_summary_response(raw: str) -> Dict[str, str]:
+        """Parse a JSON array response into ``{url: summary}``.
+
+        Tolerates leading/trailing markdown fences and stray prose by
+        extracting the first ``[ ... ]`` block before parsing.
+        """
+        text = raw.strip()
+        if text.startswith("```"):
+            # Strip ```json ... ``` or ``` ... ```
+            text = text.strip("`")
+            if text.lower().startswith("json"):
+                text = text[4:]
+            text = text.strip()
+        # Extract first JSON array
+        start = text.find("[")
+        end = text.rfind("]")
+        if start == -1 or end == -1 or end <= start:
+            return {}
+        try:
+            data = json.loads(text[start : end + 1])
+        except json.JSONDecodeError as exc:
+            logger.debug("批次摘要 JSON 解析錯誤: %s", exc)
+            return {}
+        if not isinstance(data, list):
+            return {}
+
+        out: Dict[str, str] = {}
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            url = str(entry.get("url", "")).strip()
+            summary = str(entry.get("summary", "")).strip()
+            if not url or not summary:
+                continue
+            if len(summary) > _BATCH_SUMMARY_MAX_LEN * 2:
+                # Defensive cap — prompt asks ≤80 字 but allow some slack
+                summary = summary[: _BATCH_SUMMARY_MAX_LEN * 2]
+            out[url] = summary
+        return out
+
     def summarize_category(
         self,
         articles: List[NewsArticle],
@@ -391,15 +528,19 @@ class NewsSummarizer:
     def summarize_global(
         self,
         articles_by_category: "dict[NewsCategory, List[RawArticle]]",
+        summary_map: Optional[Dict[str, str]] = None,
     ) -> GlobalBrief:
         """
         One-shot aggregate analysis over all today's articles.
         Produces an overall brief, per-category highlights, and a market sentiment score.
+
+        When ``summary_map`` is supplied, prompt sections use the per-article
+        LLM summary instead of the raw RSS excerpt — denser context, fewer tokens.
         """
         if not any(articles_by_category.values()):
             return GlobalBrief(failed=True, sentiment_reason="無新聞資料")
 
-        sections = self._format_sections(articles_by_category)
+        sections = self._format_sections(articles_by_category, summary_map=summary_map)
         prompt = _GLOBAL_BRIEF_PROMPT.format(sections=sections[:60000])
 
         try:
@@ -740,16 +881,24 @@ class NewsSummarizer:
     @staticmethod
     def _format_sections(
         articles_by_category: "dict[NewsCategory, List[RawArticle]]",
+        summary_map: Optional[Dict[str, str]] = None,
     ) -> str:
-        """Render articles grouped by category for the global-brief prompt."""
+        """Render articles grouped by category for the global-brief prompt.
+
+        When ``summary_map`` provides a non-empty entry for an article URL,
+        that summary is preferred over the raw RSS excerpt.
+        """
+        summary_map = summary_map or {}
         lines: List[str] = []
         for category, arts in articles_by_category.items():
             if not arts:
                 continue
             lines.append(f"\n## {category.value} ({category.display_name})")
             for a in arts:
-                excerpt = (a.excerpt or a.full_text[:200]).replace("\n", " ").strip()
-                lines.append(f"- {a.title} | {a.source} | {excerpt}")
+                blurb = summary_map.get(a.url, "").strip()
+                if not blurb:
+                    blurb = (a.excerpt or a.full_text[:200]).replace("\n", " ").strip()
+                lines.append(f"- {a.title} | {a.source} | {blurb}")
         return "\n".join(lines)
 
     @staticmethod
