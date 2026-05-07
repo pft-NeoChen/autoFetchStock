@@ -51,6 +51,8 @@ class NewsArticle:
     related_stock_ids: List[str] = field(default_factory=list)  # 關聯股票代號
     full_text_fetched: bool = True          # 是否成功取得全文
     summary_failed: bool = False            # 摘要是否失敗
+    impact_score: float = 0.0               # Phase 4 — 影響力分數 0~10
+    impact_direction: str = "neutral"       # Phase 4 — 利多/利空/中性 ("up"/"down"/"neutral")
 
     def to_dict(self) -> dict:
         return {
@@ -65,6 +67,8 @@ class NewsArticle:
             "related_stock_ids": self.related_stock_ids,
             "full_text_fetched": self.full_text_fetched,
             "summary_failed": self.summary_failed,
+            "impact_score": self.impact_score,
+            "impact_direction": self.impact_direction,
         }
 
     @classmethod
@@ -81,6 +85,8 @@ class NewsArticle:
             related_stock_ids=data.get("related_stock_ids", []),
             full_text_fetched=data.get("full_text_fetched", True),
             summary_failed=data.get("summary_failed", False),
+            impact_score=float(data.get("impact_score", 0.0) or 0.0),
+            impact_direction=data.get("impact_direction", "neutral"),
         )
 
 

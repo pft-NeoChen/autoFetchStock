@@ -587,6 +587,20 @@ class CallbackManager:
             if not n_clicks or not search_value:
                 raise PreventUpdate
 
+            # Phase 4 (N2) — guard against race with load_initial_favorites:
+            # when stock-card click navigates from /news → /?stock=NNN, this
+            # callback may fire before favorites are loaded into state, which
+            # would then drop them from the persisted store.
+            current_state = current_state or {}
+            if not current_state.get("favorites"):
+                try:
+                    favs = self.storage.load_favorites() or []
+                    if favs:
+                        current_state = dict(current_state)
+                        current_state["favorites"] = favs
+                except Exception as e:
+                    logger.debug(f"load_favorites in on_search_submit failed: {e}")
+
             try:
                 # Resolve submit text into a concrete stock first. Exact names
                 # such as "國巨" should map to the underlying stock code.
@@ -1616,21 +1630,125 @@ class CallbackManager:
 
             return _render_article_list(articles)
 
-        # ── TASK-155  /news page ─────────────────────────────────────────────
+        # ── Phase 4 (N2) filter buttons → set filter state + active style ──
         @self.app.callback(
-            Output("news-category-content", "children"),
-            Output("news-last-updated", "children"),
-            Input("news-category-tabs", "value", allow_optional=True),
-            Input("news-data-store", "data"),
+            Output("news-filter-state", "data"),
+            Output("news-filter-btn-all",     "className"),
+            Output("news-filter-btn-up",      "className"),
+            Output("news-filter-btn-down",    "className"),
+            Output("news-filter-btn-neutral", "className"),
+            Output("news-filter-btn-fav",     "className"),
+            Input("news-filter-btn-all",     "n_clicks"),
+            Input("news-filter-btn-up",      "n_clicks"),
+            Input("news-filter-btn-down",    "n_clicks"),
+            Input("news-filter-btn-neutral", "n_clicks"),
+            Input("news-filter-btn-fav",     "n_clicks"),
+            State("news-filter-state", "data"),
             prevent_initial_call=False,
         )
-        def update_news_page(category: str, news_data: dict):
-            """Show all articles in the selected category on the /news page."""
-            category = category or "INTERNATIONAL"
+        def update_filter_state(_a, _u, _d, _n, _f, current):
+            mapping = {
+                "news-filter-btn-all":     "ALL",
+                "news-filter-btn-up":      "UP",
+                "news-filter-btn-down":    "DOWN",
+                "news-filter-btn-neutral": "NEUTRAL",
+                "news-filter-btn-fav":     "FAVORITES",
+            }
+            trig = ctx.triggered_id
+            value = mapping.get(trig, current or "ALL")
+
+            def _cls(v: str) -> str:
+                base = "news-filter-chip"
+                if v == value:
+                    base += " news-filter-chip-active"
+                return base
+
+            return (
+                value,
+                _cls("ALL"), _cls("UP"), _cls("DOWN"),
+                _cls("NEUTRAL"), _cls("FAVORITES"),
+            )
+
+        # ── Phase 4 (N2) sort buttons → toggle direction / switch field ──
+        @self.app.callback(
+            Output("news-sort-state", "data"),
+            Output("news-sort-btn-impact", "children"),
+            Output("news-sort-btn-time",   "children"),
+            Output("news-sort-btn-heat",   "children"),
+            Output("news-sort-btn-impact", "className"),
+            Output("news-sort-btn-time",   "className"),
+            Output("news-sort-btn-heat",   "className"),
+            Input("news-sort-btn-impact", "n_clicks"),
+            Input("news-sort-btn-time",   "n_clicks"),
+            Input("news-sort-btn-heat",   "n_clicks"),
+            State("news-sort-state", "data"),
+            prevent_initial_call=False,
+        )
+        def update_sort_state(_i, _t, _h, current):
+            current = current or {"field": "IMPACT", "direction": "desc"}
+            trig = ctx.triggered_id
+            mapping = {
+                "news-sort-btn-impact": "IMPACT",
+                "news-sort-btn-time":   "TIME",
+                "news-sort-btn-heat":   "HEAT",
+            }
+            new_field = mapping.get(trig)
+            if new_field is None:
+                # initial fire — keep current state
+                state = current
+            elif new_field == current.get("field"):
+                # toggle direction on same field
+                state = {
+                    "field": new_field,
+                    "direction": "asc" if current.get("direction") == "desc" else "desc",
+                }
+            else:
+                # switch field, default desc
+                state = {"field": new_field, "direction": "desc"}
+
+            arrow = "↓" if state["direction"] == "desc" else "↑"
+            labels = {
+                "IMPACT": f"影響 {arrow}",
+                "TIME":   f"時間 {arrow}",
+                "HEAT":   f"熱度 {arrow}",
+            }
+
+            def _label(field: str) -> str:
+                if field == state["field"]:
+                    return labels[field]
+                # inactive — always show ↓ as neutral hint
+                return {"IMPACT": "影響 ↓", "TIME": "時間 ↓", "HEAT": "熱度 ↓"}[field]
+
+            def _cls(field: str) -> str:
+                base = "news-sort-chip"
+                if field == state["field"]:
+                    base += " news-sort-chip-active"
+                return base
+
+            return (
+                state,
+                _label("IMPACT"), _label("TIME"), _label("HEAT"),
+                _cls("IMPACT"), _cls("TIME"), _cls("HEAT"),
+            )
+
+        # ── TASK-155  /news page (Phase 4 — N2 impact feed) ──────────────────
+        @self.app.callback(
+            Output("news-impact-feed", "children"),
+            Output("news-last-updated", "children"),
+            Input("news-filter-state", "data"),
+            Input("news-sort-state", "data"),
+            Input("news-data-store", "data"),
+            Input("news-events-store", "data"),
+            Input("app-state-store", "data"),
+            prevent_initial_call=False,
+        )
+        def update_news_page(filter_value: str, sort_state: dict, news_data: dict, events_data: dict, app_state: dict):
+            """Render impact-ranked news feed on /news page (Variant N2)."""
+            filter_value = filter_value or "ALL"
+            sort_state = sort_state or {"field": "IMPACT", "direction": "desc"}
             if not news_data:
                 return html.Div("尚無新聞資料", className="no-news"), "最後更新：--"
 
-            # Last updated time
             run_at = news_data.get("run_at", "")
             try:
                 from datetime import datetime as _dt
@@ -1639,11 +1757,71 @@ class CallbackManager:
             except Exception:
                 updated_str = "最後更新：--"
 
-            articles = _extract_articles_from_run(news_data, category, stock_filter=None)
-            if not articles:
-                return html.Div("此分類目前無新聞", className="no-news"), updated_str
+            favorites = (app_state or {}).get("favorites", []) or []
+            favorite_ids = {
+                f.get("id") if isinstance(f, dict) else getattr(f, "stock_id", None)
+                for f in favorites
+            }
+            favorite_ids.discard(None)
 
-            return _render_article_list(articles), updated_str
+            articles = _extract_articles_from_run(news_data, "ALL", stock_filter=None)
+            articles = _apply_impact_filter(articles, filter_value, favorite_ids)
+            if not articles:
+                return html.Div("無符合條件的新聞", className="no-news"), updated_str
+
+            return _render_impact_feed(
+                articles, events_data, self.fetcher, self.storage, sort_state,
+            ), updated_str
+
+        # ── Phase 4 (N2)  ?stock= URL → trigger search ───────────────────────
+        # Stock-card clicks navigate to /?stock={sid}. Clientside callback
+        # detects the query, fills the search input, clicks search-button,
+        # then clears the query so back-nav doesn't re-fire.
+        self.app.clientside_callback(
+            """
+            function(search) {
+                if (!search || !search.startsWith('?stock=')) {
+                    return window.dash_clientside.no_update;
+                }
+                const sid = decodeURIComponent(search.substring(7));
+                if (!sid) return window.dash_clientside.no_update;
+                const tryFire = (attempt) => {
+                    const input = document.getElementById('stock-search-input');
+                    const btn = document.getElementById('stock-search-button');
+                    if (input && btn) {
+                        const setter = Object.getOwnPropertyDescriptor(
+                            window.HTMLInputElement.prototype, 'value'
+                        ).set;
+                        setter.call(input, sid);
+                        input.dispatchEvent(new Event('input', {bubbles: true}));
+                        setTimeout(() => btn.click(), 250);
+                    } else if (attempt < 30) {
+                        setTimeout(() => tryFire(attempt + 1), 100);
+                    }
+                };
+                // Wait a bit for main page init callbacks (favorites load) to settle.
+                setTimeout(() => tryFire(0), 200);
+                return '';
+            }
+            """,
+            Output("url", "search"),
+            Input("url", "search"),
+            prevent_initial_call=True,
+        )
+
+        # ── Phase 4 (N2)  Right rail ─────────────────────────────────────────
+        @self.app.callback(
+            Output("news-right-rail", "children"),
+            Input("news-data-store", "data"),
+            Input("news-events-store", "data"),
+            prevent_initial_call=False,
+        )
+        def update_news_right_rail(news_data: dict, events_data: dict):
+            if not news_data:
+                return html.Div("尚無新聞資料", className="rail-loading")
+            # Use unfiltered article set for rail aggregates
+            articles = _extract_articles_from_run(news_data, "ALL", stock_filter=None)
+            return _render_right_rail(articles, news_data, events_data)
 
         # ── TASK-156  News ticker ────────────────────────────────────────────
         @self.app.callback(
@@ -1929,6 +2107,54 @@ _CATEGORY_DISPLAY = {
 }
 
 
+def _lazy_score_article(art: dict) -> None:
+    """Phase 4 — Q5(a): if article dict has no impact_score, compute on the fly.
+
+    Mutates `art` in place. Old JSON files written before Phase 4 lack the
+    impact_score / impact_direction fields, so they default to 0.0 / "neutral"
+    and would all sink to the low-impact section. Compute lazily without
+    writing back to disk.
+    """
+    score = art.get("impact_score")
+    direction = art.get("impact_direction")
+    if score not in (None, 0, 0.0) or direction not in (None, "", "neutral"):
+        return
+    try:
+        from src.news.news_impact import _keyword_score, _recency_bonus, _category_bonus, _direction
+        from src.news.news_models import NewsCategory
+        from datetime import datetime, timezone
+
+        title = art.get("title", "")
+        summary = art.get("summary", "") or art.get("excerpt", "")
+        excerpt = art.get("excerpt", "")
+        text = f"{title} {summary} {excerpt}"
+
+        # parse published_at
+        pub_str = art.get("published_at", "")
+        try:
+            pub_dt = datetime.fromisoformat(pub_str)
+        except Exception:
+            pub_dt = datetime.now(timezone.utc)
+
+        # parse category
+        try:
+            cat = NewsCategory(art.get("category", "INTERNATIONAL"))
+        except Exception:
+            cat = NewsCategory.INTERNATIONAL
+
+        score_v = (
+            _keyword_score(text)
+            + _recency_bonus(pub_dt, datetime.now(timezone.utc))
+            + (1.0 if art.get("related_stock_ids") else 0.0)
+            + _category_bonus(cat)
+        )
+        score_v = max(0.0, min(10.0, score_v))
+        art["impact_score"] = round(score_v, 1)
+        art["impact_direction"] = _direction(text)
+    except Exception as e:
+        logger.warning(f"lazy score failed for article {art.get('url', '?')}: {e}")
+
+
 def _extract_articles_from_run(
     run_dict: dict,
     category: str,
@@ -1964,6 +2190,7 @@ def _extract_articles_from_run(
                     continue
             art_copy = dict(art)
             art_copy["_category_key"] = cat_key
+            _lazy_score_article(art_copy)
             articles.append(art_copy)
 
     # Sort newest-first
@@ -2032,6 +2259,562 @@ def _render_article_list(articles: List[dict]) -> html.Div:
         )
 
     return html.Div(items, className="news-articles-list")
+
+
+# ── Phase 4 (N2) — impact feed helpers ────────────────────────────────────────
+
+_HIGH_IMPACT_THRESHOLD = 5.0  # spec: < 5 collapsed
+
+
+def _apply_impact_filter(
+    articles: List[dict],
+    filter_value: str,
+    favorite_ids: set,
+) -> List[dict]:
+    """Filter articles by chip selection."""
+    if filter_value == "FAVORITES":
+        return [
+            a for a in articles
+            if any(sid in favorite_ids for sid in a.get("related_stock_ids", []))
+        ]
+    if filter_value == "UP":
+        return [a for a in articles if a.get("impact_direction") == "up"]
+    if filter_value == "DOWN":
+        return [a for a in articles if a.get("impact_direction") == "down"]
+    if filter_value == "NEUTRAL":
+        return [a for a in articles if a.get("impact_direction") == "neutral"]
+    return articles  # ALL
+
+
+def _impact_score_tier(score: float) -> str:
+    """Spec color tiers: ≥8 up, ≥5 highlight, else txt-2."""
+    if score >= 8.0:
+        return "tier-high"
+    if score >= 5.0:
+        return "tier-mid"
+    return "tier-low"
+
+
+def _direction_class(direction: str) -> str:
+    if direction == "up":
+        return "dir-up"
+    if direction == "down":
+        return "dir-down"
+    return "dir-neutral"
+
+
+def _render_impact_row(
+    art: dict,
+    *,
+    url_to_event_size: Optional[Dict[str, int]] = None,
+    stock_meta: Optional[dict] = None,
+) -> html.Div:
+    """Render a high-impact news row (3-col grid: 56 / 1fr / 280)."""
+    is_top = bool(art.get("_is_top"))
+    score = float(art.get("impact_score", 0.0) or 0.0)
+    direction = art.get("impact_direction", "neutral")
+    tier_cls = _impact_score_tier(score)
+    dir_cls = _direction_class(direction)
+
+    pub = art.get("published_at", "")
+    try:
+        from datetime import datetime as _dt
+        ts = _dt.fromisoformat(pub)
+        pub_str = ts.strftime("%H:%M")
+    except Exception:
+        pub_str = pub[:5] if pub else "--"
+
+    title = art.get("title", "（無標題）")
+    url = art.get("url", "#")
+    source = art.get("source", "")
+    summary = art.get("summary") or art.get("excerpt", "")
+    full_text = art.get("full_text") or ""
+
+    if direction == "up":
+        direction_pill = html.Span("利多", className="pill pill-up news-direction-pill")
+    elif direction == "down":
+        direction_pill = html.Span("利空", className="pill pill-down news-direction-pill")
+    else:
+        direction_pill = html.Span("中性", className="pill pill-neu news-direction-pill")
+    top_pill = html.Span("頂部訊號", className="pill pill-ai news-top-pill") if is_top else None
+
+    badge = html.Div(
+        className=f"news-score-badge {tier_cls}",
+        children=[
+            html.Div(f"{score:.1f}", className="news-score-value num"),
+            html.Div("影響", className="news-score-label"),
+            html.Div(
+                className="news-score-bar",
+                children=[
+                    html.Div(
+                        className=f"news-score-bar-fill {dir_cls}",
+                        style={"width": f"{min(100, score * 10):.0f}%"},
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    actions: List[Any] = []
+    actions.append(html.Details(
+        className="news-action news-action-ai",
+        children=[
+            html.Summary("AI 解讀", className="news-action-label"),
+            html.Div(summary or "（無摘要）", className="news-action-content"),
+        ],
+    ))
+    event_n = (url_to_event_size or {}).get(url, 0)
+    if event_n > 1:
+        actions.append(html.Span(
+            f"關聯事件 ×{event_n}",
+            className="news-action news-action-event",
+        ))
+
+    # Whole-row click → article. Overlay <a> spans entire row at low z-index.
+    # Action chips + stock-card sit at higher z-index with pointer-events:auto.
+    # Text content has pointer-events:none so clicks pass through to overlay.
+    row_overlay = html.A(
+        href=url,
+        target="_blank",
+        rel="noopener noreferrer",
+        className="news-row-overlay",
+        **{"aria-label": title},
+    )
+
+    content = html.Div(
+        className="news-row-content",
+        children=[
+            html.Div(
+                className="news-row-header",
+                children=[
+                    html.Span(pub_str, className="news-row-time num"),
+                    html.Span(source, className="news-row-source"),
+                    direction_pill,
+                    top_pill,
+                ],
+            ),
+            html.Div(title, className="news-row-title"),
+            html.Div(summary, className="news-row-summary") if summary else None,
+        ],
+    )
+
+    body = html.Div(
+        className="news-row-body",
+        children=[
+            content,
+            html.Div(actions, className="news-row-actions"),
+        ],
+    )
+
+    if stock_meta:
+        stock_card_inner = _render_stock_card(stock_meta)
+        sid = stock_meta.get("stock_id", "")
+        stock_card = html.A(
+            href=f"/?stock={sid}",
+            className="news-row-stock-link",
+            children=stock_card_inner,
+        )
+    else:
+        stock_card = html.Div(className="news-row-stock-card news-row-stock-empty")
+
+    cls = "news-row news-row-top" if is_top else "news-row"
+    return html.Div(className=cls, children=[row_overlay, badge, body, stock_card])
+
+
+def _render_compact_row(art: dict) -> html.Div:
+    """Render a low-impact row (5-col compact grid: 40/60/1fr/80/60)."""
+    score = float(art.get("impact_score", 0.0) or 0.0)
+    direction = art.get("impact_direction", "neutral")
+    tier_cls = _impact_score_tier(score)
+
+    pub = art.get("published_at", "")
+    try:
+        from datetime import datetime as _dt
+        ts = _dt.fromisoformat(pub)
+        pub_str = ts.strftime("%H:%M")
+    except Exception:
+        pub_str = pub[:5] if pub else "--"
+
+    title = art.get("title", "（無標題）")
+    url = art.get("url", "#")
+    related = art.get("related_stock_ids") or []
+    sid = related[0] if related else ""
+
+    if direction == "up":
+        tag = html.Span("利多", className="pill pill-up news-direction-pill")
+    elif direction == "down":
+        tag = html.Span("利空", className="pill pill-down news-direction-pill")
+    else:
+        tag = html.Span("中性", className="pill pill-neu news-direction-pill")
+
+    return html.A(
+        href=url,
+        target="_blank",
+        rel="noopener noreferrer",
+        className="news-row-compact",
+        children=[
+            html.Span(f"{score:.1f}", className=f"news-row-compact-score num {tier_cls}"),
+            html.Span(pub_str, className="news-row-compact-time num"),
+            html.Span(title, className="news-row-compact-title"),
+            html.Span(sid, className="news-row-compact-stock num"),
+            tag,
+        ],
+    )
+
+
+def _render_stock_card(meta: dict) -> html.Div:
+    """Right-side boxed stock card per spec (280px column)."""
+    from src.data.spark import render_spark, seeded_values
+
+    name = meta.get("stock_name") or meta.get("stock_id", "")
+    sid = meta.get("stock_id", "")
+    price = meta.get("price")
+    change_pct = meta.get("change_pct")
+    direction = meta.get("direction", "flat")
+    history = meta.get("history") or seeded_values(int(sid) if sid.isdigit() else 1)
+
+    price_str = f"{price:,.2f}" if isinstance(price, (int, float)) else "—"
+    if isinstance(change_pct, (int, float)):
+        change_str = f"{'+' if change_pct >= 0 else ''}{change_pct:.2f}%"
+    else:
+        change_str = ""
+    dir_cls = _direction_class(direction)
+
+    return html.Div(
+        className="news-row-stock-card",
+        children=[
+            html.Div(
+                className="news-row-stock-row1",
+                children=[
+                    html.Span(name, className="news-row-stock-name"),
+                    html.Span(sid, className="news-row-stock-id num"),
+                    html.Span(price_str, className=f"news-row-stock-price num {dir_cls}"),
+                ],
+            ),
+            html.Div(change_str, className=f"news-row-stock-change num {dir_cls}"),
+            html.Div(
+                render_spark(history, direction=direction, w=258, h=32),
+                className="news-row-stock-spark",
+            ),
+        ],
+    )
+
+
+def _build_url_to_event_size(events_data: Optional[dict]) -> Dict[str, int]:
+    """Map article URL → number of articles in the same event cluster."""
+    out: Dict[str, int] = {}
+    for c in (events_data or {}).get("clusters") or []:
+        urls = c.get("article_urls") or []
+        n = len(urls)
+        if n <= 1:
+            continue
+        for u in urls:
+            if u and out.get(u, 0) < n:
+                out[u] = n
+    return out
+
+
+def _build_stock_lookup(articles: List[dict], fetcher, storage) -> Dict[str, dict]:
+    """Look up live price + recent history for stocks referenced by articles.
+
+    Q3 fallback: take first related_stock_id since per-tag relevance score
+    is not available in current data.
+
+    Quote source: DataFetcher.get_cached_quote() (storage has no realtime
+    table — quotes live in the fetcher's in-memory cache, populated by
+    Shioaji ticks or TWSE polls).
+    """
+    lookup: Dict[str, dict] = {}
+    seen: set = set()
+    for art in articles:
+        ids = art.get("related_stock_ids") or []
+        if not ids:
+            continue
+        sid = ids[0]
+        if sid in seen:
+            continue
+        seen.add(sid)
+
+        meta: dict = {"stock_id": sid, "stock_name": sid}
+
+        # Live quote via fetcher cache
+        quote = None
+        if fetcher is not None:
+            try:
+                quote = fetcher.get_cached_quote(sid)
+            except Exception as e:
+                logger.debug(f"get_cached_quote({sid}) failed: {e}")
+        if quote is not None:
+            meta["stock_name"] = getattr(quote, "stock_name", None) or sid
+            meta["price"] = getattr(quote, "current_price", None)
+            change_amt = getattr(quote, "change_amount", None)
+            meta["change_pct"] = getattr(quote, "change_percent", None)
+            if change_amt is None:
+                meta["direction"] = "flat"
+            elif change_amt > 0:
+                meta["direction"] = "up"
+            elif change_amt < 0:
+                meta["direction"] = "down"
+            else:
+                meta["direction"] = "flat"
+
+        # History for sparkline + name fallback via daily file
+        if storage is not None:
+            try:
+                daily = storage.load_daily_data(sid)
+            except Exception as e:
+                logger.debug(f"load_daily_data({sid}) failed: {e}")
+                daily = None
+            if daily is not None:
+                if meta.get("stock_name") in (sid, None):
+                    meta["stock_name"] = getattr(daily, "stock_name", None) or sid
+                closes: List[float] = []
+                for row in (getattr(daily, "daily_data", None) or [])[-24:]:
+                    c = getattr(row, "close", None)
+                    if isinstance(c, (int, float)):
+                        closes.append(float(c))
+                if closes:
+                    meta["history"] = closes
+                    # If no quote, derive last price + change from daily
+                    if meta.get("price") is None and len(closes) >= 1:
+                        meta["price"] = closes[-1]
+                        if len(closes) >= 2 and closes[-2] > 0:
+                            ch_pct = (closes[-1] - closes[-2]) / closes[-2] * 100
+                            meta["change_pct"] = ch_pct
+                            meta["direction"] = (
+                                "up" if ch_pct > 0
+                                else "down" if ch_pct < 0
+                                else "flat"
+                            )
+
+        lookup[sid] = meta
+    return lookup
+
+
+def _render_impact_feed(
+    articles: List[dict],
+    events_data: Optional[dict] = None,
+    fetcher=None,
+    storage=None,
+    sort_state: Optional[dict] = None,
+) -> html.Div:
+    """Render N2 feed: high-impact rows + collapsed low-impact section."""
+    sort_state = sort_state or {"field": "IMPACT", "direction": "desc"}
+    sort_mode = sort_state.get("field", "IMPACT")
+    descending = sort_state.get("direction", "desc") == "desc"
+    url_event = _build_url_to_event_size(events_data)
+
+    def _sort_key(a: dict):
+        if sort_mode == "TIME":
+            return a.get("published_at", "")
+        if sort_mode == "HEAT":
+            return url_event.get(a.get("url", ""), 0)
+        return float(a.get("impact_score", 0.0) or 0.0)
+
+    sorted_articles = sorted(articles, key=_sort_key, reverse=descending)
+    stock_lookup = _build_stock_lookup(sorted_articles, fetcher, storage)
+
+    def _row(a: dict, is_top: bool) -> html.Div:
+        a = dict(a)
+        a["_is_top"] = is_top
+        ids = a.get("related_stock_ids") or []
+        meta = stock_lookup.get(ids[0]) if ids else None
+        return _render_impact_row(a, url_to_event_size=url_event, stock_meta=meta)
+
+    sections: List[Any] = []
+
+    if sort_mode == "IMPACT":
+        # Default mode — split by impact threshold + collapse low-impact.
+        high = [a for a in sorted_articles if float(a.get("impact_score", 0.0) or 0.0) >= _HIGH_IMPACT_THRESHOLD]
+        low  = [a for a in sorted_articles if float(a.get("impact_score", 0.0) or 0.0) <  _HIGH_IMPACT_THRESHOLD]
+        if high:
+            sections.append(html.Div(
+                className="news-feed-section news-feed-high",
+                children=[_row(a, i == 0) for i, a in enumerate(high)],
+            ))
+        if low:
+            sections.append(html.Details(
+                className="news-feed-section news-feed-low",
+                open=False,
+                children=[
+                    html.Summary(
+                        f"折疊 {len(low)} 則低影響新聞（影響分 < {_HIGH_IMPACT_THRESHOLD:.0f}）— 點擊展開",
+                        className="news-feed-low-header",
+                    ),
+                    html.Div(
+                        [_render_compact_row(a) for a in low],
+                        className="news-feed-low-list",
+                    ),
+                ],
+            ))
+    else:
+        # TIME / HEAT — flat sorted list, no high/low split, no collapse.
+        sections.append(html.Div(
+            className="news-feed-section news-feed-flat",
+            children=[_row(a, False) for a in sorted_articles],
+        ))
+
+    if not sections:
+        return html.Div("無符合條件的新聞", className="no-news")
+    return html.Div(sections, className="news-impact-feed-content")
+
+
+def _render_right_rail(
+    articles: List[dict],
+    news_data: dict,
+    events_data: Optional[dict],
+) -> List[Any]:
+    """Phase 4 — Build right rail: 今日整理 / 情緒分佈 / 熱門關鍵字."""
+    cards: List[Any] = []
+
+    # ── Card 1: 今日整理 ────────────────────────────────────────────────
+    brief = (news_data or {}).get("global_brief") or {}
+    summary_text = (brief.get("overall_summary") or "").strip()
+    if not summary_text:
+        summary_text = "今日重點尚未產生。"
+    cards.append(html.Div(
+        className="rail-card",
+        children=[
+            html.Div("今日重點 · AI 摘要", className="rail-card-title"),
+            html.Div(summary_text, className="rail-summary-text"),
+        ],
+    ))
+
+    # ── Card 2: 情緒分佈（基於本批 articles 的 impact_direction）────────
+    bull = sum(1 for a in articles if a.get("impact_direction") == "up")
+    bear = sum(1 for a in articles if a.get("impact_direction") == "down")
+    neutral = max(0, len(articles) - bull - bear)
+    total = max(1, bull + bear + neutral)
+    bull_pct = round(100 * bull / total)
+    bear_pct = round(100 * bear / total)
+    neut_pct = max(0, 100 - bull_pct - bear_pct)
+
+    sentiment_score = brief.get("market_sentiment", 50)
+    sentiment_reason = (brief.get("sentiment_reason") or "").strip()
+
+    cards.append(html.Div(
+        className="rail-card",
+        children=[
+            html.Div("情緒分佈", className="rail-card-title"),
+            html.Div(
+                className="rail-sentiment-bar",
+                children=[
+                    html.Div(
+                        className="rail-sentiment-seg seg-up",
+                        style={"width": f"{bull_pct}%"},
+                        title=f"利多 {bull}",
+                    ),
+                    html.Div(
+                        className="rail-sentiment-seg seg-neutral",
+                        style={"width": f"{neut_pct}%"},
+                        title=f"中性 {neutral}",
+                    ),
+                    html.Div(
+                        className="rail-sentiment-seg seg-down",
+                        style={"width": f"{bear_pct}%"},
+                        title=f"利空 {bear}",
+                    ),
+                ],
+            ),
+            html.Div(
+                className="rail-sentiment-legend",
+                children=[
+                    html.Div([
+                        html.Span(f"{bull_pct}%", className="num legend-up"),
+                        html.Span(" 利多", style={"color": "var(--txt-2)", "fontSize": "10px"}),
+                    ]),
+                    html.Div([
+                        html.Span(f"{bear_pct}%", className="num legend-down"),
+                        html.Span(" 利空", style={"color": "var(--txt-2)", "fontSize": "10px"}),
+                    ]),
+                    html.Div([
+                        html.Span(f"{neut_pct}%", className="num legend-neutral"),
+                        html.Span(" 中性", style={"color": "var(--txt-2)", "fontSize": "10px"}),
+                    ]),
+                ],
+            ),
+            html.Div(
+                f"市場情緒指數：{sentiment_score}",
+                className="rail-sentiment-score num",
+            ),
+            html.Div(sentiment_reason, className="rail-sentiment-reason") if sentiment_reason else None,
+        ],
+    ))
+
+    # ── Card 3: 熱門關鍵字（aggregate event cluster keywords）──────────
+    keywords = _aggregate_keywords(events_data, articles, top_n=12)
+    if keywords:
+        from src.news.news_impact import _BULLISH_WORDS, _BEARISH_WORDS
+        bull_set = set(_BULLISH_WORDS)
+        bear_set = set(_BEARISH_WORDS)
+
+        def _kw_dir(kw: str) -> str:
+            if kw in bull_set:
+                return "up"
+            if kw in bear_set:
+                return "down"
+            return "neutral"
+
+        pills = []
+        for kw, cnt in keywords:
+            d = _kw_dir(kw)
+            border_color = (
+                "var(--up-line)" if d == "up"
+                else "var(--down-line)" if d == "down"
+                else "var(--line-2)"
+            )
+            pills.append(html.Span(
+                children=[
+                    kw,
+                    html.Span(
+                        f" {cnt}",
+                        className="num",
+                        style={"marginLeft": "6px", "color": "var(--txt-3)", "fontSize": "10px"},
+                    ),
+                ],
+                className="rail-keyword-pill",
+                style={"border": f"1px solid {border_color}"},
+            ))
+        cards.append(html.Div(
+            className="rail-card",
+            children=[
+                html.Div("熱門關鍵字", className="rail-card-title"),
+                html.Div(pills, className="rail-keywords-list"),
+            ],
+        ))
+
+    return cards
+
+
+def _aggregate_keywords(
+    events_data: Optional[dict],
+    articles: List[dict],
+    top_n: int = 12,
+) -> List[tuple]:
+    """Aggregate top keywords from event clusters; fallback to article titles."""
+    counts: Dict[str, int] = {}
+
+    clusters = (events_data or {}).get("clusters") or []
+    for c in clusters:
+        for kw in (c.get("keywords") or []):
+            kw = str(kw).strip()
+            if kw:
+                counts[kw] = counts.get(kw, 0) + int(c.get("daily_count", {}).get(
+                    sorted((c.get("daily_count") or {}).keys())[-1] if c.get("daily_count") else "",
+                    1,
+                ) or 1)
+
+    if not counts:
+        # Fallback: extract from impact-scoring keyword set hits
+        from src.news.news_impact import _TIER1_KEYWORDS, _TIER2_KEYWORDS
+        watched = set(_TIER1_KEYWORDS) | set(_TIER2_KEYWORDS)
+        for art in articles:
+            text = f"{art.get('title','')} {art.get('summary','')}"
+            for kw in watched:
+                if kw in text:
+                    counts[kw] = counts.get(kw, 0) + 1
+
+    return sorted(counts.items(), key=lambda x: x[1], reverse=True)[:top_n]
 
 
 _SIGNAL_STYLES = {

@@ -20,6 +20,7 @@ from src.exceptions import SchedulerTaskError
 from src.models import StockInfo
 from src.news.news_fetcher import NewsFetcher
 from src.news.news_anomaly import mark_event_anomalies
+from src.news.news_impact import annotate_article
 from src.news.news_models import (
     EventCluster,
     FavoriteSignal,
@@ -334,7 +335,7 @@ class NewsProcessor:
         related_by_url = related_by_url or {}
         for raw in raw_articles:
             related_ids = list(dict.fromkeys(related_by_url.get(raw.url, [])))
-            articles.append(NewsArticle(
+            article = NewsArticle(
                 title=raw.title,
                 source=raw.source,
                 url=raw.url,
@@ -346,7 +347,9 @@ class NewsProcessor:
                 related_stock_ids=related_ids,
                 full_text_fetched=raw.full_text_fetched,
                 summary_failed=False,
-            ))
+            )
+            annotate_article(article)
+            articles.append(article)
         return articles
 
     # ── 輔助方法 ──────────────────────────────────────────────────────────────

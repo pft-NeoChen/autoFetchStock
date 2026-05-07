@@ -1,4 +1,84 @@
-# Implementation Plan — autoFetchStock
+# IMPLEMENTATION_PLAN.md — 7 Phases
+
+Each Phase = 1 PR. Don't skip ahead. Run the app and visually compare to `reference/*.png` after each Phase.
+
+---
+
+## Phase 4 — News Impact Feed (Variant N2)
+
+**Goal:** News sorted by impact, not time. Match `reference/11-news-impact.png`.
+
+**Tasks:**
+- [ ] Add `impact_score: float = 0.0` to `NewsItem` model
+- [ ] Stub `src/data/news_impact.py` — `score_news(news_item) -> float`
+  - Heuristic: keyword presence (`目標價`, `法說`, `管制`, `下修` etc.) → base score; recency multiplier; sentiment magnitude
+- [ ] Update news fetching to compute and persist `impact_score` on each item
+- [ ] Replace existing news rendering with `.news-row` template
+- [ ] Add filter chip row at top: `[全部] [我的最愛] [利多] [利空] [Impact ≥ 7]`
+- [ ] New callback `callbacks/news_filter.py`
+- [ ] Click row → expand summary inline (no modal)
+
+**Done when:** News list is sorted by impact, filter chips work, expand/collapse works.
+
+---
+
+## Phase 5 — AI Advisor Right Rail (Variant AI-1)
+
+**Goal:** 4-dimension AI panel always visible on stock detail. Match `reference/12-ai-rightrail.png`.
+
+**Tasks:**
+- [ ] Add `Advisor`, `AdvisorDimension`, `AdvisorBullet` to `src/models.py`
+- [ ] Stub `src/data/advisor.py` — `build_advisor(stock_id) -> Advisor` from existing news/chip/fund/tech data
+- [ ] New builder `_create_ai_panel(stock_id)` in `layout.py`
+- [ ] Mount in right rail above Big Orders (or replace if space-constrained)
+- [ ] Header: overall score + stance pill + delta arrow
+- [ ] 4 dimension cards stacked, click to expand bullets
+- [ ] Recommendation footer in bg-1 italic
+- [ ] New callback `callbacks/advisor.py` — re-render on stock change
+
+**Done when:** AI panel renders for selected stock, shows 4 dims, clicking expands bullets, recommendation visible.
+
+---
+
+## Phase 6 — Polish + Multi-page (B + N1 + AI-2)
+
+**Goal:** Add layout toggle, news timeline, full advisor canvas.
+
+**Tasks:**
+- [ ] Migrate to Dash multi-page (`use_pages=True`)
+- [ ] `pages/_dashboard.py` = current main (Variant A)
+- [ ] `pages/_advisor.py` = Variant AI-2 full canvas with radar chart
+- [ ] Add layout toggle to header: `[標準] [當沖]` — `當沖` mode = Variant B
+- [ ] Add `EVENTS` model + `EVENTS` data layer (event clustering by date)
+- [ ] Add news timeline (N1) as a tab inside stock detail page
+- [ ] Update status bar with stale-data + connection-lost states (DESIGN_SPEC §7)
+- [ ] Add focus rings, finalize a11y (DESIGN_SPEC §8)
+
+**Done when:** All variants accessible, layout toggle works, /advisor route renders, a11y audit passes.
+
+---
+
+## Out of Scope (Future Stories)
+
+- Real LLM-driven sentiment scoring (currently heuristic stubs)
+- Variant C — Dual-Stock Compare route (`/compare`)
+- Variant 3c — Standalone Signal Wall (`/signals`)
+- Mobile responsive
+- WebSocket migration
+- User auth / saved layouts per user
+
+---
+
+## Verification Checklist (run before each PR)
+
+- [ ] No new console errors in browser devtools
+- [ ] No new mypy/ruff/pyright errors
+- [ ] Existing tests still pass
+- [ ] Screenshot diff against the matching `reference/*.png` is within ~4px tolerance
+- [ ] Taiwan color convention preserved (red=up, teal=down)
+- [ ] Numbers don't shift width on update (tabular-nums verified)
+- [ ] Tested at 1920×1080 viewport
+
 
 ## Phase 7 — Data Quality & Tech Debt
 

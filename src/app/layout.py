@@ -112,77 +112,94 @@ def create_news_page_layout() -> html.Div:
     Returns:
         html.Div for the /news page
     """
-    category_tabs = [
-        dcc.Tab(label="國際新聞",   value="INTERNATIONAL", className="tab", selected_className="tab-selected"),
-        dcc.Tab(label="財經新聞",   value="FINANCIAL",     className="tab", selected_className="tab-selected"),
-        dcc.Tab(label="科技新聞",   value="TECH",          className="tab", selected_className="tab-selected"),
-        dcc.Tab(label="台股相關",   value="STOCK_TW",      className="tab", selected_className="tab-selected"),
-        dcc.Tab(label="美股相關",   value="STOCK_US",      className="tab", selected_className="tab-selected"),
-    ]
+    # Phase 4 (N2) — filter buttons (single-select, html.Button for reliable
+    # active styling). State held in dcc.Store; rendering swaps className.
+    filter_chips = html.Div(
+        className="news-filter-chips",
+        children=[
+            html.Button("全部",     id="news-filter-btn-all",
+                        className="news-filter-chip news-filter-chip-active",
+                        n_clicks=0),
+            html.Button("利多",     id="news-filter-btn-up",
+                        className="news-filter-chip", n_clicks=0),
+            html.Button("利空",     id="news-filter-btn-down",
+                        className="news-filter-chip", n_clicks=0),
+            html.Button("中性",     id="news-filter-btn-neutral",
+                        className="news-filter-chip", n_clicks=0),
+            html.Button("只看自選",  id="news-filter-btn-fav",
+                        className="news-filter-chip", n_clicks=0),
+            dcc.Store(id="news-filter-state", data="ALL"),
+        ],
+    )
+
+    # Sort buttons — click toggles direction on active field, switches field
+    # otherwise. Direction state held in dcc.Store. Active button: blue bg.
+    sort_chips = html.Div(
+        className="news-sort-chips",
+        children=[
+            html.Button("影響 ↓", id="news-sort-btn-impact",
+                        className="news-sort-chip news-sort-chip-active",
+                        n_clicks=0),
+            html.Button("時間 ↓", id="news-sort-btn-time",
+                        className="news-sort-chip", n_clicks=0),
+            html.Button("熱度 ↓", id="news-sort-btn-heat",
+                        className="news-sort-chip", n_clicks=0),
+            dcc.Store(id="news-sort-state",
+                      data={"field": "IMPACT", "direction": "desc"}),
+        ],
+    )
 
     return html.Div(
         id="news-page",
         className="news-page",
         children=[
+            # Phase 4 (N2) — 2-col grid: feed-panel + right-rail
             html.Div(
-                className="news-page-header",
+                className="news-body-grid",
                 children=[
-                    html.H2("市場新聞總覽", className="news-page-title"),
-                    html.Button(
-                        "手動更新",
-                        id="news-refresh-button",
-                        className="news-refresh-button",
-                    ),
-                    html.Span(
-                        id="news-last-updated",
-                        className="news-last-updated",
-                        children="最後更新：--",
-                    ),
-                ],
-            ),
-            html.Div(id="global-brief-card", className="global-brief-card"),
-            html.Div(
-                className="market-dashboard",
-                children=[
+                    # ── Left panel ──────────────────────────────────────────
                     html.Div(
-                        id="market-sentiment-gauge",
-                        className="market-sentiment-gauge",
-                    ),
-                    html.Div(
-                        id="sector-heatmap",
-                        className="sector-heatmap",
-                    ),
-                ],
-            ),
-            html.Div(id="event-timeline", className="event-timeline"),
-            html.Div(
-                id="news-chat-sidebar",
-                className="news-chat-sidebar",
-                children=[
-                    html.H3("新聞問答", className="news-chat-title"),
-                    html.Div(id="news-chat-messages", className="news-chat-messages"),
-                    html.Div(
-                        className="news-chat-controls",
+                        className="news-feed-panel",
                         children=[
-                            dcc.Input(
-                                id="news-chat-input",
-                                type="text",
-                                placeholder="詢問近期新聞...",
-                                className="news-chat-input",
+                            html.Div(
+                                className="news-feed-panel-header",
+                                children=[
+                                    html.H2(
+                                        "市場新聞 · AI 排序",
+                                        className="news-feed-panel-title",
+                                    ),
+                                    html.Span(
+                                        id="news-last-updated",
+                                        className="news-feed-panel-meta",
+                                        children="即時更新",
+                                    ),
+                                    html.Div(className="news-feed-spacer"),
+                                    sort_chips,
+                                    html.Div(filter_chips, className="news-filter-chips-row"),
+                                    html.Button(
+                                        "更新",
+                                        id="news-refresh-button",
+                                        className="news-refresh-button",
+                                    ),
+                                ],
                             ),
-                            html.Button("送出", id="news-chat-submit", className="news-chat-submit"),
+                            html.Div(
+                                id="news-impact-feed",
+                                className="news-impact-feed",
+                                children=[html.Div("尚無新聞資料", className="no-news")],
+                            ),
                         ],
                     ),
-                    dcc.Store(id="news-chat-history", data=[]),
+                    # ── Right rail ─────────────────────────────────────────
+                    html.Aside(
+                        id="news-right-rail",
+                        className="news-right-rail",
+                        children=[html.Div("載入中...", className="rail-loading")],
+                    ),
                 ],
             ),
-            dcc.Tabs(
-                id="news-category-tabs",
-                value="INTERNATIONAL",
-                className="main-tabs",
-                children=category_tabs,
-            ),
-            html.Div(id="news-category-content", className="news-category-content"),
+            # Hidden chat-history store kept for legacy callback safety
+            dcc.Store(id="news-chat-history", data=[]),
         ],
     )
 
