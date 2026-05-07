@@ -2084,48 +2084,61 @@ html {
 }
 
 .app-header {
-    display: grid;
-    grid-template-columns: auto auto 1fr auto;
-    align-items: center;
-    gap: var(--sp-4);
-    height: var(--header-h);
-    padding: 0 var(--sp-5);
-    border-bottom: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
     background: var(--bg-1);
+    border-bottom: 1px solid var(--line);
     flex-shrink: 0;
     overflow: visible;
     z-index: 20;
 }
 
-.header-brand {
+/* Row 1 — search row: brand watermark + nav links + search (all left) */
+.app-header-top {
     display: flex;
-    align-items: baseline;
-    gap: var(--sp-2);
+    align-items: center;
+    gap: var(--sp-4);
+    height: 44px;
+    padding: 0 var(--sp-5);
+    border-bottom: 1px solid var(--line);
+}
+
+/* Row 2 — thin band: MarketStrip | session badge */
+.app-header-bottom {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: var(--sp-4);
+    height: 32px;
+    padding: 0 var(--sp-5);
+}
+
+.header-nav {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
     white-space: nowrap;
 }
 
 .brand-name {
-    font-size: 15px;
+    font-size: 13px;
     font-weight: 700;
-    color: var(--txt-0);
-    text-decoration: none;
-}
-
-.brand-sub {
-    font-size: 11px;
     color: var(--txt-3);
     letter-spacing: .04em;
+    opacity: 0.65;
 }
 
 .header-nav-link {
-    margin-left: var(--sp-3);
     color: var(--txt-2);
-    font-size: 12px;
+    font-size: 13px;
     text-decoration: none;
+    padding: 4px 8px;
+    border-radius: var(--r-button);
 }
 
 .header-nav-link:hover {
     color: var(--txt-0);
+    background: var(--bg-2);
 }
 
 .header-search {
@@ -2179,6 +2192,31 @@ html {
     background: transparent;
     border: 0;
     font-size: 13px;
+    justify-self: start;
+}
+
+/* Stock-info VOL pill (relocated from removed status bar) */
+.stock-volume-pill {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-left: var(--sp-3);
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+    background: var(--bg-2);
+}
+
+.stock-volume-label {
+    font-size: 10px;
+    color: var(--txt-3);
+    letter-spacing: .06em;
+}
+
+.stock-volume-value {
+    font-size: 12px;
+    color: var(--txt-1);
+    font-variant-numeric: tabular-nums;
 }
 
 .market-strip-item {

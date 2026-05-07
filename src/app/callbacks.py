@@ -570,7 +570,6 @@ class CallbackManager:
             Output("stock-change-display", "children"),
             Output("stock-change-display", "className"),
             Output("stock-volume-display", "children"),
-            Output("last-update-display", "children"),
             Output("app-state-store", "data"),
             Output("auto-update-interval", "disabled"),
             Output("stock-match-list", "style", allow_duplicate=True),
@@ -731,7 +730,6 @@ class CallbackManager:
                     change_text,  # change
                     f"stock-change num {direction_class}",  # change class
                     f"{quote.total_volume:,} 張",  # volume
-                    quote.timestamp.strftime("%H:%M:%S") if quote.timestamp else "--",  # update time
                     new_state,  # app state
                     False,  # enable auto-update
                     {"display": "none"},  # hide match list
@@ -745,7 +743,7 @@ class CallbackManager:
                 empty_fig = self.renderer.render_empty_chart("查無此股票")
                 return (
                     "--", "", "", "--", "stock-price", "", "stock-change",
-                    "--", "--", no_update, True, {"display": "none"}, 
+                    "--", no_update, True, {"display": "none"},
                     empty_fig, empty_fig, "star-button"
                 )
 
@@ -754,7 +752,7 @@ class CallbackManager:
                 error_fig = self.renderer.render_empty_chart("搜尋發生錯誤")
                 return (
                     "--", "", "", "--", "stock-price", "", "stock-change",
-                    "--", "--", no_update, True, {"display": "none"}, 
+                    "--", no_update, True, {"display": "none"},
                     error_fig, error_fig, "star-button"
                 )
 
@@ -1050,9 +1048,6 @@ class CallbackManager:
             Output("stock-change-display", "children", allow_duplicate=True),
             Output("stock-change-display", "className", allow_duplicate=True),
             Output("stock-volume-display", "children", allow_duplicate=True),
-            Output("last-update-display", "children", allow_duplicate=True),
-            Output("market-status", "children"),
-            Output("scheduler-status", "children"),
             Output("intraday-chart", "figure", allow_duplicate=True),
             Output("kline-chart", "figure", allow_duplicate=True),
             Output("big-orders-list", "children", allow_duplicate=True),
@@ -1070,17 +1065,10 @@ class CallbackManager:
             """Handle automatic updates (REQ-044)."""
             stock_id = app_state.get("current_stock") if app_state else None
 
-            # Update market and scheduler status
-            is_market_open = self.scheduler.is_market_open()
-            market_text = f"● 市場狀態：{'開盤中' if is_market_open else '休市'}"
-
-            scheduler_status = self.scheduler.get_status()
-            scheduler_text = f"● 排程狀態：{'運作中' if scheduler_status.is_running and not scheduler_status.is_paused else '暫停'}"
-
             if not stock_id:
                 return (
                     no_update, no_update, no_update, no_update,
-                    no_update, no_update, market_text, scheduler_text, no_update, no_update, no_update,
+                    no_update, no_update, no_update, no_update,
                     no_update, no_update, no_update, no_update,
                 )
 
@@ -1089,12 +1077,12 @@ class CallbackManager:
                 # If Shioaji has data, it returns immediately.
                 # If falling back to TWSE, it returns None if rate limit hit.
                 quote = self.fetcher.fetch_realtime_quote(stock_id, blocking=False)
-                
+
                 if quote is None:
                     # Rate limit hit (TWSE) or no data available yet
                     return (
                         no_update, no_update, no_update, no_update,
-                        no_update, no_update, market_text, scheduler_text, no_update, no_update, no_update,
+                        no_update, no_update, no_update, no_update,
                         no_update, no_update, no_update, no_update,
                     )
 
@@ -1297,9 +1285,6 @@ class CallbackManager:
                     change_text,
                     f"stock-change num {direction_class}",
                     f"{quote.total_volume:,} 張",
-                    quote.timestamp.strftime("%H:%M:%S") if quote.timestamp else "--",
-                    market_text,
-                    scheduler_text,
                     intraday_figure,
                     kline_figure,
                     big_orders_items,
@@ -1313,7 +1298,7 @@ class CallbackManager:
                 logger.warning(f"Auto-update failed: {e}")
                 return (
                     no_update, no_update, no_update, no_update,
-                    no_update, no_update, market_text, scheduler_text, no_update, no_update, no_update,
+                    no_update, no_update, no_update, no_update,
                     no_update, no_update, no_update, no_update,
                 )
 

@@ -98,9 +98,6 @@ def create_main_page_layout() -> html.Div:
 
             # Error message display
             _create_error_display(),
-
-            # System status bar
-            _create_status_bar(),
         ]
     )
 
@@ -236,11 +233,13 @@ def _create_hidden_components() -> html.Div:
                 disabled=False,
             ),
 
-            # Phase 3.5 — MarketStrip refresh (30s; rate-limit safe for
-            # external index quotes; do not reuse the 1s tick).
+            # MarketStrip refresh (5s). Local 3 indices via Shioaji
+            # snapshots — no rate limit. Foreign 4 via yfinance with
+            # an internal 30s TTL cache, so 5s callback won't actually
+            # poll yfinance more often.
             dcc.Interval(
                 id="market-strip-interval",
-                interval=30 * 1000,
+                interval=5 * 1000,
                 n_intervals=0,
                 disabled=False,
             ),
@@ -300,48 +299,67 @@ def _create_news_ticker() -> html.Div:
 
 
 def _create_header() -> html.Header:
-    """Create the single-row app header used across pages."""
+    """Two-row app header (matches reference/04-layout-A.png).
+
+    Row 1 (top, search row): brand watermark | nav links | search box.
+    Row 2 (thin band below): MarketStrip indices | session+clock.
+
+    `autoFetchStock` is a non-clickable watermark on the top row;
+    navigation links sit beside it. The index ribbon lives on the
+    second row directly below.
+    """
     return html.Header(
         id="app-header",
         className="app-header",
         children=[
+            # ── Row 1: brand watermark + nav + search ────────────────────
             html.Div(
-                className="header-brand",
-                children=[
-                    html.A("autoFetchStock", href="/", className="brand-name"),
-                    html.Span("Bloomberg", className="brand-sub"),
-                    html.A("市場新聞", href="/news", className="header-nav-link"),
-                ],
-            ),
-            html.Div(
-                className="header-search",
+                className="app-header-top",
                 children=[
                     html.Div(
-                        className="search-container",
+                        className="header-nav",
                         children=[
-                            dcc.Input(
-                                id="stock-search-input",
-                                type="text",
-                                placeholder="輸入股票代號或名稱...",
-                                className="search-input",
-                            ),
-                            html.Button(
-                                "搜尋",
-                                id="stock-search-button",
-                                className="search-button",
-                            ),
-                        ]
+                            html.Span("autoFetchStock", className="brand-name"),
+                            html.A("即時看板", href="/", className="header-nav-link"),
+                            html.A("市場新聞", href="/news", className="header-nav-link"),
+                        ],
                     ),
-                    # Search results dropdown
                     html.Div(
-                        id="stock-match-list",
-                        className="match-list",
-                        children=[],
+                        className="header-search",
+                        children=[
+                            html.Div(
+                                className="search-container",
+                                children=[
+                                    dcc.Input(
+                                        id="stock-search-input",
+                                        type="text",
+                                        placeholder="輸入股票代號或名稱...",
+                                        className="search-input",
+                                    ),
+                                    html.Button(
+                                        "搜尋",
+                                        id="stock-search-button",
+                                        className="search-button",
+                                    ),
+                                ]
+                            ),
+                            html.Div(
+                                id="stock-match-list",
+                                className="match-list",
+                                children=[],
+                            ),
+                        ],
                     ),
                 ],
             ),
-            _create_market_strip(),
-            _build_session_badge(),
+            # ── Row 2: MarketStrip + session/clock ───────────────────────
+            html.Div(
+                className="app-header-bottom",
+                children=[
+                    _create_market_strip(),
+                    _build_session_badge(),
+                ],
+            ),
         ]
     )
 
@@ -530,11 +548,13 @@ def _create_stock_info_section() -> html.Div:
 
     Two siblings inside the 72px row:
       LEFT  — ★ name id sector-pill signal-pill
-      RIGHT — price change pct (all JetBrains Mono, tabular-nums)
+      RIGHT — price change pct VOL (all JetBrains Mono, tabular-nums)
     Right block uses margin-left:auto for separation.
 
-    成交量 and 更新時間 live in the bottom status bar; do not stuff
-    them back into the headline.
+    VOL (累積成交量) sits at the right edge after the change pill. The
+    bottom status bar was removed — session/clock at top-right covers
+    market state, and `last-update-display` / scheduler indicators were
+    redundant with the running clock + connection pill.
     """
     return html.Div(
         id="stock-info-section",
@@ -593,6 +613,18 @@ def _create_stock_info_section() -> html.Div:
                         id="stock-change-display",
                         className="stock-change num",
                         children="",
+                    ),
+                    # 累積成交量 — moved up from removed status bar.
+                    html.Span(
+                        className="stock-volume-pill",
+                        children=[
+                            html.Span("VOL", className="stock-volume-label"),
+                            html.Span(
+                                id="stock-volume-display",
+                                className="num stock-volume-value",
+                                children="--",
+                            ),
+                        ],
                     ),
                 ],
             ),
@@ -794,59 +826,6 @@ def _create_error_display() -> html.Div:
     )
 
 
-def _create_status_bar() -> html.Div:
-    """Bottom status bar (28px sticky).
-
-    Hosts connection / market / scheduler indicators on the left and
-    the per-stock VOL + UPD readouts on the right (relocated from the
-    StockHeadline 72px row per Phase 3.5 redesign feedback).
-    """
-    return html.Div(
-        id="system-status-bar",
-        className="status-bar",
-        children=[
-            html.Span(
-                id="connection-status",
-                className="status-item",
-                children="● 連線狀態：正常",
-            ),
-            html.Span(
-                id="market-status",
-                className="status-item",
-                children="● 市場狀態：--",
-            ),
-            html.Span(
-                id="scheduler-status",
-                className="status-item",
-                children="● 排程狀態：--",
-            ),
-            html.Span(className="status-spacer"),
-            html.Span(
-                className="status-item status-stock-stat",
-                children=[
-                    html.Span("VOL", className="status-stock-label"),
-                    html.Span(
-                        id="stock-volume-display",
-                        className="num status-stock-value",
-                        children="--",
-                    ),
-                ],
-            ),
-            html.Span(
-                className="status-item status-stock-stat",
-                children=[
-                    html.Span("UPD", className="status-stock-label"),
-                    html.Span(
-                        id="last-update-display",
-                        className="num status-stock-value",
-                        children="--",
-                    ),
-                ],
-            ),
-        ],
-    )
-
-
 # Component IDs for reference in callbacks
 COMPONENT_IDS = {
     # Search components
@@ -861,7 +840,6 @@ COMPONENT_IDS = {
     "stock_price": "stock-price-display",
     "stock_change": "stock-change-display",
     "stock_volume": "stock-volume-display",
-    "last_update": "last-update-display",
 
     # Sidebar
     "favorites_sidebar": "favorites-sidebar",
@@ -917,11 +895,8 @@ COMPONENT_IDS = {
     "news_ticker_bar": "news-ticker-bar",
     "news_ticker_content": "news-ticker-content",
 
-    # Error and status
+    # Error display
     "error_display": "error-message-display",
     "error_text": "error-text",
     "error_close": "error-close-button",
-    "connection_status": "connection-status",
-    "market_status": "market-status",
-    "scheduler_status": "scheduler-status",
 }
