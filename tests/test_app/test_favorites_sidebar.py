@@ -64,8 +64,10 @@ class TestFavoritesSidebarHelpers:
         price_col = item.children[3]
 
         assert "signal-dot" in dot.className
-        assert name_col.children[0].children == "台積電"
-        assert name_col.children[1].children == "2330"
+        name_row = name_col.children[0]
+        assert name_row.className == "watch-name-row"
+        assert name_row.children[0].children == "台積電"
+        assert name_row.children[1].children == "2330"
         assert spark_col.className == "watch-spark-col"
         assert price_col.children[0].children == "103.00"
         assert price_col.children[1].children == "+5.10%"

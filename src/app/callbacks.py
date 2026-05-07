@@ -114,7 +114,65 @@ class CallbackManager:
         self._register_favorites_callbacks()
         self._register_news_callbacks()
         self._register_phase35_callbacks()
+        self._register_right_rail_callbacks()
         logger.info("All callbacks registered")
+
+    def _register_right_rail_callbacks(self) -> None:
+        """Register Phase 4.5 right-rail tab switching callbacks."""
+
+        @self.app.callback(
+            Output("rr-tab-chips", "className"),
+            Output("rr-tab-ai", "className"),
+            Output("rr-tab-signal", "className"),
+            Output("rr-tab-fund", "className"),
+            Output("rr-tab-news", "className"),
+            Output("right-rail-panel-chips", "className"),
+            Output("right-rail-panel-ai", "className"),
+            Output("right-rail-panel-signal", "className"),
+            Output("right-rail-panel-fund", "className"),
+            Output("right-rail-panel-news", "className"),
+            Output("right-rail-active-tab", "data"),
+            Input("rr-tab-chips", "n_clicks"),
+            Input("rr-tab-ai", "n_clicks"),
+            Input("rr-tab-signal", "n_clicks"),
+            Input("rr-tab-fund", "n_clicks"),
+            Input("rr-tab-news", "n_clicks"),
+            State("right-rail-active-tab", "data"),
+            prevent_initial_call=True,
+        )
+        def switch_right_rail_tab(_chips, _ai, _signal, _fund, _news, current):
+            tab_by_id = {
+                "rr-tab-chips": "chips",
+                "rr-tab-ai": "ai",
+                "rr-tab-signal": "signal",
+                "rr-tab-fund": "fund",
+                "rr-tab-news": "news",
+            }
+            active = tab_by_id.get(ctx.triggered_id, current or "chips")
+
+            def _tab_cls(key: str) -> str:
+                base = "right-rail-tab"
+                return f"{base} active" if key == active else base
+
+            def _panel_cls(key: str) -> str:
+                base = "right-rail-panel"
+                if key == active:
+                    return f"{base} right-rail-panel-active"
+                return f"{base} right-rail-panel-hidden"
+
+            return (
+                _tab_cls("chips"),
+                _tab_cls("ai"),
+                _tab_cls("signal"),
+                _tab_cls("fund"),
+                _tab_cls("news"),
+                _panel_cls("chips"),
+                _panel_cls("ai"),
+                _panel_cls("signal"),
+                _panel_cls("fund"),
+                _panel_cls("news"),
+                active,
+            )
 
     def _get_spark_values(self, stock_id: str) -> List[float]:
         """Return the last 20 daily closes for the WatchlistRow sparkline,
@@ -264,16 +322,20 @@ class CallbackManager:
             recent_closes if recent_closes else None,
             direction=spark_dir,
             w=56,
-            h=18,
+            h=20,
             seed=seed,
         )
 
-        # Column 2 — vertically stacked name + id. Text event pills were
-        # removed in Phase 3.6; the leading dot carries the signal colour.
-        name_truncated = stock_name[:4] + ("…" if len(stock_name) > 4 else "")
+        # Column 2 — name + id stay on the same row, matching the layout-B
+        # reference. The name can wrap, but the code is not stacked below it.
         name_row_children: List[Any] = [
-            html.Span(name_truncated, className="watch-name"),
-            html.Span(stock_id, className="watch-code num"),
+            html.Div(
+                className="watch-name-row",
+                children=[
+                    html.Span(stock_name, className="watch-name"),
+                    html.Span(stock_id, className="watch-code num"),
+                ],
+            ),
         ]
 
         children: List[Any] = [
@@ -1600,17 +1662,15 @@ class CallbackManager:
                 logger.warning(f"Failed to load news events: {e}")
                 return no_update
 
-        # ── TASK-154  Stock news tab (main page) ─────────────────────────────
+        # ── Phase 4.5  Stock news in layout-B right rail ─────────────────────
         @self.app.callback(
-            Output("stock-news-articles", "children"),
-            Input("stock-news-category-tabs", "value", allow_optional=True),
+            Output("right-rail-news-content", "children"),
             Input("news-data-store", "data"),
             Input("app-state-store", "data"),
             prevent_initial_call=False,
         )
-        def update_stock_news_tab(category: str, news_data: dict, app_state: dict):
-            """Filter news by current stock + selected category."""
-            category = category or "ALL"
+        def update_right_rail_news(news_data: dict, app_state: dict):
+            """Render per-stock impact news in the layout-B right rail."""
             if not news_data:
                 return html.Div("尚無新聞資料", className="no-news")
 
@@ -1621,14 +1681,14 @@ class CallbackManager:
             current_stock_name = (app_state or {}).get("current_stock_name")
             articles = _extract_articles_from_run(
                 news_data,
-                category,
+                "ALL",
                 current_stock,
                 current_stock_name,
             )
             if not articles:
                 return html.Div(f"目前無 {current_stock} 相關新聞", className="no-news")
 
-            return _render_article_list(articles)
+            return _render_right_rail_news_list(articles, stock_id=current_stock)
 
         # ── Phase 4 (N2) filter buttons → set filter state + active style ──
         @self.app.callback(
@@ -2032,11 +2092,11 @@ class CallbackManager:
             return _render_market_strip(entries, market_strip_tail(self.index_fetcher))
 
         @self.app.callback(
-            Output("bottom-data-row", "children"),
+            Output("right-rail-fund-content", "children"),
             Input("app-state-store", "data"),
             prevent_initial_call=False,
         )
-        def update_bottom_data_row(app_state):
+        def update_right_rail_fund_content(app_state):
             stock_id = (app_state or {}).get("current_stock")
             cards = build_chips_kpi(stock_id, self.chips_storage)
             fundamentals = get_fundamentals(stock_id)
@@ -2259,6 +2319,71 @@ def _render_article_list(articles: List[dict]) -> html.Div:
         )
 
     return html.Div(items, className="news-articles-list")
+
+
+def _render_right_rail_news_list(
+    articles: List[dict],
+    stock_id: Optional[str] = None,
+    limit: int = 10,
+) -> List[Any]:
+    """Render layout-B right-rail news rows sorted by impact, then time."""
+    sorted_articles = sorted(
+        articles,
+        key=lambda a: (
+            float(a.get("impact_score", 0.0) or 0.0),
+            a.get("published_at", ""),
+        ),
+        reverse=True,
+    )[:limit]
+
+    rows: List[Any] = []
+    for art in sorted_articles:
+        score = float(art.get("impact_score", 0.0) or 0.0)
+        direction = art.get("impact_direction", "neutral")
+        if direction == "up":
+            pill_cls = "pill pill-up right-rail-news-impact"
+        elif direction == "down":
+            pill_cls = "pill pill-down right-rail-news-impact"
+        else:
+            pill_cls = "pill pill-neu right-rail-news-impact"
+
+        pub = art.get("published_at", "")
+        try:
+            from datetime import datetime as _dt
+            pub_str = _dt.fromisoformat(pub).strftime("%H:%M")
+        except Exception:
+            pub_str = pub[:5] if pub else "--"
+
+        source = art.get("source", "")
+        related = art.get("related_stock_ids") or []
+        stock_text = related[0] if related else (stock_id or "")
+        title = art.get("title", "（無標題）")
+        url = art.get("url", "#")
+
+        rows.append(
+            html.A(
+                href=url,
+                target="_blank",
+                rel="noopener noreferrer",
+                className="right-rail-news-row",
+                children=[
+                    html.Div(
+                        className="right-rail-news-meta",
+                        children=[
+                            html.Span(pub_str, className="num right-rail-news-time"),
+                            html.Span(source, className="right-rail-news-source"),
+                            html.Span(stock_text, className="num right-rail-news-stock"),
+                            html.Span(f"{score:.1f}", className=pill_cls),
+                        ],
+                    ),
+                    html.Div(title, className="right-rail-news-title"),
+                ],
+            )
+        )
+
+    if not rows:
+        return [html.Div("目前無相關新聞", className="no-news")]
+    return rows
 
 
 # ── Phase 4 (N2) — impact feed helpers ────────────────────────────────────────

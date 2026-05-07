@@ -9,6 +9,7 @@ from src.app.callbacks import (
     _render_event_timeline,
     _render_favorite_signal_strip,
     _render_news_chat_messages,
+    _render_right_rail_news_list,
 )
 from src.models import FundamentalsSnapshot
 
@@ -161,3 +162,43 @@ def test_render_news_chat_messages_with_citations():
 
     assert "AI demand" in str(rendered)
     assert "https://example.com/ai" in str(rendered)
+
+
+def test_render_right_rail_news_list_sorts_by_impact_then_time():
+    rendered = _render_right_rail_news_list([
+        {
+            "title": "低影響",
+            "published_at": "2026-04-24T09:00:00+08:00",
+            "impact_score": 3.0,
+            "impact_direction": "neutral",
+            "source": "A",
+            "related_stock_ids": ["2330"],
+            "url": "https://example.com/low",
+        },
+        {
+            "title": "高影響較新",
+            "published_at": "2026-04-24T10:00:00+08:00",
+            "impact_score": 8.0,
+            "impact_direction": "up",
+            "source": "B",
+            "related_stock_ids": ["2330"],
+            "url": "https://example.com/high-new",
+        },
+        {
+            "title": "高影響較舊",
+            "published_at": "2026-04-24T08:00:00+08:00",
+            "impact_score": 8.0,
+            "impact_direction": "down",
+            "source": "C",
+            "related_stock_ids": ["2330"],
+            "url": "https://example.com/high-old",
+        },
+    ])
+
+    assert [row.children[1].children for row in rendered] == [
+        "高影響較新",
+        "高影響較舊",
+        "低影響",
+    ]
+    assert rendered[0].className == "right-rail-news-row"
+    assert "pill-up" in rendered[0].children[0].children[-1].className

@@ -1849,7 +1849,7 @@ html {
     padding-left: 6px;
 }
 .favorite-item.watch-row:hover {
-    background-color: var(--bg-3);
+    background: linear-gradient(90deg, var(--ai-soft) 0%, transparent 70%);
 }
 .watch-row > .watch-dot {
     width: 6px;
@@ -3050,4 +3050,362 @@ button.news-filter-chip.news-filter-chip-active {
     background: var(--ai) !important;
     color: #fff !important;
     border-color: var(--ai) !important;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Phase 4.5 — Layout-B sync (chart-first + 300px right rail tabs)
+   ──────────────────────────────────────────────────────────────────────── */
+
+.content-wrapper {
+    grid-template-columns: 240px 1fr 300px;
+    grid-template-rows: 72px 1fr;
+    grid-template-areas:
+        "left top-center right"
+        "left mid-center right";
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 0;
+}
+
+.right-rail {
+    grid-area: right;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+}
+
+.right-rail-tabs {
+    display: flex;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--line);
+}
+
+button.right-rail-tab {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 0;
+    background: transparent;
+    color: var(--txt-2);
+    border: 0;
+    border-bottom: 2px solid transparent;
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1;
+    text-align: center;
+    cursor: pointer;
+}
+
+button.right-rail-tab:hover {
+    color: var(--txt-1);
+    background: var(--bg-2);
+}
+
+button.right-rail-tab.active {
+    color: var(--txt-0);
+    background: var(--bg-2);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+}
+
+.right-rail-content {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.right-rail-panel {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.right-rail-panel-active {
+    display: flex;
+    flex-direction: column;
+}
+
+.right-rail-panel-hidden {
+    display: none;
+}
+
+#right-rail-panel-chips.right-rail-panel-active {
+    gap: var(--sp-3);
+    padding: 10px;
+}
+
+#right-rail-panel-fund.right-rail-panel-active {
+    padding: 10px;
+}
+
+#right-rail-panel-news.right-rail-panel-active,
+#right-rail-panel-ai.right-rail-panel-active,
+#right-rail-panel-signal.right-rail-panel-active {
+    padding: 0;
+}
+
+.right-rail .best-five-section {
+    flex-shrink: 0;
+    margin-bottom: 0;
+    padding-bottom: var(--sp-3);
+}
+
+.right-rail .big-orders-tape {
+    flex: 1;
+    min-height: 0;
+}
+
+.right-rail-fund-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    min-height: 0;
+}
+
+.right-rail-fund-content .chips-kpi-grid {
+    grid-template-columns: 1fr;
+    gap: var(--sp-2);
+}
+
+.right-rail-fund-content .data-card {
+    height: auto;
+    min-height: 58px;
+    padding: var(--sp-2) var(--sp-3);
+}
+
+.right-rail-fund-content .data-card-label,
+.right-rail-fund-content .data-card-sub {
+    font-size: 10px;
+}
+
+.right-rail-fund-content .data-card-value {
+    font-size: 19px;
+}
+
+.right-rail-fund-content .fund-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+}
+
+.right-rail-fund-content .fund-cell {
+    padding: 6px;
+}
+
+.right-rail-fund-content .fund-label,
+.right-rail-fund-content .fund-note {
+    font-size: 9px;
+}
+
+.right-rail-fund-content .fund-value {
+    font-size: 14px;
+}
+
+.right-rail-news-list {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.right-rail-news-row {
+    display: block;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    color: inherit;
+    text-decoration: none;
+}
+
+.right-rail-news-row:hover {
+    background: var(--bg-2);
+}
+
+.right-rail-news-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+    min-width: 0;
+    color: var(--txt-3);
+    font-size: 10px;
+    line-height: 1;
+}
+
+.right-rail-news-source {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.right-rail-news-stock {
+    flex-shrink: 0;
+}
+
+.right-rail-news-impact {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-size: 9px !important;
+}
+
+.right-rail-news-title {
+    color: var(--txt-1);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.tabs-section {
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+}
+
+.main-tabs {
+    display: flex;
+    min-height: 32px;
+    padding: 4px 18px 0;
+    border-bottom: 1px solid var(--line);
+    background: transparent;
+    flex-shrink: 0;
+}
+
+.tab {
+    padding: 7px 0 !important;
+    margin-right: 14px;
+    color: var(--txt-2) !important;
+    background: transparent !important;
+    border: 0 !important;
+    border-bottom: 2px solid transparent !important;
+    font-size: 11px !important;
+    font-weight: 400;
+}
+
+.tab:hover {
+    color: var(--txt-1) !important;
+    background: transparent !important;
+}
+
+.tab-selected {
+    color: var(--txt-0) !important;
+    border-bottom-color: var(--accent) !important;
+    font-weight: 600 !important;
+}
+
+.tab-content {
+    padding: 8px;
+}
+
+.chart-timeframe-chips-wrap {
+    justify-content: flex-end;
+    padding: 0 0 6px;
+    margin-bottom: 0;
+}
+
+.chart-timeframe-chips {
+    display: flex;
+    gap: 4px;
+}
+
+.chart-timeframe-chips label {
+    display: inline-flex !important;
+    align-items: center;
+    margin: 0 !important;
+    padding: 3px 7px !important;
+    background: var(--bg-3);
+    color: var(--txt-2);
+    border-radius: 2px;
+    font-size: 10px;
+    line-height: 1;
+}
+
+.chart-timeframe-chips label:has(input[type="radio"]:checked) {
+    background: var(--accent);
+    color: #fff;
+}
+
+.chart-timeframe-chips input[type="radio"] {
+    display: none;
+}
+
+/* Phase 4.5 — sparkline overlays the name+code area as a faded background
+ * so the watchlist row only needs 3 grid cols (dot / name+code / price).
+ * Without this, the spark eats a 56px col and the 1fr name col collapses,
+ * which forced the name to wrap and squished the stock code. */
+.favorite-item.watch-row {
+    position: relative;
+    grid-template-columns: 6px minmax(0, 1fr) 60px;
+    gap: var(--sp-2);
+    height: 44px;
+    padding: 0 10px;
+}
+
+.favorite-item.watch-row.active {
+    padding-left: 8px;
+}
+
+.watch-name-col {
+    position: relative;
+    z-index: 1;
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.watch-name-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.watch-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.watch-code {
+    flex: 0 0 auto;
+    font-size: 10px;
+    color: var(--txt-3);
+}
+
+.watch-spark-col {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    right: 76px;            /* 60px price col + 10px row padding + ~6px gap */
+    width: 72px;
+    height: 24px;
+    pointer-events: none;
+    opacity: 0.45;
+    z-index: 0;
+}
+
+.watch-spark-col svg,
+.watch-spark-col .watch-spark {
+    width: 100%;
+    height: 100%;
+}
+
+.watch-price-col {
+    position: relative;
+    z-index: 1;
+}
+
+.watch-price {
+    font-size: 13px;
+}
+
+.watch-pct {
+    font-size: 10px;
 }

@@ -5,7 +5,7 @@ This module defines the web application layout structure:
 - Multi-page routing via dcc.Location
 - Stock search input field
 - Stock info display area
-- Three-tab interface (intraday / K-line / news)
+- Two-tab chart interface (intraday / K-line)
 - News page layout (/news)
 - News ticker bar
 - Control components (period selector, intervals)
@@ -58,8 +58,8 @@ def create_main_page_layout() -> html.Div:
     - Header with stock search
     - Main content area with:
       - Left sidebar (favorites list)
-      - Center content (stock info, three-tab panel)
-      - Right sidebar (big orders / best five prices)
+      - Center content (stock info, two-tab chart panel)
+      - Right rail tabs (best five / big orders / AI / signals / chips / news)
     - Error message display
     - System status bar
 
@@ -79,7 +79,8 @@ def create_main_page_layout() -> html.Div:
                 style={"display": "none"},
             ),
 
-            # Main content area — Phase 2 grid (260 / 1fr / 260) × (72 / 1fr / 220)
+            # Main content area — Phase 4.5 layout-B grid
+            # (180 / 1fr / 300) × (72 / 1fr), no bottom data row.
             html.Div(
                 className="content-wrapper",
                 children=[
@@ -89,10 +90,8 @@ def create_main_page_layout() -> html.Div:
                     _create_stock_info_section(),
                     # grid-area: mid-center
                     _create_tabs_section(),
-                    # grid-area: bot-center (Phase 2 NEW)
-                    _create_bottom_data_row(),
                     # grid-area: right
-                    _create_big_orders_sidebar(),
+                    _create_right_rail(),
                 ]
             ),
 
@@ -422,19 +421,100 @@ def _create_favorites_sidebar() -> html.Div:
     )
 
 
-def _create_big_orders_sidebar() -> html.Div:
-    """Right rail container — Best5 on top, BigOrders on bottom (Phase 3.5).
+def _create_right_rail() -> html.Aside:
+    """Phase 4.5 — layout-B right rail with 5 tabs.
 
-    Spec: design/afs/layout-variants.jsx — Best5Mini above BigOrdersTape.
-    Reuses the same `.big-orders-sidebar` grid-area (col 3, all rows).
+    All tab panels stay mounted so the existing realtime callbacks can
+    continue updating Best5 / BigOrders even when the user is viewing
+    another right-rail tab.
     """
-    return html.Div(
-        id="big-orders-sidebar",
-        className="big-orders-sidebar",
+    return html.Aside(
+        id="right-rail",
+        className="right-rail",
         children=[
-            _create_best_five_prices(),
-            _create_big_orders_tape(),
-        ]
+            html.Div(
+                className="right-rail-tabs",
+                children=[
+                    html.Button(
+                        "五檔/大戶",
+                        id="rr-tab-chips",
+                        className="right-rail-tab active",
+                        n_clicks=0,
+                    ),
+                    html.Button(
+                        "AI",
+                        id="rr-tab-ai",
+                        className="right-rail-tab",
+                        n_clicks=0,
+                    ),
+                    html.Button(
+                        "訊號",
+                        id="rr-tab-signal",
+                        className="right-rail-tab",
+                        n_clicks=0,
+                    ),
+                    html.Button(
+                        "籌碼面",
+                        id="rr-tab-fund",
+                        className="right-rail-tab",
+                        n_clicks=0,
+                    ),
+                    html.Button(
+                        "新聞",
+                        id="rr-tab-news",
+                        className="right-rail-tab",
+                        n_clicks=0,
+                    ),
+                    dcc.Store(id="right-rail-active-tab", data="chips"),
+                ],
+            ),
+            html.Div(
+                id="right-rail-content",
+                className="right-rail-content",
+                children=[
+                    html.Div(
+                        id="right-rail-panel-chips",
+                        className="right-rail-panel right-rail-panel-active",
+                        children=[
+                            _create_best_five_prices(),
+                            _create_big_orders_tape(),
+                        ],
+                    ),
+                    html.Div(
+                        id="right-rail-panel-ai",
+                        className="right-rail-panel right-rail-panel-hidden",
+                        children=[],
+                    ),
+                    html.Div(
+                        id="right-rail-panel-signal",
+                        className="right-rail-panel right-rail-panel-hidden",
+                        children=[],
+                    ),
+                    html.Div(
+                        id="right-rail-panel-fund",
+                        className="right-rail-panel right-rail-panel-hidden",
+                        children=[
+                            html.Div(
+                                id="right-rail-fund-content",
+                                className="right-rail-fund-content",
+                                children=[],
+                            ),
+                        ],
+                    ),
+                    html.Div(
+                        id="right-rail-panel-news",
+                        className="right-rail-panel right-rail-panel-hidden",
+                        children=[
+                            html.Div(
+                                id="right-rail-news-content",
+                                className="right-rail-news-list",
+                                children=[html.Div("請先選擇股票", className="no-news")],
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ],
     )
 
 
@@ -568,7 +648,7 @@ def _create_stock_info_section() -> html.Div:
       RIGHT — price change pct VOL (all JetBrains Mono, tabular-nums)
     Right block uses margin-left:auto for separation.
 
-    VOL (累積成交量) sits at the right edge after the change pill. The
+    成交量 (累積成交量) sits at the right edge after the change pill. The
     bottom status bar was removed — session/clock at top-right covers
     market state, and `last-update-display` / scheduler indicators were
     redundant with the running clock + connection pill.
@@ -635,7 +715,7 @@ def _create_stock_info_section() -> html.Div:
                     html.Span(
                         className="stock-volume-pill",
                         children=[
-                            html.Span("VOL", className="stock-volume-label"),
+                            html.Span("成交量", className="stock-volume-label"),
                             html.Span(
                                 id="stock-volume-display",
                                 className="num stock-volume-value",
@@ -650,11 +730,10 @@ def _create_stock_info_section() -> html.Div:
 
 
 def _create_bottom_data_row() -> html.Div:
-    """Phase 3.5 — bottom data row container.
+    """Legacy Phase 3.5 bottom data row container.
 
-    Children populated by `render_bottom_data_row` callback from
-    `src.data.chips_kpi.build_chips_kpi(stock_id)`. The visual contract
-    matches design/afs/layout-variants.jsx::ChipsKpi.
+    Phase 4.5 no longer mounts this in the main page; ChipsKpi and the
+    fundamentals strip render inside the right-rail 籌碼面 tab instead.
     """
     return html.Div(
         id="bottom-data-row",
@@ -664,7 +743,7 @@ def _create_bottom_data_row() -> html.Div:
 
 
 def _create_tabs_section() -> html.Div:
-    """Create main tabs section (Intraday / K-line / News)."""
+    """Create main chart tabs section (Intraday / K-line)."""
     return html.Div(
         id="tabs-section",
         className="tabs-section",
@@ -690,14 +769,6 @@ def _create_tabs_section() -> html.Div:
                         selected_className="tab-selected",
                         children=_create_kline_tab_content(),
                     ),
-                    # News tab (stock-filtered)
-                    dcc.Tab(
-                        label="新聞",
-                        value="news",
-                        className="tab",
-                        selected_className="tab-selected",
-                        children=_create_news_tab_content(),
-                    ),
                 ]
             ),
         ]
@@ -705,7 +776,11 @@ def _create_tabs_section() -> html.Div:
 
 
 def _create_news_tab_content() -> html.Div:
-    """Create the stock-filtered news tab inside the main page."""
+    """Legacy stock-filtered news tab content.
+
+    Phase 4.5 no longer mounts this in the main page; stock-filtered
+    impact news renders inside the right-rail 新聞 tab instead.
+    """
     category_tabs = [
         dcc.Tab(label="全部",     value="ALL",           className="tab", selected_className="tab-selected"),
         dcc.Tab(label="國際",     value="INTERNATIONAL", className="tab", selected_className="tab-selected"),
@@ -763,21 +838,18 @@ def _create_kline_tab_content() -> html.Div:
         children=[
             # Period selector
             html.Div(
-                className="period-selector-container",
+                className="period-selector-container chart-timeframe-chips-wrap",
                 children=[
-                    html.Span("時間週期：", className="label"),
                     dcc.RadioItems(
                         id="period-selector",
-                        className="period-selector",
+                        className="period-selector chart-timeframe-chips",
                         options=[
-                            {"label": "日K", "value": "daily"},
-                            {"label": "週K", "value": "weekly"},
-                            {"label": "月K", "value": "monthly"},
                             {"label": "1分", "value": "min_1"},
                             {"label": "5分", "value": "min_5"},
                             {"label": "15分", "value": "min_15"},
-                            {"label": "30分", "value": "min_30"},
-                            {"label": "60分", "value": "min_60"},
+                            {"label": "日K", "value": "daily"},
+                            {"label": "週K", "value": "weekly"},
+                            {"label": "月K", "value": "monthly"},
                         ],
                         value="daily",
                         inline=True,
