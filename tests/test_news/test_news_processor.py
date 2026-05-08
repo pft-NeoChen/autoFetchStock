@@ -12,7 +12,7 @@ Coverage targets:
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -110,7 +110,7 @@ class TestFetchStockCategory:
             title="台積電新聞",
             url="https://example.com/2330",
             source="TestSource",
-            published_at=make_article().published_at,
+            published_at=datetime.now(timezone.utc),
             excerpt="short",
         )
         processor._fetcher.fetch_stock_news.return_value = ([raw], NewsCategory.STOCK_TW)
@@ -131,7 +131,7 @@ class TestFetchStockCategory:
             title="供應鏈新聞",
             url="https://example.com/supply-chain",
             source="TestSource",
-            published_at=make_article().published_at,
+            published_at=datetime.now(timezone.utc),
             excerpt="short",
         )
         processor._fetcher.fetch_stock_news.side_effect = [
@@ -170,6 +170,30 @@ class TestRun:
         self.mock_storage.save_news.assert_called_once()
         saved_arg = self.mock_storage.save_news.call_args[0][0]
         assert isinstance(saved_arg, NewsRunResult)
+        self.mock_storage.cleanup_old_news.assert_called_once_with(30)
+
+    def test_fetch_category_filters_articles_older_than_retention(self):
+        self.processor._fetcher.fetch_category.return_value = [
+            RawArticle(
+                title="近期新聞",
+                url="https://example.com/recent",
+                source="TestSource",
+                published_at=datetime.now(timezone.utc) - timedelta(days=2),
+                excerpt="recent",
+            ),
+            RawArticle(
+                title="過舊新聞",
+                url="https://example.com/old",
+                source="TestSource",
+                published_at=datetime.now(timezone.utc) - timedelta(days=31),
+                excerpt="old",
+            ),
+        ]
+
+        result, raws = self.processor._fetch_category(NewsCategory.FINANCIAL)
+
+        assert [raw.title for raw in raws] == ["近期新聞"]
+        assert [article.title for article in result.articles] == ["近期新聞"]
 
     def test_run_returns_all_5_categories(self):
         """run() result must have entries for all 5 NewsCategory members."""

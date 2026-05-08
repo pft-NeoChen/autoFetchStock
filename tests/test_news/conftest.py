@@ -114,6 +114,7 @@ def mock_config():
     cfg.news_request_interval = 0.0   # no delay in tests
     cfg.news_summarizer_timeout = 10
     cfg.news_max_run_minutes = 5
+    cfg.news_retention_days = 30
     return cfg
 
 
@@ -125,5 +126,6 @@ def mock_storage(tmp_path):
         {"id": "AAPL", "name": "Apple"},
     ]
     storage.save_news.return_value = None
+    storage.cleanup_old_news.return_value = 0
     storage.load_latest_news.return_value = None
     return storage

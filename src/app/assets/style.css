@@ -2946,21 +2946,23 @@ details.news-feed-low > .news-feed-low-list {
 .news-row-overlay {
     position: absolute;
     inset: 0;
-    z-index: 1;
+    z-index: 2;
     text-decoration: none;
     color: transparent;
 }
 .news-row > *:not(.news-row-overlay) {
     position: relative;
-    z-index: 2;
+    z-index: 1;
 }
 .news-row .news-row-content,
+.news-row .news-row-body,
 .news-row .news-score-badge {
     pointer-events: none;
 }
 .news-row .news-row-actions,
 .news-row .news-row-stock-link {
     pointer-events: auto;
+    position: relative;
     z-index: 3;
 }
 .news-row .news-row-title {

@@ -2,7 +2,7 @@
 Unit tests for favorites sidebar rendering helpers.
 """
 
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from unittest.mock import MagicMock
 
 from src.app.callbacks import CallbackManager
@@ -87,6 +87,17 @@ class TestFavoritesSidebarHelpers:
         simtrade_quote = _make_quote(is_simtrade=True)
 
         self.manager._save_quote_as_tick(simtrade_quote)
+
+        self.storage.save_intraday_data.assert_not_called()
+
+    def test_save_quote_as_tick_skips_previous_trade_date_quote(self):
+        stale_quote = _make_quote()
+        stale_quote.timestamp = datetime.combine(
+            date.today() - timedelta(days=1),
+            time(14, 30),
+        )
+
+        self.manager._save_quote_as_tick(stale_quote)
 
         self.storage.save_intraday_data.assert_not_called()
 

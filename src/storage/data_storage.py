@@ -423,12 +423,23 @@ class DataStorage:
 
         # Convert to dataclass
         ticks = []
+        file_date = date.fromisoformat(data["date"]) if isinstance(data.get("date"), str) else trade_date
         for tick in data.get("ticks", []):
             try:
                 from datetime import time as time_type
                 time_value = tick["time"]
                 if isinstance(time_value, str):
                     time_value = time_type.fromisoformat(time_value)
+                timestamp = datetime.fromisoformat(tick["timestamp"]) if tick.get("timestamp") else None
+                if timestamp is not None and self._timestamp_local_date(timestamp) != file_date:
+                    logger.debug(
+                        "Skipping stale intraday tick for %s on %s: time=%s timestamp=%s",
+                        stock_id,
+                        file_date,
+                        time_value,
+                        timestamp,
+                    )
+                    continue
 
                 ticks.append(IntradayTick(
                     time=time_value,
@@ -437,7 +448,7 @@ class DataStorage:
                     buy_volume=int(tick.get("buy_volume", 0)),
                     sell_volume=int(tick.get("sell_volume", 0)),
                     accumulated_volume=int(tick.get("accumulated_volume", 0)),
-                    timestamp=datetime.fromisoformat(tick["timestamp"]) if tick.get("timestamp") else None,
+                    timestamp=timestamp,
                 ))
             except (ValueError, KeyError) as e:
                 logger.warning(f"Skipping invalid tick: {e}")
@@ -446,10 +457,17 @@ class DataStorage:
         return StockIntradayFile(
             stock_id=data["stock_id"],
             stock_name=data.get("stock_name", ""),
-            date=date.fromisoformat(data["date"]) if isinstance(data.get("date"), str) else trade_date,
+            date=file_date,
             previous_close=float(data.get("previous_close", 0)),
             ticks=ticks,
         )
+
+    @staticmethod
+    def _timestamp_local_date(timestamp: datetime) -> date:
+        """Return timestamp date in Taiwan local time."""
+        if timestamp.tzinfo is not None:
+            return timestamp.astimezone(_TW_TIMEZONE).date()
+        return timestamp.date()
 
     def _atomic_write(self, file_path: Path, data: Dict[str, Any]) -> None:
         """

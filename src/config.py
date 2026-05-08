@@ -105,7 +105,7 @@ class AppConfig:
     news_max_articles_per_stock: int = 5
     # News history settings
     news_retention_days: int = field(
-        default_factory=lambda: _env_int("NEWS_RETENTION_DAYS", 30)
+        default_factory=lambda: _env_int("NEWS_RETENTION_DAYS", 7)
     )
     news_history_window_days: int = field(
         default_factory=lambda: _env_int("NEWS_HISTORY_WINDOW_DAYS", 7)

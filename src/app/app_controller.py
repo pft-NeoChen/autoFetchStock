@@ -20,6 +20,10 @@ from src.scheduler import Scheduler
 from src.news.news_processor import NewsProcessor
 from src.app.layout import create_layout
 from src.app.callbacks import CallbackManager
+from src.app.intraday_guard import (
+    quote_timestamp_matches_trade_date,
+    timestamp_matches_trade_date,
+)
 
 logger = logging.getLogger("autofetchstock.app")
 
@@ -546,6 +550,15 @@ class AppController:
         current_time = quote.timestamp.time() if quote.timestamp else datetime.now().time()
         if current_time < time(9, 0):
             return
+        trade_date = date.today()
+        if not quote_timestamp_matches_trade_date(quote, trade_date):
+            logger.debug(
+                "Skip saving stale quote for %s: timestamp=%s trade_date=%s",
+                quote.stock_id,
+                quote.timestamp,
+                trade_date,
+            )
+            return
 
         try:
             # Load previous ticks to calculate volume delta and price trend (REQ-FixVolume0)
@@ -553,7 +566,7 @@ class AppController:
             last_price = quote.previous_close # Default
             last_tick_time = None
             
-            existing_data = self.storage.load_intraday_data(quote.stock_id, date.today())
+            existing_data = self.storage.load_intraday_data(quote.stock_id, trade_date)
             stream_sum = 0
             has_accumulated_anchor = False
             
@@ -562,7 +575,7 @@ class AppController:
                 last_price = last_tick.price
                 last_tick_time = last_tick.timestamp
                 if not last_tick_time and hasattr(last_tick, 'time'):
-                     last_tick_time = datetime.combine(date.today(), last_tick.time)
+                     last_tick_time = datetime.combine(trade_date, last_tick.time)
                 
                 # Search backwards for last non-zero accumulated volume
                 for t in reversed(existing_data.ticks):
@@ -658,7 +671,7 @@ class AppController:
             self.storage.save_intraday_data(
                 stock_id=quote.stock_id,
                 stock_name=quote.stock_name,
-                trade_date=date.today(),
+                trade_date=trade_date,
                 previous_close=quote.previous_close,
                 ticks=[tick],
             )
@@ -783,6 +796,15 @@ class AppController:
             if not stock_id:
                 logger.warning("Received Shioaji tick without stock_id")
                 return
+            trade_date = date.today()
+            if not timestamp_matches_trade_date(getattr(tick, "timestamp", None), trade_date):
+                logger.debug(
+                    "Skip saving stale Shioaji tick for %s: timestamp=%s trade_date=%s",
+                    stock_id,
+                    getattr(tick, "timestamp", None),
+                    trade_date,
+                )
+                return
 
             # --- Fix: Maintain accumulated volume ---
             # Shioaji tick comes with accumulated_volume=0. We must calculate it.
@@ -790,7 +812,7 @@ class AppController:
             # Initialize cache if needed
             if stock_id not in self._volume_cache:
                 try:
-                    existing_data = self.storage.load_intraday_data(stock_id, date.today())
+                    existing_data = self.storage.load_intraday_data(stock_id, trade_date)
                     if existing_data and existing_data.ticks:
                         self._volume_cache[stock_id] = existing_data.ticks[-1].accumulated_volume
                     else:

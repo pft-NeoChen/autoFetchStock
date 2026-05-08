@@ -40,6 +40,7 @@ from src.data.chips_kpi import build_chips_kpi
 from src.data.fundamentals import get_fundamentals
 from src.data.sectors import get_sector
 from src.data.spark import render_spark
+from src.app.intraday_guard import quote_timestamp_matches_trade_date
 
 logger = logging.getLogger("autofetchstock.app")
 
@@ -1476,12 +1477,21 @@ class CallbackManager:
             if getattr(quote, "is_simtrade", False):
                 logger.debug(f"Skip saving simtrade quote for {quote.stock_id}")
                 return
+            trade_date = date.today()
+            if not quote_timestamp_matches_trade_date(quote, trade_date):
+                logger.debug(
+                    "Skip saving stale quote for %s: timestamp=%s trade_date=%s",
+                    quote.stock_id,
+                    quote.timestamp,
+                    trade_date,
+                )
+                return
 
             # Load previous ticks to calculate volume delta and price trend (REQ-FixVolume0)
             last_accumulated_volume = 0
             last_price = quote.previous_close # Default to prev close if no ticks
             
-            existing_data = self.storage.load_intraday_data(quote.stock_id, date.today())
+            existing_data = self.storage.load_intraday_data(quote.stock_id, trade_date)
             stream_sum = 0
             has_accumulated_anchor = False
             
@@ -1558,7 +1568,7 @@ class CallbackManager:
             self.storage.save_intraday_data(
                 stock_id=quote.stock_id,
                 stock_name=quote.stock_name,
-                trade_date=date.today(),
+                trade_date=trade_date,
                 previous_close=quote.previous_close,
                 ticks=[tick],
             )
@@ -3412,7 +3422,10 @@ def _render_market_strip(
                 ),
                 children=[
                     html.Span(e.label, className="market-strip-label"),
-                    html.Span(_fmt_index_value(e.value), className="num market-strip-value"),
+                    html.Span(
+                        _fmt_index_value(e.value),
+                        className=f"num market-strip-value {cls}",
+                    ),
                     html.Span(
                         _fmt_signed(e.change),
                         className=f"num market-strip-chg {cls}",

@@ -170,6 +170,14 @@ class NewsProcessor:
                 task_id="news_collection",
                 original_error=exc,
             ) from exc
+        try:
+            deleted_count = self._storage.cleanup_old_news(
+                self._news_retention_days()
+            )
+            if deleted_count:
+                logger.info("新聞保留清理完成：刪除 %d 個舊檔", deleted_count)
+        except Exception as exc:
+            logger.warning("新聞保留清理失敗: %s", exc, exc_info=True)
 
         logger.info(
             "新聞收集完成: %d 篇文章，%.1f 秒",
@@ -291,6 +299,7 @@ class NewsProcessor:
             category,
             max_articles=self._config.news_max_articles_per_category,
         )
+        raw_articles = self._filter_recent_raw_articles(raw_articles)
         articles = self._raws_to_articles(raw_articles, category)
         result.articles = articles
         result.article_count = len(articles)
@@ -316,6 +325,7 @@ class NewsProcessor:
                 raw_list, detected_cat = self._fetcher.fetch_stock_news(stock)
                 if detected_cat != category:
                     continue
+                raw_list = self._filter_recent_raw_articles(raw_list)
                 for raw in raw_list:
                     related_ids = related_by_url.setdefault(raw.url, [])
                     if stock.stock_id not in related_ids:
@@ -331,6 +341,43 @@ class NewsProcessor:
         result.article_count = len(articles)
         result.failed_count = 0
         return result, all_raw
+
+    def _news_retention_days(self) -> int:
+        """Return configured news retention days with a safe default."""
+        try:
+            return max(1, int(getattr(self._config, "news_retention_days", 7)))
+        except (TypeError, ValueError):
+            return 7
+
+    def _filter_recent_raw_articles(self, raw_articles: list) -> list:
+        """Drop RSS articles older than the configured news retention window."""
+        if not raw_articles:
+            return []
+
+        cutoff = datetime.now(tz=TW_TIMEZONE) - timedelta(
+            days=self._news_retention_days()
+        )
+        recent = []
+        for raw in raw_articles:
+            published_at = getattr(raw, "published_at", None)
+            if published_at is None:
+                recent.append(raw)
+                continue
+            if published_at.tzinfo is None:
+                published_at = published_at.replace(tzinfo=TW_TIMEZONE)
+            else:
+                published_at = published_at.astimezone(TW_TIMEZONE)
+            if published_at >= cutoff:
+                recent.append(raw)
+
+        dropped_count = len(raw_articles) - len(recent)
+        if dropped_count:
+            logger.info(
+                "略過 %d 篇超過 %d 天的舊新聞",
+                dropped_count,
+                self._news_retention_days(),
+            )
+        return recent
 
     @staticmethod
     def _raws_to_articles(
