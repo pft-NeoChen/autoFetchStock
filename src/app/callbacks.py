@@ -15,6 +15,7 @@ import time
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from dash import callback, Output, Input, State, no_update, html, dcc, ctx, ALL
 from dash.exceptions import PreventUpdate
@@ -2176,6 +2177,24 @@ _CATEGORY_DISPLAY = {
     "STOCK_US": "美股",
 }
 
+_TW_TIMEZONE = ZoneInfo("Asia/Taipei")
+
+
+def _format_news_time(value: str, fmt: str = "%m/%d %H:%M") -> str:
+    """Format a news timestamp in Asia/Taipei for UI display."""
+    if not value:
+        return "--"
+    try:
+        published_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return value[:16] if fmt.startswith("%m/%d") else value[:5]
+
+    if published_at.tzinfo is None:
+        local_time = published_at.replace(tzinfo=_TW_TIMEZONE)
+    else:
+        local_time = published_at.astimezone(_TW_TIMEZONE)
+    return local_time.strftime(fmt)
+
 
 def _lazy_score_article(art: dict) -> None:
     """Phase 4 — Q5(a): if article dict has no impact_score, compute on the fly.
@@ -2291,13 +2310,7 @@ def _render_article_list(articles: List[dict]) -> html.Div:
     for art in articles:
         cat_key = art.get("_category_key", "")
         cat_label = _CATEGORY_DISPLAY.get(cat_key, cat_key)
-        pub = art.get("published_at", "")
-        try:
-            from datetime import datetime as _dt
-            ts = _dt.fromisoformat(pub)
-            pub_str = ts.strftime("%m/%d %H:%M")
-        except Exception:
-            pub_str = pub[:16] if pub else "--"
+        pub_str = _format_news_time(art.get("published_at", ""), "%m/%d %H:%M")
 
         title = art.get("title", "（無標題）")
         summary = art.get("summary") or art.get("excerpt", "")
@@ -2357,12 +2370,7 @@ def _render_right_rail_news_list(
         else:
             pill_cls = "pill pill-neu right-rail-news-impact"
 
-        pub = art.get("published_at", "")
-        try:
-            from datetime import datetime as _dt
-            pub_str = _dt.fromisoformat(pub).strftime("%H:%M")
-        except Exception:
-            pub_str = pub[:5] if pub else "--"
+        pub_str = _format_news_time(art.get("published_at", ""))
 
         source = art.get("source", "")
         related = art.get("related_stock_ids") or []
@@ -2451,13 +2459,7 @@ def _render_impact_row(
     tier_cls = _impact_score_tier(score)
     dir_cls = _direction_class(direction)
 
-    pub = art.get("published_at", "")
-    try:
-        from datetime import datetime as _dt
-        ts = _dt.fromisoformat(pub)
-        pub_str = ts.strftime("%H:%M")
-    except Exception:
-        pub_str = pub[:5] if pub else "--"
+    pub_str = _format_news_time(art.get("published_at", ""))
 
     title = art.get("title", "（無標題）")
     url = art.get("url", "#")
@@ -2562,13 +2564,7 @@ def _render_compact_row(art: dict) -> html.Div:
     direction = art.get("impact_direction", "neutral")
     tier_cls = _impact_score_tier(score)
 
-    pub = art.get("published_at", "")
-    try:
-        from datetime import datetime as _dt
-        ts = _dt.fromisoformat(pub)
-        pub_str = ts.strftime("%H:%M")
-    except Exception:
-        pub_str = pub[:5] if pub else "--"
+    pub_str = _format_news_time(art.get("published_at", ""))
 
     title = art.get("title", "（無標題）")
     url = art.get("url", "#")

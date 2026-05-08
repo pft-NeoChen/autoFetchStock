@@ -5,6 +5,7 @@ Unit tests for stock news filtering helpers.
 from src.app.callbacks import (
     _collect_ticker_headlines,
     _extract_articles_from_run,
+    _format_news_time,
     _render_fundamentals_strip,
     _render_event_timeline,
     _render_favorite_signal_strip,
@@ -71,6 +72,12 @@ def test_collect_ticker_headlines_prefers_stock_name_match():
     headlines = _collect_ticker_headlines(_run_dict(), "2330", "台積電")
 
     assert headlines[0]["title"] == "台積電先進製程新聞"
+
+
+def test_format_news_time_displays_source_timestamps_in_taiwan_time():
+    assert _format_news_time("2026-04-24T12:07:00+00:00") == "04/24 20:07"
+    assert _format_news_time("2026-04-24T20:07:00+08:00") == "04/24 20:07"
+    assert _format_news_time("2026-04-24T20:07:00") == "04/24 20:07"
 
 
 def test_render_event_timeline_empty_state():

@@ -2982,6 +2982,9 @@ details.news-feed-low > .news-feed-low-list {
     position: relative;
     z-index: 1;
 }
+.news-row .news-row-body {
+    z-index: 3;
+}
 .news-row .news-row-content,
 .news-row .news-row-body,
 .news-row .news-score-badge {
