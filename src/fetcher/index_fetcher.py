@@ -34,6 +34,46 @@ def _direction(change: float) -> str:
     return "flat"
 
 
+def _to_float(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _snapshot_change(snap, contract, close: float) -> Tuple[float, float]:
+    """Extract index change from Shioaji snapshot fields when available."""
+    ref = (
+        _to_float(getattr(contract, "reference", None))
+        or _to_float(getattr(snap, "reference_price", None))
+        or 0.0
+    )
+    snap_change = _to_float(getattr(snap, "change_price", None))
+    snap_pct = _to_float(getattr(snap, "change_rate", None))
+
+    if snap_change is not None:
+        change = snap_change
+    elif ref:
+        change = close - ref
+    elif snap_pct is not None and snap_pct != -100:
+        previous = close / (1 + snap_pct / 100.0)
+        change = close - previous
+    else:
+        change = 0.0
+
+    if snap_pct is not None:
+        pct = snap_pct
+    elif ref:
+        pct = change / ref * 100.0
+    else:
+        previous = close - change
+        pct = change / previous * 100.0 if previous else 0.0
+
+    return change, pct
+
+
 # ── Local indices (Shioaji) ────────────────────────────────────────
 # (label, contract_kind, market_or_none, symbol)
 _LOCAL_INDEX_DEFS: List[Tuple[str, str, Optional[str], str]] = [
@@ -90,21 +130,14 @@ class IndexFetcher:
                     continue
                 snap = snaps[0]
                 close = float(getattr(snap, "close", 0) or 0)
-                # Reference attribute lives on the contract for indices and on
-                # the snapshot for stocks; try both.
-                ref = float(
-                    getattr(contract, "reference", 0)
-                    or getattr(snap, "reference_price", 0)
-                    or 0
-                )
                 if close <= 0:
                     continue
-                change = close - ref if ref else 0.0
-                pct = (change / ref * 100.0) if ref else 0.0
+                change, pct = _snapshot_change(snap, contract, close)
+                direction_basis = change if change != 0 else pct
                 out.append(MarketIndexEntry(
                     label=label, symbol=sym,
                     value=close, change=change, pct=pct,
-                    direction=_direction(change),
+                    direction=_direction(direction_basis),
                 ))
                 # Record ^TWII running total_amount (TWD) for the
                 # `near-1-min trade amount` ribbon tail.

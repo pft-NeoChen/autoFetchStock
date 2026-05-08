@@ -1940,7 +1940,7 @@ html {
 }
 .five-price-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
     font-size: 11px;
@@ -1948,6 +1948,8 @@ html {
 .five-price-cell {
     display: flex;
     align-items: center;
+    min-width: 0;
+    overflow: hidden;
     padding: 2px 6px;
     gap: 8px;
 }
@@ -1959,13 +1961,27 @@ html {
 }
 .five-bid-vol,
 .five-ask-vol {
+    width: auto;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--txt-2);
     font-size: 10px;
 }
 .five-bid-price {
+    width: auto;
+    flex: 0 0 auto;
+    padding-right: 0;
+    white-space: nowrap;
     font-weight: 600;
 }
 .five-ask-price {
+    width: auto;
+    flex: 0 0 auto;
+    padding-left: 0;
+    white-space: nowrap;
     font-weight: 600;
 }
 .five-totals-footer {
@@ -2241,6 +2257,18 @@ html {
     font-family: var(--font-num);
     font-variant-numeric: tabular-nums;
     color: var(--txt-0);
+}
+
+.market-strip-value.up {
+    color: var(--up);
+}
+
+.market-strip-value.down {
+    color: var(--down);
+}
+
+.market-strip-value.flat {
+    color: var(--flat);
 }
 
 .market-strip-chg,
