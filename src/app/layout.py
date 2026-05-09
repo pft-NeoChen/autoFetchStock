@@ -11,6 +11,8 @@ This module defines the web application layout structure:
 - Control components (period selector, intervals)
 """
 
+from typing import Optional
+
 from dash import html, dcc
 
 from src.models import KlinePeriod
@@ -483,7 +485,7 @@ def _create_right_rail() -> html.Aside:
                     html.Div(
                         id="right-rail-panel-ai",
                         className="right-rail-panel right-rail-panel-hidden",
-                        children=[],
+                        children=[_create_ai_panel()],
                     ),
                     html.Div(
                         id="right-rail-panel-signal",
@@ -515,6 +517,21 @@ def _create_right_rail() -> html.Aside:
                 ],
             ),
         ],
+    )
+
+
+def _create_ai_panel(stock_id: Optional[str] = None) -> html.Div:
+    """Phase 5 — AI advisor right-rail container.
+
+    The callback fills this with the selected stock's Advisor model.
+    Keeping a stable id lets the right-rail tab remain mounted while
+    the user switches between tabs.
+    """
+    message = f"正在建立 {stock_id} 的 AI 顧問" if stock_id else "請先選擇股票"
+    return html.Div(
+        id="ai-panel",
+        className="ai-panel",
+        children=[html.Div(message, className="ai-panel-empty")],
     )
 
 

@@ -7,12 +7,13 @@ from src.app.callbacks import (
     _extract_articles_from_run,
     _format_news_time,
     _render_fundamentals_strip,
+    _render_ai_panel,
     _render_event_timeline,
     _render_favorite_signal_strip,
     _render_news_chat_messages,
     _render_right_rail_news_list,
 )
-from src.models import FundamentalsSnapshot
+from src.models import Advisor, AdvisorBullet, AdvisorDimension, FundamentalsSnapshot
 
 
 def _run_dict():
@@ -91,6 +92,35 @@ def test_render_fundamentals_strip_shows_placeholders_for_missing_values():
 
     assert rendered.className == "fund-strip"
     assert str(rendered).count("--") == 6
+
+
+def test_render_ai_panel_contains_expandable_dimension_cards():
+    advisor = Advisor(
+        overall_score=7.1,
+        stance="偏多",
+        confidence=0.82,
+        delta="+0.4 vs 昨日",
+        recommendation="偏多觀察。",
+        dimensions=[
+            AdvisorDimension(
+                key="news",
+                label="新聞面",
+                score=7.4,
+                direction="up",
+                summary="新聞偏多。",
+                bullets=[AdvisorBullet("bull", "法說展望優於預期。")],
+            ),
+            AdvisorDimension("chip", "籌碼面", 6.1, "up", "籌碼偏多。", []),
+            AdvisorDimension("fund", "基本面", 5.5, "neu", "基本面中性。", []),
+            AdvisorDimension("tech", "技術面", 6.8, "up", "技術面偏多。", []),
+        ],
+    )
+
+    rendered = _render_ai_panel(advisor, "2330", "台積電")
+
+    assert "AI 顧問" in str(rendered)
+    assert str(rendered).count("ai-dim-card") == 4
+    assert "策略觀點" in str(rendered)
 
 
 def test_render_event_timeline_with_cluster():

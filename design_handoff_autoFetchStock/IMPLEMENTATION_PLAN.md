@@ -27,14 +27,14 @@ Each Phase = 1 PR. Don't skip ahead. Run the app and visually compare to `refere
 **Goal:** 4-dimension AI panel always visible on stock detail. Match `reference/12-ai-rightrail.png`.
 
 **Tasks:**
-- [ ] Add `Advisor`, `AdvisorDimension`, `AdvisorBullet` to `src/models.py`
-- [ ] Stub `src/data/advisor.py` — `build_advisor(stock_id) -> Advisor` from existing news/chip/fund/tech data
-- [ ] New builder `_create_ai_panel(stock_id)` in `layout.py`
-- [ ] Mount in right rail above Big Orders (or replace if space-constrained)
-- [ ] Header: overall score + stance pill + delta arrow
-- [ ] 4 dimension cards stacked, click to expand bullets
-- [ ] Recommendation footer in bg-1 italic
-- [ ] New callback `callbacks/advisor.py` — re-render on stock change
+- [x] Add `Advisor`, `AdvisorDimension`, `AdvisorBullet` to `src/models.py`
+- [x] Stub `src/data/advisor.py` — `build_advisor(stock_id) -> Advisor` from existing news/chip/fund/tech data
+- [x] New builder `_create_ai_panel(stock_id)` in `layout.py`
+- [x] Mount in right rail AI tab
+- [x] Header: overall score + stance pill + delta arrow
+- [x] 4 dimension cards stacked, click to expand bullets
+- [x] Recommendation footer in bg-1 italic
+- [x] Callback in existing `callbacks.py` — re-render on stock change
 
 **Done when:** AI panel renders for selected stock, shows 4 dims, clicking expands bullets, recommendation visible.
 

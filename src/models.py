@@ -419,3 +419,34 @@ class FundamentalsSnapshot:
     eps_period: str = ""
     gross_margin_period: str = ""
     pe_period: str = ""
+
+
+# ─── Phase 5 — AI Advisor models ────────────────────────────────────────
+
+@dataclass
+class AdvisorBullet:
+    """Single evidence bullet inside an advisor dimension card."""
+    tag: Literal["bull", "bear", "neu"]
+    text: str
+
+
+@dataclass
+class AdvisorDimension:
+    """One of the four advisor dimensions shown in the right rail."""
+    key: Literal["news", "chip", "fund", "tech"]
+    label: str
+    score: float
+    direction: Literal["up", "down", "neu"]
+    summary: str
+    bullets: List[AdvisorBullet] = field(default_factory=list)
+
+
+@dataclass
+class Advisor:
+    """Aggregated 4-dimension AI advisor result for one stock."""
+    overall_score: float
+    stance: str
+    confidence: float
+    delta: str
+    dimensions: List[AdvisorDimension] = field(default_factory=list)
+    recommendation: str = ""

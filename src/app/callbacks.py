@@ -29,6 +29,9 @@ from src.models import (
     MarketIndexEntry,
     ChipKpiCard,
     FundamentalsSnapshot,
+    Advisor,
+    AdvisorBullet,
+    AdvisorDimension,
 )
 from src.exceptions import (
     ConnectionTimeoutError,
@@ -37,6 +40,7 @@ from src.exceptions import (
     ServiceUnavailableError,
 )
 from src.data.market_indices import fetch_market_strip, market_strip_tail
+from src.data.advisor import build_advisor
 from src.data.chips_kpi import build_chips_kpi
 from src.data.fundamentals import get_fundamentals
 from src.data.sectors import get_sector
@@ -117,6 +121,7 @@ class CallbackManager:
         self._register_news_callbacks()
         self._register_phase35_callbacks()
         self._register_right_rail_callbacks()
+        self._register_advisor_callbacks()
         logger.info("All callbacks registered")
 
     def _register_right_rail_callbacks(self) -> None:
@@ -175,6 +180,69 @@ class CallbackManager:
                 _panel_cls("news"),
                 active,
             )
+
+    def _register_advisor_callbacks(self) -> None:
+        """Register Phase 5 AI advisor right-rail callbacks."""
+
+        @self.app.callback(
+            Output("ai-panel", "children"),
+            Input("app-state-store", "data"),
+            Input("news-data-store", "data"),
+            prevent_initial_call=False,
+        )
+        def update_ai_panel(app_state: Optional[dict], news_data: Optional[dict]):
+            stock_id = (app_state or {}).get("current_stock")
+            if not stock_id:
+                return _render_ai_panel_empty("請先選擇股票")
+
+            stock_name = (app_state or {}).get("current_stock_name") or stock_id
+            articles: List[dict] = []
+            if news_data:
+                articles = _extract_articles_from_run(
+                    news_data,
+                    "ALL",
+                    stock_id,
+                    stock_name,
+                )
+
+            quote = None
+            try:
+                if self.fetcher:
+                    get_cached_quote = getattr(self.fetcher, "get_cached_quote", None)
+                    if callable(get_cached_quote):
+                        quote = get_cached_quote(stock_id)
+                    if quote is None:
+                        quote = self.fetcher.fetch_realtime_quote(stock_id, blocking=False)
+            except Exception as exc:
+                logger.debug("advisor quote fetch failed for %s: %s", stock_id, exc)
+
+            cards = build_chips_kpi(stock_id, self.chips_storage)
+            fundamentals = get_fundamentals(stock_id)
+            advisor = build_advisor(
+                stock_id,
+                articles=articles,
+                chip_cards=cards,
+                fundamentals=fundamentals,
+                quote=quote,
+                daily_closes=self._load_daily_closes(stock_id),
+            )
+            return _render_ai_panel(advisor, stock_id, stock_name)
+
+    def _load_daily_closes(self, stock_id: str, limit: int = 80) -> List[float]:
+        """Load recent daily closes for advisor technical scoring."""
+        if not self.storage or not stock_id:
+            return []
+        try:
+            daily = self.storage.load_daily_data(stock_id)
+        except Exception as exc:
+            logger.debug("advisor daily load failed for %s: %s", stock_id, exc)
+            return []
+        closes: List[float] = []
+        for row in (getattr(daily, "daily_data", None) or [])[-limit:]:
+            close = getattr(row, "close", None)
+            if isinstance(close, (int, float)):
+                closes.append(float(close))
+        return closes
 
     def _get_spark_values(self, stock_id: str) -> List[float]:
         """Return the last 20 daily closes for the WatchlistRow sparkline,
@@ -2194,6 +2262,155 @@ def _format_news_time(value: str, fmt: str = "%m/%d %H:%M") -> str:
     else:
         local_time = published_at.astimezone(_TW_TIMEZONE)
     return local_time.strftime(fmt)
+
+
+def _render_ai_panel_empty(message: str) -> html.Div:
+    """Render the empty state inside the Phase 5 AI tab."""
+    return html.Div(message, className="ai-panel-empty")
+
+
+def _render_ai_panel(advisor: Advisor, stock_id: str, stock_name: str) -> List[Any]:
+    """Render the Phase 5 AI advisor right-rail panel."""
+    score = float(advisor.overall_score)
+    stance_cls = _advisor_pill_class(advisor.stance)
+    delta_cls = "up" if advisor.delta.startswith("+") else "down" if advisor.delta.startswith("-") else "flat"
+    delta_arrow = "↑" if delta_cls == "up" else "↓" if delta_cls == "down" else "→"
+    confidence_pct = max(0, min(100, int(round(advisor.confidence * 100))))
+
+    return [
+        html.Div(
+            className="ai-advisor-header",
+            children=[
+                html.Div(
+                    className="ai-advisor-title-row",
+                    children=[
+                        html.Span(className="signal-dot ai"),
+                        html.Span("AI 顧問", className="ai-advisor-title"),
+                        html.Span(f"{stock_id} {stock_name}", className="num ai-advisor-stock"),
+                    ],
+                ),
+                html.Div(
+                    className="ai-advisor-score-row",
+                    children=[
+                        html.Span(f"{score:.1f}", className="num ai-advisor-score"),
+                        html.Span("/10", className="ai-advisor-score-unit"),
+                        html.Span(advisor.stance, className=f"pill {stance_cls} ai-advisor-stance"),
+                        html.Span(
+                            f"{delta_arrow} {advisor.delta}",
+                            className=f"num ai-advisor-delta {delta_cls}",
+                        ),
+                    ],
+                ),
+                html.Div(
+                    className="ai-confidence-row",
+                    children=[
+                        html.Span("信心度", className="ai-confidence-label"),
+                        html.Div(
+                            className="ai-confidence-track",
+                            children=[
+                                html.Div(
+                                    className="ai-confidence-fill",
+                                    style={"width": f"{confidence_pct}%"},
+                                ),
+                            ],
+                        ),
+                        html.Span(f"{confidence_pct}%", className="num ai-confidence-value"),
+                    ],
+                ),
+            ],
+        ),
+        html.Div(
+            className="ai-dimension-list",
+            children=[_render_ai_dimension_card(dim) for dim in advisor.dimensions],
+        ),
+        html.Div(
+            className="ai-advisor-footer",
+            children=[
+                html.Div("策略觀點", className="ai-advisor-footer-label"),
+                html.Div(advisor.recommendation, className="ai-advisor-footer-text"),
+            ],
+        ),
+    ]
+
+
+def _render_ai_dimension_card(dim: AdvisorDimension) -> html.Details:
+    """Render one expandable dimension card."""
+    dir_cls = _advisor_direction_class(dim.direction)
+    score_width = max(0, min(100, int(round(float(dim.score) * 10))))
+    return html.Details(
+        className=f"ai-dim-card ai-dim-{dim.key}",
+        children=[
+            html.Summary(
+                className="ai-dim-summary",
+                children=[
+                    html.Div(
+                        className="ai-dim-head",
+                        children=[
+                            html.Span(dim.label, className="ai-dim-label"),
+                            html.Span(_advisor_direction_arrow(dim.direction), className=f"ai-dim-arrow {dir_cls}"),
+                            html.Span(f"{dim.score:.1f}", className=f"num ai-dim-score {dir_cls}"),
+                        ],
+                    ),
+                    html.Div(
+                        className="ai-dim-meter",
+                        children=[
+                            html.Div(
+                                className=f"ai-dim-meter-fill {dir_cls}",
+                                style={"width": f"{score_width}%"},
+                            ),
+                        ],
+                    ),
+                    html.Div(dim.summary, className="ai-dim-text"),
+                ],
+            ),
+            html.Div(
+                className="ai-dim-bullets",
+                children=[_render_ai_bullet(b) for b in dim.bullets[:3]],
+            ),
+        ],
+    )
+
+
+def _render_ai_bullet(bullet: AdvisorBullet) -> html.Div:
+    dot_cls = {"bull": "bull", "bear": "bear", "neu": "neu"}.get(bullet.tag, "neu")
+    label = {"bull": "多", "bear": "空", "neu": "平"}.get(bullet.tag, "平")
+    pill_cls = {
+        "bull": "pill-up",
+        "bear": "pill-down",
+        "neu": "pill-neu",
+    }.get(bullet.tag, "pill-neu")
+    return html.Div(
+        className="ai-dim-bullet",
+        children=[
+            html.Span(className=f"signal-dot {dot_cls} ai-bullet-dot"),
+            html.Span(label, className=f"pill {pill_cls} ai-bullet-pill"),
+            html.Span(bullet.text, className="ai-bullet-text"),
+        ],
+    )
+
+
+def _advisor_pill_class(stance: str) -> str:
+    if stance == "偏多":
+        return "pill-up"
+    if stance == "偏空":
+        return "pill-down"
+    return "pill-neu"
+
+
+def _advisor_direction_class(direction: str) -> str:
+    if direction == "up":
+        return "up"
+    if direction == "down":
+        return "down"
+    return "flat"
+
+
+def _advisor_direction_arrow(direction: str) -> str:
+    if direction == "up":
+        return "↑"
+    if direction == "down":
+        return "↓"
+    return "→"
 
 
 def _lazy_score_article(art: dict) -> None:
