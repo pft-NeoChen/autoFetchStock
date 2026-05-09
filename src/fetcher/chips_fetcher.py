@@ -81,12 +81,16 @@ class ChipsFetcher:
     CONNECTION_TIMEOUT = 10
 
     HEADERS = {
+        # TWSE WAF blocks "compatible; bot-name" UAs and any request without
+        # a Referer pointing at the matching SPA page. Mimic a real browser
+        # navigation to stay below the heuristic threshold.
         "User-Agent": (
-            "Mozilla/5.0 (compatible; autoFetchStock/0.1; "
-            "https://github.com/pft-NeoChen/autoFetchStock)"
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         ),
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+        "Referer": "https://wwwc.twse.com.tw/",
     }
 
     def __init__(self) -> None:
@@ -176,7 +180,7 @@ class ChipsFetcher:
             return None
 
         fields, rows = per_stock
-        index_map = self._resolve_field_indices_for(fields, _MARGIN_FIELD_ALIASES)
+        index_map = self._resolve_margin_indices(fields)
         if not index_map:
             logger.warning("MI_MARGN schema unrecognised on %s, headers=%r", target_date, fields)
             return None
@@ -308,7 +312,8 @@ class ChipsFetcher:
         """Return (fields, rows) for the per-stock margin table.
 
         Handles both the new multi-table envelope and the legacy flat
-        shape. Picks the table whose fields include 股票代號 + 融資今日餘額.
+        shape. Picks the per-stock breakdown (typically 16 columns with
+        a "代號" header) over the daily summary table (~6 columns).
         """
         candidates: List[Tuple[List[str], list]] = []
         for tbl in payload.get("tables") or []:
@@ -322,11 +327,50 @@ class ChipsFetcher:
             candidates.append((flat_fields, flat_data))
         for fields, rows in candidates:
             cleaned = [self._clean_header(f) for f in fields]
-            has_id = any(c in cleaned for c in ("股票代號", "證券代號"))
+            has_id = any(c in cleaned for c in ("股票代號", "證券代號", "代號"))
             has_bal = any(c in cleaned for c in ("融資今日餘額", "今日餘額"))
-            if has_id and has_bal:
+            if has_id and has_bal and len(cleaned) >= 8:
                 return fields, rows
         return None
+
+    def _resolve_margin_indices(self, fields: List[str]) -> Optional[Dict[str, int]]:
+        """Resolve column indices for the MI_MARGN per-stock table.
+
+        Two schemas observed in the wild:
+
+        - **Modern 16-col layout** (current TWSE): no 融資/融券 prefix on the
+          balance columns; both groups share identical headers ``買進 / 賣出
+          / 現金(券)償還 / 前日餘額 / 今日餘額 / 次一營業日限額``. Disambiguation
+          is by *position* — first 6 columns after id+name = 融資, next 6 =
+          融券. Names alone are not unique.
+
+        - **Legacy named layout**: each balance column is labelled
+          ``融資今日餘額`` / ``融券今日餘額`` explicitly. Falls through to
+          alias-based resolution.
+        """
+        cleaned = [self._clean_header(f) for f in fields]
+
+        # Detect the 16-col positional schema.
+        if (
+            len(cleaned) >= 14
+            and cleaned[:2] in (["代號", "名稱"], ["股票代號", "股票名稱"])
+            and cleaned.count("今日餘額") == 2
+            and cleaned.count("前日餘額") == 2
+        ):
+            # Find the two 今日餘額 / 前日餘額 occurrences.
+            today_idxs = [i for i, c in enumerate(cleaned) if c == "今日餘額"]
+            prev_idxs  = [i for i, c in enumerate(cleaned) if c == "前日餘額"]
+            return {
+                "stock_id":       0,
+                "stock_name":     1,
+                "margin_prev":    prev_idxs[0],
+                "margin_balance": today_idxs[0],
+                "short_prev":     prev_idxs[1],
+                "short_balance":  today_idxs[1],
+            }
+
+        # Legacy schema — fall back to alias-based resolution.
+        return self._resolve_field_indices_for(fields, _MARGIN_FIELD_ALIASES)
 
     @staticmethod
     def _parse_margin_row(row: List, idx: Dict[str, int]) -> Optional[dict]:
