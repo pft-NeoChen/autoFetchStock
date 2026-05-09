@@ -10,8 +10,11 @@ When no on-disk history is available for the current stock, falls
 back to a deterministic STUB matching the reference PNG so the UI
 never blank-screens during first-run / non-trading-day conditions.
 
-Margin (融資) is NOT yet wired to a real source; the card stays a
-placeholder until `MI_MARGN` integration lands.
+Phase 7.1 — both 融資 (margin) and 融券 (short) read from on-disk
+``ChipsStorage`` MI_MARGN snapshots. ``_build_margin_card`` and
+``_build_short_card`` derive direction + caption from the rolling
+balance window; missing days fall through to ``--`` with explanatory
+captions instead of fake numbers.
 """
 
 from __future__ import annotations
@@ -43,6 +46,11 @@ _STUB_CARDS: List[ChipKpiCard] = [
         key="margin", label="融資",
         value_text="-4.2%", direction="up",
         caption="月減 · 籌碼改善",
+    ),
+    ChipKpiCard(
+        key="short", label="融券",
+        value_text="-12.0%", direction="down",
+        caption="月減 · 空頭回補",
     ),
 ]
 
@@ -88,6 +96,8 @@ def _empty_cards() -> List[ChipKpiCard]:
                     value_text="--", direction="flat", caption="本日無進出"),
         ChipKpiCard(key="margin",  label="融資",
                     value_text="--", direction="flat", caption="無融資資料"),
+        ChipKpiCard(key="short",   label="融券",
+                    value_text="--", direction="flat", caption="無融券資料"),
     ]
 
 
@@ -134,6 +144,7 @@ def _build_from_history(
             caption=f"5日 {_signed_lots(d_sum5)}",
         ),
         _build_margin_card(margin_recent),
+        _build_short_card(margin_recent),
     ]
 
 
@@ -187,6 +198,71 @@ def _build_margin_card(margin_recent: Optional[List[dict]]) -> ChipKpiCard:
 
     return ChipKpiCard(
         key="margin", label="融資",
+        value_text=value_text, direction=direction, caption=caption,
+    )
+
+
+def _build_short_card(margin_recent: Optional[List[dict]]) -> ChipKpiCard:
+    """Build the 融券 KPI card from MI_MARGN history.
+
+    Display: pct change of short balance over the rolling window
+    (today vs oldest available, up to ~20 trading days). Direction
+    follows the spec retail-leverage convention: rising 融券 in a
+    rising market signals contrarian/short squeeze potential (up),
+    falling 融券 signals shorts covering/improving (down). Mirrors
+    the 融資 card's structure but reads ``short_balance`` /
+    ``short_prev`` from MI_MARGN.
+    """
+    if not margin_recent:
+        return ChipKpiCard(
+            key="short", label="融券",
+            value_text="--", direction="flat",
+            caption="資料整合中",
+        )
+
+    today_bal = int(margin_recent[0].get("short_balance", 0) or 0)
+    if len(margin_recent) >= 2:
+        base_bal = int(margin_recent[-1].get("short_balance", 0) or 0)
+        days = len(margin_recent) - 1
+    else:
+        base_bal = int(margin_recent[0].get("short_prev", 0) or 0)
+        days = 1
+
+    if today_bal == 0 and base_bal == 0:
+        return ChipKpiCard(
+            key="short", label="融券",
+            value_text="0", direction="flat",
+            caption="本日無融券",
+        )
+
+    if base_bal <= 0:
+        # No baseline — surface the absolute today balance only.
+        return ChipKpiCard(
+            key="short", label="融券",
+            value_text=f"{today_bal:,}",
+            direction="flat",
+            caption="新增融券",
+        )
+
+    pct = (today_bal - base_bal) / base_bal * 100.0
+    sign = "+" if pct > 0 else ""
+    value_text = f"{sign}{pct:.1f}%"
+    # Rising 融券 = potential short-squeeze setup (up). Falling = shorts
+    # covering, also generally bullish for chip structure (down).
+    direction = "up" if pct > 0 else ("down" if pct < 0 else "flat")
+    if pct > 1.0:
+        caption_head = "月增" if days >= 15 else f"{days}日增"
+        caption_tail = "空頭壓力增加"
+    elif pct < -1.0:
+        caption_head = "月減" if days >= 15 else f"{days}日減"
+        caption_tail = "空頭回補"
+    else:
+        caption_head = "持平"
+        caption_tail = "融券穩定"
+    caption = f"{caption_head} · {caption_tail}"
+
+    return ChipKpiCard(
+        key="short", label="融券",
         value_text=value_text, direction=direction, caption=caption,
     )
 

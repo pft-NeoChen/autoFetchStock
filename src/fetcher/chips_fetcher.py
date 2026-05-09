@@ -49,8 +49,9 @@ _FIELD_ALIASES: Dict[str, List[str]] = {
 
 
 # Margin trading (MI_MARGN) field aliases. TWSE has historically split the
-# day's payload into a "融資" (margin) block and "融券" (short) block; we
-# care about today's margin balance to drive the 籌碼 KPI card.
+# day's payload into a "融資" (margin) block and "融券" (short) block. We
+# capture both balance pairs so the 籌碼 KPI cards (融資 + 融券) and the
+# advisor canvas chip indicator can show real numbers.
 _MARGIN_FIELD_ALIASES: Dict[str, List[str]] = {
     "stock_id":         ["股票代號", "證券代號"],
     "stock_name":       ["股票名稱", "證券名稱"],
@@ -61,6 +62,12 @@ _MARGIN_FIELD_ALIASES: Dict[str, List[str]] = {
     "margin_prev":      [
         "融資前日餘額",
         "前日餘額",
+    ],
+    "short_balance":    [
+        "融券今日餘額",
+    ],
+    "short_prev":       [
+        "融券前日餘額",
     ],
 }
 
@@ -105,20 +112,8 @@ class ChipsFetcher:
             "selectType": "ALL",
         }
         self._respect_rate_limit()
-        try:
-            r = requests.get(
-                self.T86_URL,
-                params=params,
-                timeout=self.CONNECTION_TIMEOUT,
-                headers=self.HEADERS,
-            )
-            r.raise_for_status()
-            payload = r.json()
-        except requests.RequestException as exc:
-            logger.warning("T86 fetch failed (%s): %s", target_date, exc)
-            return None
-        except ValueError as exc:
-            logger.warning("T86 invalid JSON (%s): %s", target_date, exc)
+        payload = self._get_json(self.T86_URL, params, target_date, label="T86")
+        if payload is None:
             return None
 
         if (payload.get("stat") or "").upper() != "OK":
@@ -165,20 +160,8 @@ class ChipsFetcher:
             "selectType": "ALL",
         }
         self._respect_rate_limit()
-        try:
-            r = requests.get(
-                self.MARGIN_URL,
-                params=params,
-                timeout=self.CONNECTION_TIMEOUT,
-                headers=self.HEADERS,
-            )
-            r.raise_for_status()
-            payload = r.json()
-        except requests.RequestException as exc:
-            logger.warning("MI_MARGN fetch failed (%s): %s", target_date, exc)
-            return None
-        except ValueError as exc:
-            logger.warning("MI_MARGN invalid JSON (%s): %s", target_date, exc)
+        payload = self._get_json(self.MARGIN_URL, params, target_date, label="MI_MARGN")
+        if payload is None:
             return None
 
         if (payload.get("stat") or "").upper() != "OK":
@@ -229,6 +212,65 @@ class ChipsFetcher:
         return None
 
     # ── Internals ───────────────────────────────────────────────────
+
+    def _get_json(
+        self,
+        url: str,
+        params: Dict[str, str],
+        target_date: date,
+        *,
+        label: str,
+    ) -> Optional[dict]:
+        """GET an endpoint expecting JSON. Returns the parsed payload, or
+        None on failure.
+
+        Catchup loops walk backwards through weekends + holidays + days
+        TWSE temporarily WAFs out (HTML 307). Those are expected — log
+        them at DEBUG so production logs stay readable. Reserve WARNING
+        for genuinely unexpected transport failures (timeouts, 5xx, DNS).
+        """
+        try:
+            r = requests.get(
+                url,
+                params=params,
+                timeout=self.CONNECTION_TIMEOUT,
+                headers=self.HEADERS,
+                allow_redirects=False,
+            )
+        except requests.RequestException as exc:
+            logger.warning("%s fetch failed (%s): %s", label, target_date, exc)
+            return None
+
+        # WAF block / weekend redirect — TWSE returns 307 + an HTML page
+        # explaining the request was refused. Not actionable here; log at
+        # debug so the catchup loop doesn't spam warnings.
+        if r.status_code in (301, 302, 303, 307, 308):
+            logger.debug(
+                "%s redirected (%s, status=%d, ct=%s) — likely WAF / weekend",
+                label, target_date, r.status_code, r.headers.get("Content-Type", ""),
+            )
+            return None
+
+        if r.status_code >= 500:
+            logger.warning("%s upstream %d (%s)", label, r.status_code, target_date)
+            return None
+        if r.status_code >= 400:
+            logger.debug("%s client %d (%s)", label, r.status_code, target_date)
+            return None
+
+        ct = (r.headers.get("Content-Type") or "").lower()
+        if "json" not in ct:
+            logger.debug(
+                "%s non-JSON response (%s, ct=%s, head=%r)",
+                label, target_date, ct, r.text[:64],
+            )
+            return None
+
+        try:
+            return r.json()
+        except ValueError as exc:
+            logger.debug("%s invalid JSON (%s): %s", label, target_date, exc)
+            return None
 
     def _respect_rate_limit(self) -> None:
         elapsed = time.time() - self._last_request_at
@@ -311,6 +353,8 @@ class ChipsFetcher:
             "stock_name":     (cell("stock_name") or "").strip(),
             "margin_balance": to_int(cell("margin_balance")),
             "margin_prev":    to_int(cell("margin_prev")),
+            "short_balance":  to_int(cell("short_balance")),
+            "short_prev":     to_int(cell("short_prev")),
         }
 
     @staticmethod

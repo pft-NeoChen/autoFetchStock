@@ -3107,14 +3107,16 @@ def _render_quadrant_indicators(
         return _render_indicator_table(rows)
 
     if key == "chip":
-        # Map cards by key for stable ordering. 融券 currently has no
-        # data layer (MI_MARGN parser captures margin only) — show "--".
+        # Map cards by key for stable ordering. Phase 7.1 wires 融券 to
+        # the MI_MARGN ``short_balance`` parser so it picks up real data
+        # the same way as 融資; missing rows fall through to "--".
         by_key = {c.key: c for c in (cards or [])}
         order = [
             ("foreign", "外資"),
             ("trust",   "投信"),
             ("dealer",  "自營"),
             ("margin",  "融資"),
+            ("short",   "融券"),
         ]
         rows: List[tuple[str, str, str]] = []
         for k, label in order:
@@ -3123,7 +3125,6 @@ def _render_quadrant_indicators(
                 rows.append((label, c.value_text or "--", c.direction or "flat"))
             else:
                 rows.append((label, "--", "flat"))
-        rows.append(("融券", "--", "flat"))
         return _render_indicator_table(rows)
 
     if key == "fund":
