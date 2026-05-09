@@ -73,20 +73,37 @@ def _parse_twse_iih_financial(payload: Dict[str, Any]) -> FundamentalsSnapshot:
     gross_values = _series_data_by_name(profit_chart, "毛利率") or _series_data_at(profit_chart, 0)
     pe_values = _series_data_by_name(pe_chart, "本益比") or _series_data_at(pe_chart, 0)
 
-    eps_q = _last_number(eps_values)
-    prev_year_eps = _nth_from_end(eps_values, 5)
-    gross_margin = _last_number(gross_values)
-    prev_gross_margin = _nth_from_end(gross_values, 2)
-    pe = _last_number(pe_values)
-    pe_avg = _avg([v for v in pe_values if _to_float(v) and _to_float(v) > 0])
+    eps_cats = _categories_or_empty(eps_chart)
+    profit_cats = _categories_or_empty(profit_chart)
+    pe_cats = _categories_or_empty(pe_chart)
 
+    # IIH fills the unreported current quarter with 0 — skip zeros so the
+    # "latest reported quarter" label/value stay aligned (上一季回退邏輯).
+    eps_q, eps_idx = _last_nonzero_with_index(eps_values)
+    gross_margin, gm_idx = _last_nonzero_with_index(gross_values)
+    pe, pe_idx = _last_nonzero_with_index(pe_values)
+
+    pe_avg = _avg([v for v in pe_values if (_to_float(v) or 0) > 0])
+
+    # YoY: same quarter one year ago = picked_idx - 4 in quarterly cats.
+    prev_year_eps = None
+    if eps_idx is not None and eps_idx - 4 >= 0:
+        prev_year_eps = _to_float(eps_values[eps_idx - 4])
     eps_yoy = None
     if eps_q is not None and prev_year_eps not in (None, 0):
         eps_yoy = (eps_q - prev_year_eps) / abs(prev_year_eps) * 100
 
+    # GM delta: previous quarter (idx - 1) for QoQ change.
+    prev_gross_margin = None
+    if gm_idx is not None and gm_idx - 1 >= 0:
+        prev_gross_margin = _to_float(gross_values[gm_idx - 1])
     gm_delta = None
     if gross_margin is not None and prev_gross_margin is not None:
         gm_delta = gross_margin - prev_gross_margin
+
+    eps_period = eps_cats[eps_idx] if (eps_idx is not None and eps_idx < len(eps_cats)) else str(eps_chart.get("date") or "")
+    gm_period = profit_cats[gm_idx] if (gm_idx is not None and gm_idx < len(profit_cats)) else str(profit_chart.get("date") or "")
+    pe_period = pe_cats[pe_idx] if (pe_idx is not None and pe_idx < len(pe_cats)) else str(pe_chart.get("date") or "")
 
     return FundamentalsSnapshot(
         eps_q=eps_q,
@@ -95,10 +112,24 @@ def _parse_twse_iih_financial(payload: Dict[str, Any]) -> FundamentalsSnapshot:
         gm_delta=gm_delta,
         pe=pe,
         pe_avg=pe_avg,
-        eps_period=str(eps_chart.get("date") or ""),
-        gross_margin_period=str(profit_chart.get("date") or ""),
-        pe_period=str(pe_chart.get("date") or ""),
+        eps_period=str(eps_period),
+        gross_margin_period=str(gm_period),
+        pe_period=str(pe_period),
     )
+
+
+def _categories_or_empty(chart: Dict[str, Any]) -> List[str]:
+    cats = chart.get("categories") or []
+    return [str(c) for c in cats] if isinstance(cats, list) else []
+
+
+def _last_nonzero_with_index(values: List[Any]) -> Tuple[Optional[float], Optional[int]]:
+    for i in range(len(values) - 1, -1, -1):
+        v = _to_float(values[i])
+        if v is None or v == 0:
+            continue
+        return v, i
+    return None, None
 
 
 def _first_series_data(chart: Dict[str, Any]) -> List[Any]:

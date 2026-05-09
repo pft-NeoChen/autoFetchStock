@@ -58,6 +58,29 @@ Each Phase = 1 PR. Don't skip ahead. Run the app and visually compare to `refere
 
 ---
 
+## Phase 7 — Data Layer Coverage Backlog (parked)
+
+Added during Phase 6.2 review. These gaps surfaced while building the
+`/advisor` AI-2 canvas. None block Phase 6 closure; track separately.
+
+**Tasks:**
+- [ ] Extend `MI_MARGN` parser in `src/fetcher/chips_fetcher.py` to capture
+      融券 (short) fields: `short_balance` / `short_prev`. Add aliases to
+      `_MARGIN_FIELD_ALIASES`, surface via `ChipsStorage`, and add a
+      `short` `ChipKpiCard` row (advisor canvas already reserves the row
+      with `--` placeholder).
+- [ ] Broaden chip-flow coverage so small caps (e.g. 聯亞 3081) show
+      something other than `--`. Options: TWSE 個股日成交、券商分點、
+      OTC 三大法人。Pick one that has bulk endpoints.
+- [ ] ROE / HPC 占比 fundamentals fields. IIH `financial` doesn't return
+      ROE — needs separate fetcher (IFRS 三表 or BWIBBU_d). HPC 占比 is
+      issuer-specific revenue mix; only auto-derivable for TSMC via
+      法說 PDF parse, otherwise drop the row.
+- [ ] Replace heuristic advisor scoring (`src/data/advisor.py`) with
+      real LLM scorer. (Listed in DESIGN_SPEC §5 as future story.)
+
+---
+
 ## Out of Scope (Future Stories)
 
 - Real LLM-driven sentiment scoring (currently heuristic stubs)

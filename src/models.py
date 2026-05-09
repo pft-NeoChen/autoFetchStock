@@ -450,3 +450,29 @@ class Advisor:
     delta: str
     dimensions: List[AdvisorDimension] = field(default_factory=list)
     recommendation: str = ""
+
+
+# ─── Phase 6 — N1 per-stock event timeline ──────────────────────────
+
+@dataclass
+class StockEvent:
+    """One row on the per-stock event timeline (Variant N1).
+
+    Date is the cluster's last_seen day (newest activity). Kind is
+    classified from cluster title/keywords by ``src.data.events`` using
+    a keyword heuristic; the full taxonomy is defined in DESIGN_SPEC §4.2
+    and matches the visual swatch palette in news-variants.jsx.
+
+    ``articles`` carries hydrated per-article meta (time/title/source/
+    impact) for the inline news list under each event row.
+    """
+    date: str
+    kind: Literal["news", "price", "inst", "fund", "macro", "tech", "ai"]
+    label: str
+    summary: str
+    weight: float
+    news_count: int
+    direction: Literal["up", "down", "neu"] = "neu"
+    is_anomaly: bool = False
+    articles: List[dict] = field(default_factory=list)
+    event_id: str = ""

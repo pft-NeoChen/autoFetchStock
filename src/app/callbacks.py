@@ -12,7 +12,7 @@ This module implements all Dash callback functions:
 
 import logging
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -32,6 +32,7 @@ from src.models import (
     Advisor,
     AdvisorBullet,
     AdvisorDimension,
+    StockEvent,
 )
 from src.exceptions import (
     ConnectionTimeoutError,
@@ -41,6 +42,7 @@ from src.exceptions import (
 )
 from src.data.market_indices import fetch_market_strip, market_strip_tail
 from src.data.advisor import build_advisor
+from src.data.events import build_stock_event_timeline
 from src.data.chips_kpi import build_chips_kpi
 from src.data.fundamentals import get_fundamentals
 from src.data.sectors import get_sector
@@ -122,6 +124,8 @@ class CallbackManager:
         self._register_phase35_callbacks()
         self._register_right_rail_callbacks()
         self._register_advisor_callbacks()
+        self._register_events_tab_callbacks()
+        self._register_alert_bar_callbacks()
         logger.info("All callbacks registered")
 
     def _register_right_rail_callbacks(self) -> None:
@@ -228,6 +232,67 @@ class CallbackManager:
             )
             return _render_ai_panel(advisor, stock_id, stock_name)
 
+        # ── Phase 6 — /advisor full-canvas (Variant AI-2) ────────────────
+        @self.app.callback(
+            Output("advisor-canvas", "children"),
+            Input("app-state-store", "data"),
+            Input("news-data-store", "data"),
+            Input("url", "pathname"),
+            prevent_initial_call=False,
+        )
+        def update_advisor_canvas(
+            app_state: Optional[dict],
+            news_data: Optional[dict],
+            pathname: Optional[str],
+        ):
+            if pathname != "/advisor":
+                raise PreventUpdate
+
+            stock_id = (app_state or {}).get("current_stock")
+            if not stock_id:
+                return html.Div(
+                    "請從即時看板選擇股票後再查看 AI 顧問。",
+                    className="advisor-empty",
+                )
+
+            stock_name = (app_state or {}).get("current_stock_name") or stock_id
+            articles: List[dict] = []
+            if news_data:
+                articles = _extract_articles_from_run(
+                    news_data, "ALL", stock_id, stock_name,
+                )
+
+            quote = None
+            try:
+                if self.fetcher:
+                    get_cached_quote = getattr(self.fetcher, "get_cached_quote", None)
+                    if callable(get_cached_quote):
+                        quote = get_cached_quote(stock_id)
+                    if quote is None:
+                        quote = self.fetcher.fetch_realtime_quote(stock_id, blocking=False)
+            except Exception as exc:
+                logger.debug("advisor-canvas quote fetch failed for %s: %s", stock_id, exc)
+
+            cards = build_chips_kpi(stock_id, self.chips_storage)
+            fundamentals = get_fundamentals(stock_id)
+            advisor = build_advisor(
+                stock_id,
+                articles=articles,
+                chip_cards=cards,
+                fundamentals=fundamentals,
+                quote=quote,
+                daily_closes=self._load_daily_closes(stock_id),
+            )
+            return _render_advisor_canvas(
+                advisor, stock_id, stock_name,
+                quote=quote,
+                articles=articles,
+                cards=cards,
+                fundamentals=fundamentals,
+                daily_closes=self._load_daily_closes(stock_id),
+                daily_ohlc=self._load_daily_ohlc(stock_id),
+            )
+
     def _load_daily_closes(self, stock_id: str, limit: int = 80) -> List[float]:
         """Load recent daily closes for advisor technical scoring."""
         if not self.storage or not stock_id:
@@ -243,6 +308,280 @@ class CallbackManager:
             if isinstance(close, (int, float)):
                 closes.append(float(close))
         return closes
+
+    def _load_daily_ohlc(
+        self, stock_id: str, limit: int = 120
+    ) -> List[Tuple[float, float, float]]:
+        """Return recent (high, low, close) tuples for KD/RSI calc."""
+        if not self.storage or not stock_id:
+            return []
+        try:
+            daily = self.storage.load_daily_data(stock_id)
+        except Exception as exc:
+            logger.debug("advisor daily ohlc load failed for %s: %s", stock_id, exc)
+            return []
+        out: List[Tuple[float, float, float]] = []
+        for row in (getattr(daily, "daily_data", None) or [])[-limit:]:
+            h = getattr(row, "high", None)
+            l = getattr(row, "low", None)
+            c = getattr(row, "close", None)
+            if isinstance(h, (int, float)) and isinstance(l, (int, float)) and isinstance(c, (int, float)):
+                out.append((float(h), float(l), float(c)))
+        return out
+
+    def _register_alert_bar_callbacks(self) -> None:
+        """Phase 6.5 — DESIGN_SPEC §7 stale-data & connection-lost banner.
+
+        Two paths surface as alerts:
+        - **Stale data**: during market hours, if the latest tick for the
+          current stock is >5 s old (Shioaji subscription stalled or TWSE
+          fallback hung). Amber.
+        - **Connection lost**: Shioaji socket dropped after a successful
+          login, or scheduler consecutive_failures crossed the threshold.
+          Red. Surfaces a 重新連線 button that re-runs login.
+        """
+
+        @self.app.callback(
+            Output("system-alert-bar", "children"),
+            Output("system-alert-bar", "className"),
+            Output("system-alert-bar", "style"),
+            Input("auto-update-interval", "n_intervals"),
+            Input("app-state-store", "data"),
+            prevent_initial_call=False,
+        )
+        def update_alert_bar(_n, app_state):
+            level, message = self._eval_alert_state(app_state or {})
+            if level is None:
+                return [], "system-alert-bar", {"display": "none"}
+
+            children = [
+                html.Span("●", className=f"alert-dot alert-dot-{level}"),
+                html.Span(message, className="alert-message"),
+            ]
+            if level == "error":
+                children.append(html.Button(
+                    "重新連線",
+                    id="alert-reconnect-button",
+                    className="alert-reconnect-button",
+                    n_clicks=0,
+                ))
+            else:
+                # keep the button id mounted (hidden) so the reconnect
+                # callback's Input target always exists.
+                children.append(html.Button(
+                    "",
+                    id="alert-reconnect-button",
+                    className="alert-reconnect-button",
+                    n_clicks=0,
+                    style={"display": "none"},
+                ))
+
+            return (
+                children,
+                f"system-alert-bar system-alert-{level}",
+                {"display": "flex"},
+            )
+
+        @self.app.callback(
+            Output("alert-reconnect-button", "n_clicks"),
+            Input("alert-reconnect-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def reconnect_clicked(n_clicks):
+            if not n_clicks:
+                raise PreventUpdate
+            try:
+                if self.shioaji_fetcher and not self.shioaji_fetcher.is_connected:
+                    self.shioaji_fetcher.login()
+                    logger.info("alert-bar reconnect: shioaji re-login attempted")
+            except Exception as exc:
+                logger.warning("alert-bar reconnect failed: %s", exc)
+            return 0  # reset counter; next tick re-evaluates state
+
+    def _eval_alert_state(self, app_state: dict) -> Tuple[Optional[str], str]:
+        """Return (level, message). level in {None, 'warn', 'error'}."""
+        # Connection-lost takes priority.
+        try:
+            shioaji_connected = bool(
+                self.shioaji_fetcher and self.shioaji_fetcher.is_connected
+            )
+        except Exception:
+            shioaji_connected = False
+        shioaji_configured = bool(self.shioaji_fetcher)
+
+        try:
+            status = self.scheduler.get_status() if self.scheduler else None
+            consecutive_failures = int(getattr(status, "consecutive_failures", 0) or 0)
+        except Exception:
+            consecutive_failures = 0
+
+        if shioaji_configured and not shioaji_connected:
+            return "error", "Shioaji 連線中斷，即時報價不可用"
+        if consecutive_failures >= 3:
+            return "error", f"資料抓取連續失敗 {consecutive_failures} 次，已暫停排程"
+
+        # Stale check only meaningful during market hours and when a stock
+        # is selected. Outside market hours stale data is expected.
+        try:
+            is_open = bool(self.scheduler and self.scheduler.is_market_open())
+        except Exception:
+            is_open = False
+        if not is_open:
+            return None, ""
+
+        stock_id = (app_state or {}).get("current_stock")
+        if not stock_id:
+            return None, ""
+
+        quote = None
+        try:
+            if self.fetcher:
+                get_cached_quote = getattr(self.fetcher, "get_cached_quote", None)
+                if callable(get_cached_quote):
+                    quote = get_cached_quote(stock_id)
+        except Exception:
+            quote = None
+        if quote is None or not getattr(quote, "timestamp", None):
+            return None, ""
+
+        ts = quote.timestamp
+        try:
+            if ts.tzinfo is None:
+                age = (datetime.now() - ts).total_seconds()
+            else:
+                age = (datetime.now(ts.tzinfo) - ts).total_seconds()
+        except Exception:
+            return None, ""
+
+        if age > 5:
+            return "warn", f"資料延遲 {int(age)} 秒，等待下一筆"
+        return None, ""
+
+    def _register_events_tab_callbacks(self) -> None:
+        """Phase 6.4 — fill the per-stock event timeline tab."""
+
+        @self.app.callback(
+            Output("events-window-store", "data"),
+            Output("events-window-btn-today", "className"),
+            Output("events-window-btn-3", "className"),
+            Output("events-window-btn-all", "className"),
+            Input("events-window-btn-today", "n_clicks"),
+            Input("events-window-btn-3", "n_clicks"),
+            Input("events-window-btn-all", "n_clicks"),
+            State("events-window-store", "data"),
+            prevent_initial_call=False,
+        )
+        def update_events_window(_n_today, _n3, _n_all, current):
+            # Window encoded as days back: 0=當日, 3=近 3 日, 999=全部.
+            base = "events-window-chip"
+            active = "events-window-chip events-window-chip-active"
+            triggered = ctx.triggered_id
+            if triggered == "events-window-btn-today":
+                return 0, active, base, base
+            if triggered == "events-window-btn-3":
+                return 3, base, active, base
+            if triggered == "events-window-btn-all":
+                return 999, base, base, active
+
+            cur = current if current in (0, 3, 999) else 3
+            if cur == 0:
+                return 0, active, base, base
+            if cur == 999:
+                return 999, base, base, active
+            return 3, base, active, base
+
+        @self.app.callback(
+            Output("stock-events-timeline", "children"),
+            Output("stock-events-summary", "children"),
+            Input("app-state-store", "data"),
+            Input("news-events-store", "data"),
+            Input("events-window-store", "data"),
+            prevent_initial_call=False,
+        )
+        def update_stock_events_timeline(app_state, news_events_data, window):
+            stock_id = (app_state or {}).get("current_stock")
+            if not stock_id:
+                return [html.Div("請先選擇股票", className="events-empty")], "請先選擇股票"
+
+            stock_name = (app_state or {}).get("current_stock_name") or stock_id
+            # window encoding: 0 = 當日, 3 = 近 3 日, 999 = 全部.
+            try:
+                window_days = int(window) if window is not None else 3
+            except (TypeError, ValueError):
+                window_days = 3
+            if window_days not in (0, 3, 999):
+                window_days = 3
+
+            articles_by_url = self._load_articles_by_url(days=min(max(window_days, 1), 14))
+            events = build_stock_event_timeline(
+                stock_id,
+                news_events_data or {},
+                window_days=window_days,
+                articles_by_url=articles_by_url,
+            )
+            if window_days == 0:
+                window_label = "當日"
+            elif window_days >= 999:
+                window_label = "全部"
+            else:
+                window_label = f"近 {window_days} 日"
+            if not events:
+                return (
+                    [html.Div(f"{window_label}無相關事件", className="events-empty")],
+                    f"{stock_name} {stock_id} · {window_label}無事件",
+                )
+
+            news_total = sum(e.news_count for e in events)
+            anomaly_n = sum(1 for e in events if e.is_anomaly)
+            summary_text = (
+                f"{stock_name} {stock_id} · {window_label} "
+                f"{len(events)} 件事件 · {news_total} 則新聞"
+            )
+            if anomaly_n:
+                summary_text += f" · 爆量 {anomaly_n}"
+
+            return _render_stock_events_timeline(events), summary_text
+
+    def _load_articles_by_url(self, days: int = 7) -> Dict[str, dict]:
+        """Build a URL → article-meta map covering the last ``days`` days.
+
+        Cached for 60 s to avoid re-walking the daily news files on every
+        events-tab callback fire.
+        """
+        cache = getattr(self, "_articles_by_url_cache", None)
+        now = time.time()
+        if cache and now - cache[0] < 60 and cache[2] == days:
+            return cache[1]
+
+        out: Dict[str, dict] = {}
+        if self.storage:
+            today = date.today()
+            start = (today - timedelta(days=days)).strftime("%Y%m%d")
+            end = today.strftime("%Y%m%d")
+            try:
+                for art in self.storage.iter_news_articles(start, end):
+                    url = getattr(art, "url", "") or ""
+                    if not url:
+                        continue
+                    out[url] = {
+                        "title": getattr(art, "title", "") or "",
+                        "source": getattr(art, "source", "") or "",
+                        "published_at": (
+                            art.published_at.isoformat()
+                            if getattr(art, "published_at", None)
+                            else ""
+                        ),
+                        "impact_score": float(getattr(art, "impact_score", 0.0) or 0.0),
+                        "impact_direction": getattr(art, "impact_direction", "neutral"),
+                        "related_stock_ids": list(
+                            getattr(art, "related_stock_ids", []) or []
+                        ),
+                    }
+            except Exception as exc:
+                logger.debug("events tab article hydrate failed: %s", exc)
+
+        self._articles_by_url_cache = (now, out, days)
+        return out
 
     def _get_spark_values(self, stock_id: str) -> List[float]:
         """Return the last 20 daily closes for the WatchlistRow sparkline,
@@ -1695,7 +2034,11 @@ class CallbackManager:
         TASK-155: /news page category view + manual refresh
         TASK-156: Ticker bar rotation (5 s)
         """
-        from src.app.layout import create_main_page_layout, create_news_page_layout
+        from src.app.layout import (
+            create_advisor_page_layout,
+            create_main_page_layout,
+            create_news_page_layout,
+        )
 
         # ── TASK-153  Routing ────────────────────────────────────────────────
         @self.app.callback(
@@ -1706,6 +2049,8 @@ class CallbackManager:
             """Swap page-content based on URL pathname."""
             if pathname == "/news":
                 return create_news_page_layout()
+            if pathname == "/advisor":
+                return create_advisor_page_layout()
             return create_main_page_layout()
 
         # ── News data store refresh ──────────────────────────────────────────
@@ -2411,6 +2756,629 @@ def _advisor_direction_arrow(direction: str) -> str:
     if direction == "down":
         return "↓"
     return "→"
+
+
+# ─── Phase 6 — /advisor full-canvas renderer ──────────────────────────
+
+_ADVISOR_QUADRANT_TAG = {
+    "news": "NEWS",
+    "chip": "CHIP",
+    "fund": "FUND",
+    "tech": "TECH",
+}
+
+
+def _render_advisor_canvas(
+    advisor: Advisor,
+    stock_id: str,
+    stock_name: str,
+    *,
+    quote: Optional[RealtimeQuote],
+    articles: List[dict],
+    cards: List[ChipKpiCard],
+    fundamentals: Optional[FundamentalsSnapshot],
+    daily_closes: Optional[List[float]] = None,
+    daily_ohlc: Optional[List[Tuple[float, float, float]]] = None,
+) -> List[Any]:
+    """Phase 6 — Variant AI-2 full-canvas renderer."""
+    return [
+        _render_advisor_hero(advisor, stock_id, stock_name, quote),
+        html.Div(
+            id="advisor-grid",
+            className="advisor-grid",
+            children=[
+                _render_advisor_quadrant(
+                    dim,
+                    quote=quote,
+                    articles=articles,
+                    cards=cards,
+                    fundamentals=fundamentals,
+                    daily_closes=daily_closes or [],
+                    daily_ohlc=daily_ohlc or [],
+                )
+                for dim in advisor.dimensions
+            ],
+        ),
+    ]
+
+
+def _render_advisor_hero(
+    advisor: Advisor,
+    stock_id: str,
+    stock_name: str,
+    quote: Optional[RealtimeQuote],
+) -> html.Div:
+    score = float(advisor.overall_score)
+    stance_cls = _advisor_pill_class(advisor.stance)
+    delta_cls = (
+        "up" if advisor.delta.startswith("+")
+        else "down" if advisor.delta.startswith("-")
+        else "flat"
+    )
+
+    price_text = "--"
+    pct_text = ""
+    price_cls = "flat"
+    if quote is not None:
+        price_text = f"{quote.current_price:.2f}"
+        if quote.change_amount > 0:
+            price_cls = "up"
+        elif quote.change_amount < 0:
+            price_cls = "down"
+        sign = "+" if quote.change_percent >= 0 else ""
+        pct_text = f"{sign}{quote.change_amount:.2f} ({sign}{quote.change_percent:.2f}%)"
+
+    # spec — single horizontal row aligned to flex-end:
+    #   [id-block] [spacer] [score | radar | rec]
+    return html.Div(
+        className="advisor-hero",
+        children=[
+            html.Div(
+                className="advisor-hero-id",
+                children=[
+                    html.Div("AI ADVISOR", className="advisor-hero-eyebrow"),
+                    html.Div(
+                        className="advisor-hero-name-row",
+                        children=[
+                            html.Span(stock_name, className="advisor-hero-name"),
+                            html.Span(stock_id, className="num advisor-hero-code"),
+                            html.Span(price_text, className=f"num advisor-hero-price {price_cls}"),
+                            html.Span(pct_text, className=f"num advisor-hero-change {price_cls}"),
+                        ],
+                    ),
+                ],
+            ),
+            html.Div(className="advisor-hero-spacer"),
+            html.Div(
+                className="advisor-hero-summary",
+                children=[
+                    html.Div(
+                        className="advisor-hero-score",
+                        children=[
+                            html.Div("綜合評分", className="advisor-hero-score-label"),
+                            html.Div(f"{score:.1f}", className="num advisor-hero-score-value"),
+                            html.Div(
+                                html.Span(advisor.stance, className=f"pill {stance_cls} advisor-hero-stance"),
+                            ),
+                        ],
+                    ),
+                    dcc.Graph(
+                        id="advisor-radar-chart",
+                        className="advisor-radar",
+                        figure=_build_advisor_radar(advisor),
+                        config={"displayModeBar": False, "staticPlot": True},
+                        style={"height": "180px", "width": "200px"},
+                    ),
+                    html.Div(
+                        className="advisor-hero-rec",
+                        children=[
+                            html.Div("策略觀點", className="advisor-hero-rec-label"),
+                            html.Div(advisor.recommendation, className="advisor-hero-rec-text"),
+                            html.Div(
+                                className="advisor-confidence-row",
+                                children=[
+                                    html.Span("信心度", className="advisor-confidence-label"),
+                                    html.Div(
+                                        className="advisor-confidence-track",
+                                        children=[
+                                            html.Div(
+                                                className="advisor-confidence-fill",
+                                                style={
+                                                    "width": f"{int(round(advisor.confidence * 100))}%",
+                                                },
+                                            ),
+                                        ],
+                                    ),
+                                    html.Span(
+                                        f"{int(round(advisor.confidence * 100))}%",
+                                        className="num advisor-confidence-value",
+                                    ),
+                                    html.Span(
+                                        advisor.delta,
+                                        className=f"num advisor-hero-delta {delta_cls}",
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def _build_advisor_radar(advisor: Advisor) -> go.Figure:
+    """4-axis radar chart of dimension scores."""
+    label_map = {
+        "news": "新聞面",
+        "chip": "籌碼面",
+        "fund": "基本面",
+        "tech": "技術面",
+    }
+    categories = [label_map.get(d.key, d.key) for d in advisor.dimensions]
+    values = [float(d.score) for d in advisor.dimensions]
+    if categories:
+        categories = categories + [categories[0]]
+        values = values + [values[0]]
+
+    fig = go.Figure(
+        data=[
+            go.Scatterpolar(
+                r=values,
+                theta=categories,
+                fill="toself",
+                line={"color": "#9C27B0", "width": 2},
+                fillcolor="rgba(156,39,176,0.28)",
+                hoverinfo="skip",
+            ),
+        ]
+    )
+    fig.update_layout(
+        polar={
+            "bgcolor": "#1E1E1E",
+            "radialaxis": {
+                "visible": True,
+                "range": [0, 10],
+                "tickvals": [2, 4, 6, 8, 10],
+                "tickfont": {"size": 8, "color": "#666666"},
+                "gridcolor": "rgba(255,255,255,0.08)",
+                "linecolor": "rgba(255,255,255,0.08)",
+            },
+            "angularaxis": {
+                "tickfont": {"size": 10, "color": "#AAAAAA"},
+                "gridcolor": "rgba(255,255,255,0.08)",
+                "linecolor": "rgba(255,255,255,0.08)",
+            },
+        },
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+        margin={"l": 28, "r": 28, "t": 18, "b": 18},
+    )
+    return fig
+
+
+def _render_advisor_quadrant(
+    dim: AdvisorDimension,
+    *,
+    quote: Optional[RealtimeQuote],
+    articles: List[dict],
+    cards: List[ChipKpiCard],
+    fundamentals: Optional[FundamentalsSnapshot],
+    daily_closes: Optional[List[float]] = None,
+    daily_ohlc: Optional[List[Tuple[float, float, float]]] = None,
+) -> html.Div:
+    dir_cls = _advisor_direction_class(dim.direction)
+    tag = _ADVISOR_QUADRANT_TAG.get(dim.key, dim.key.upper())
+    return html.Div(
+        className=f"advisor-quadrant advisor-quadrant-{dim.key}",
+        children=[
+            html.Div(
+                className="advisor-quadrant-head",
+                children=[
+                    html.Span(className=f"advisor-quadrant-bar {dir_cls}"),
+                    html.Span(dim.label, className="advisor-quadrant-label"),
+                    html.Span(tag, className="advisor-quadrant-tag"),
+                    html.Span(f"{dim.score:.1f}", className=f"num advisor-quadrant-score {dir_cls}"),
+                    html.Span("/10", className="advisor-quadrant-score-unit"),
+                ],
+            ),
+            html.Div(
+                className="advisor-quadrant-body",
+                children=[
+                    html.Div(
+                        className="advisor-quadrant-text",
+                        children=[
+                            html.Div(dim.summary, className="advisor-quadrant-summary"),
+                            html.Div(
+                                className="advisor-quadrant-bullets",
+                                children=[
+                                    _render_advisor_bullet_row(b) for b in dim.bullets[:3]
+                                ],
+                            ),
+                        ],
+                    ),
+                    html.Div(
+                        className="advisor-quadrant-side",
+                        children=[
+                            html.Div("關鍵指標", className="advisor-quadrant-side-label"),
+                            _render_quadrant_indicators(
+                                dim.key,
+                                quote=quote,
+                                articles=articles,
+                                cards=cards,
+                                fundamentals=fundamentals,
+                                daily_closes=daily_closes or [],
+                                daily_ohlc=daily_ohlc or [],
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def _render_advisor_bullet_row(bullet: AdvisorBullet) -> html.Div:
+    label = {"bull": "多", "bear": "空", "neu": "平"}.get(bullet.tag, "平")
+    pill_cls = {
+        "bull": "pill-up",
+        "bear": "pill-down",
+        "neu": "pill-neu",
+    }.get(bullet.tag, "pill-neu")
+    bar_cls = {"bull": "up", "bear": "down", "neu": "flat"}.get(bullet.tag, "flat")
+    return html.Div(
+        className=f"advisor-quadrant-bullet bullet-{bar_cls}",
+        children=[
+            html.Span(label, className=f"pill {pill_cls} advisor-bullet-pill"),
+            html.Span(bullet.text, className="advisor-bullet-text"),
+        ],
+    )
+
+
+def _compute_rsi(closes: List[float], period: int = 14) -> Optional[float]:
+    """Wilder's RSI on the trailing close series."""
+    if len(closes) < period + 1:
+        return None
+    gains: List[float] = []
+    losses: List[float] = []
+    for i in range(1, len(closes)):
+        diff = closes[i] - closes[i - 1]
+        gains.append(max(diff, 0.0))
+        losses.append(max(-diff, 0.0))
+    avg_g = sum(gains[:period]) / period
+    avg_l = sum(losses[:period]) / period
+    for i in range(period, len(gains)):
+        avg_g = (avg_g * (period - 1) + gains[i]) / period
+        avg_l = (avg_l * (period - 1) + losses[i]) / period
+    if avg_l == 0:
+        return 100.0
+    rs = avg_g / avg_l
+    return 100.0 - 100.0 / (1.0 + rs)
+
+
+def _compute_kd(
+    ohlc: List[Tuple[float, float, float]],
+    n: int = 9,
+) -> Tuple[Optional[float], Optional[float]]:
+    """KD (9, 3, 3) — returns (K, D) at the latest bar, or (None, None)."""
+    if len(ohlc) < n:
+        return None, None
+    rsv_list: List[float] = []
+    for i in range(n - 1, len(ohlc)):
+        window = ohlc[i - n + 1: i + 1]
+        h = max(x[0] for x in window)
+        l = min(x[1] for x in window)
+        c = ohlc[i][2]
+        rsv = (c - l) / (h - l) * 100 if h != l else 50.0
+        rsv_list.append(rsv)
+    k = 50.0
+    d = 50.0
+    for rsv in rsv_list:
+        k = (2 / 3) * k + (1 / 3) * rsv
+        d = (2 / 3) * d + (1 / 3) * k
+    return k, d
+
+
+def _render_quadrant_indicators(
+    key: str,
+    *,
+    quote: Optional[RealtimeQuote],
+    articles: List[dict],
+    cards: List[ChipKpiCard],
+    fundamentals: Optional[FundamentalsSnapshot],
+    daily_closes: Optional[List[float]] = None,
+    daily_ohlc: Optional[List[Tuple[float, float, float]]] = None,
+) -> html.Div:
+    if key == "news":
+        bull = sum(1 for a in articles if a.get("impact_direction") == "up")
+        bear = sum(1 for a in articles if a.get("impact_direction") == "down")
+        neu = sum(1 for a in articles if a.get("impact_direction") not in ("up", "down"))
+        avg = (
+            sum(float(a.get("impact_score", 0.0) or 0.0) for a in articles) / len(articles)
+            if articles else 0.0
+        )
+        rows = [
+            ("利多", f"{bull}", "up"),
+            ("利空", f"{bear}", "down"),
+            ("中性", f"{neu}", "flat"),
+            ("平均影響", f"{avg:.1f}" if articles else "--", "flat"),
+        ]
+        return _render_indicator_table(rows)
+
+    if key == "chip":
+        # Map cards by key for stable ordering. 融券 currently has no
+        # data layer (MI_MARGN parser captures margin only) — show "--".
+        by_key = {c.key: c for c in (cards or [])}
+        order = [
+            ("foreign", "外資"),
+            ("trust",   "投信"),
+            ("dealer",  "自營"),
+            ("margin",  "融資"),
+        ]
+        rows: List[tuple[str, str, str]] = []
+        for k, label in order:
+            c = by_key.get(k)
+            if c:
+                rows.append((label, c.value_text or "--", c.direction or "flat"))
+            else:
+                rows.append((label, "--", "flat"))
+        rows.append(("融券", "--", "flat"))
+        return _render_indicator_table(rows)
+
+    if key == "fund":
+        f = fundamentals or FundamentalsSnapshot()
+        rows: List[tuple[str, str, str]] = []
+
+        # EPS
+        if f.eps_q is not None:
+            yoy = f.eps_yoy
+            cls = "up" if (yoy or 0) > 0 else "down" if (yoy or 0) < 0 else "flat"
+            txt = f"{f.eps_q:.2f}"
+            if yoy is not None:
+                txt += f" ({yoy:+.0f}%)"
+            label = f"EPS {f.eps_period}".strip() if f.eps_period else "EPS"
+            rows.append((label, txt, cls))
+        else:
+            rows.append(("EPS", "--", "flat"))
+
+        # 毛利率
+        if f.gross_margin is not None:
+            d = f.gm_delta
+            cls = "up" if (d or 0) > 0 else "down" if (d or 0) < 0 else "flat"
+            txt = f"{f.gross_margin:.1f}%"
+            if d is not None:
+                txt += f" ({d:+.1f}pp)"
+            rows.append(("毛利率", txt, cls))
+        else:
+            rows.append(("毛利率", "--", "flat"))
+
+        # 本益比
+        if f.pe is not None:
+            cls = "flat"
+            if f.pe_avg is not None and f.pe_avg > 0:
+                gap = (f.pe - f.pe_avg) / f.pe_avg
+                cls = "up" if gap < -0.12 else "down" if gap > 0.18 else "flat"
+            txt = f"{f.pe:.1f}x"
+            if f.pe_avg is not None and f.pe_avg > 0:
+                txt += f" (均 {f.pe_avg:.1f}x)"
+            rows.append(("本益比", txt, cls))
+        else:
+            rows.append(("本益比", "--", "flat"))
+
+        return _render_indicator_table(rows)
+
+    if key == "tech":
+        rows: List[tuple[str, str, str]] = []
+
+        # 漲跌幅 / 成交量 / 開盤 / 高 / 低 — from realtime quote
+        if quote is not None:
+            pct = float(getattr(quote, "change_percent", 0.0) or 0.0)
+            cls = "up" if pct > 0 else "down" if pct < 0 else "flat"
+            sign = "+" if pct >= 0 else ""
+            rows.append(("漲跌幅", f"{sign}{pct:.2f}%", cls))
+            vol = int(getattr(quote, "total_volume", 0) or 0)
+            rows.append(("成交量", f"{vol:,} 張" if vol else "--", "flat"))
+            rows.append(("開盤", f"{quote.open_price:.2f}" if quote.open_price else "--", "flat"))
+            rows.append(("最高", f"{quote.high_price:.2f}" if quote.high_price else "--", "up"))
+            rows.append(("最低", f"{quote.low_price:.2f}" if quote.low_price else "--", "down"))
+        else:
+            rows.extend([
+                ("漲跌幅", "--", "flat"),
+                ("成交量", "--", "flat"),
+                ("開盤", "--", "flat"),
+                ("最高", "--", "up"),
+                ("最低", "--", "down"),
+            ])
+
+        # MA5 / MA20 / MA60 — derive from daily_closes (newest at end)
+        closes = [float(c) for c in (daily_closes or []) if isinstance(c, (int, float))]
+        last_price = None
+        if quote is not None and quote.current_price:
+            last_price = float(quote.current_price)
+        elif closes:
+            last_price = closes[-1]
+
+        for window, label in [(5, "MA5"), (20, "MA20"), (60, "MA60")]:
+            if len(closes) >= window:
+                ma = sum(closes[-window:]) / window
+                if last_price is not None:
+                    cls = "up" if last_price >= ma else "down"
+                    note = "站上" if last_price >= ma else "跌破"
+                    rows.append((label, f"{ma:.2f} ({note})", cls))
+                else:
+                    rows.append((label, f"{ma:.2f}", "flat"))
+            else:
+                rows.append((label, "--", "flat"))
+
+        # KD(9,3,3) — needs daily OHLC
+        k, d = _compute_kd(daily_ohlc or [], n=9)
+        if k is not None and d is not None:
+            kd_cls = "up" if k > d else "down" if k < d else "flat"
+            note = ""
+            if k >= 80 and d >= 80:
+                note = " 超買"
+                kd_cls = "down"
+            elif k <= 20 and d <= 20:
+                note = " 超賣"
+                kd_cls = "up"
+            rows.append(("KD", f"K {k:.1f} / D {d:.1f}{note}", kd_cls))
+        else:
+            rows.append(("KD", "--", "flat"))
+
+        # RSI(14) — closes only
+        rsi = _compute_rsi(closes, period=14)
+        if rsi is not None:
+            if rsi >= 70:
+                rsi_cls = "down"; note = " 超買"
+            elif rsi <= 30:
+                rsi_cls = "up"; note = " 超賣"
+            else:
+                rsi_cls = "flat"; note = ""
+            rows.append(("RSI(14)", f"{rsi:.1f}{note}", rsi_cls))
+        else:
+            rows.append(("RSI(14)", "--", "flat"))
+
+        return _render_indicator_table(rows)
+
+    return html.Div("--", className="advisor-quadrant-no-data")
+
+
+_EVENT_KIND_META = {
+    "news":  ("新聞", "#FFEB3B"),
+    "price": ("價格", "#2196F3"),
+    "ai":    ("AI",   "#9C27B0"),
+    "inst":  ("籌碼", "#FFB74D"),
+    "fund":  ("基本面", "#81C784"),
+    "macro": ("總經", "#90A4AE"),
+    "tech":  ("技術", "#E91E63"),
+}
+
+
+def _render_stock_events_timeline(events: List[StockEvent]) -> List[Any]:
+    """Phase 6.4 — Variant N1 vertical timeline (per-stock).
+
+    Group events by date (newest first) and render each row as
+    [date · kind dot · pill+title+impact] plus the cluster summary.
+    """
+    if not events:
+        return [html.Div("近 7 日無相關事件", className="events-empty")]
+
+    by_date: Dict[str, List[StockEvent]] = {}
+    for ev in events:
+        by_date.setdefault(ev.date, []).append(ev)
+    sorted_dates = sorted(by_date.keys(), reverse=True)
+
+    rows: List[Any] = []
+    rows.append(html.Div(className="stock-events-rail"))
+    for d in sorted_dates:
+        rows.append(
+            html.Div(
+                className="stock-events-date-group",
+                children=[
+                    html.Div(d, className="stock-events-date-label"),
+                    *[_render_stock_event_row(ev) for ev in by_date[d]],
+                ],
+            )
+        )
+    return rows
+
+
+def _render_stock_event_row(ev: StockEvent) -> html.Div:
+    label, color = _EVENT_KIND_META.get(ev.kind, ("事件", "#AAAAAA"))
+    arrow = "▲" if ev.direction == "up" else "▼" if ev.direction == "down" else "■"
+    return html.Div(
+        className="stock-event-row",
+        children=[
+            html.Div(
+                className="stock-event-marker",
+                style={"borderColor": color, "color": color},
+                children=html.Span(arrow, className="stock-event-arrow"),
+            ),
+            html.Div(
+                className="stock-event-body",
+                children=[
+                    html.Div(
+                        className="stock-event-head",
+                        children=[
+                            html.Span(label, className="stock-event-pill", style={
+                                "color": color,
+                                "borderColor": color,
+                            }),
+                            html.Span(ev.label, className="stock-event-title"),
+                            html.Span("爆量", className="stock-event-anomaly") if ev.is_anomaly else None,
+                            html.Span(
+                                f"影響 {ev.weight:.1f}",
+                                className="num stock-event-weight",
+                            ),
+                            html.Span(
+                                f"{ev.news_count} 則",
+                                className="num stock-event-count",
+                            ),
+                        ],
+                    ),
+                    html.Div(ev.summary, className="stock-event-summary") if ev.summary else None,
+                    _render_stock_event_articles(ev.articles or []),
+                ],
+            ),
+        ],
+    )
+
+
+def _render_stock_event_articles(articles: List[dict]) -> Optional[html.Div]:
+    """Inline news list (matches news-variants.jsx::News_Timeline mock).
+
+    Each row renders [time · title+source · impact pill] and the title
+    is the link target so the whole headline is clickable.
+    """
+    if not articles:
+        return None
+    rows: List[Any] = []
+    for a in articles:
+        d = a.get("impact_direction") or "neutral"
+        pill_cls = "pill-up" if d in ("up", "bull") else "pill-down" if d in ("down", "bear") else "pill-neu"
+        impact_score = float(a.get("impact_score") or 0.0)
+        impact_text = f"{impact_score:.1f}" if impact_score > 0 else "—"
+        rows.append(html.Div(
+            className="stock-event-news-row",
+            children=[
+                html.Span(a.get("time") or "—", className="num stock-event-news-time"),
+                html.Div(
+                    className="stock-event-news-main",
+                    children=[
+                        html.A(
+                            a.get("title") or "(未取得標題)",
+                            href=a.get("url") or "#",
+                            target="_blank",
+                            rel="noopener noreferrer",
+                            className="stock-event-news-title",
+                        ),
+                        html.Span(a.get("source") or "", className="stock-event-news-source"),
+                    ],
+                ),
+                html.Span(
+                    impact_text,
+                    className=f"pill {pill_cls} stock-event-news-impact num",
+                ),
+            ],
+        ))
+    return html.Div(rows, className="stock-event-news-list")
+
+
+def _render_indicator_table(rows: List[tuple[str, str, str]]) -> html.Div:
+    return html.Div(
+        className="advisor-indicator-table",
+        children=[
+            html.Div(
+                className="advisor-indicator-row",
+                children=[
+                    html.Span(label, className="advisor-indicator-label"),
+                    html.Span(value, className=f"num advisor-indicator-value {direction}"),
+                ],
+            )
+            for (label, value, direction) in rows
+        ],
+    )
 
 
 def _lazy_score_article(art: dict) -> None:

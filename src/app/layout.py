@@ -43,6 +43,12 @@ def create_layout() -> html.Div:
             # MarketStrip, session badge and clock share one row.
             _create_header(),
 
+            # Phase 6.5 — system alert ribbon. Hidden by default; shows
+            # amber when last data tick is >5s old during market hours,
+            # red when Shioaji connection drops or scheduler hits the
+            # consecutive-failure threshold.
+            _create_alert_bar(),
+
             # Dynamic page content (swapped by routing callback)
             html.Div(id="page-content"),
 
@@ -100,6 +106,31 @@ def create_main_page_layout() -> html.Div:
             # Error message display
             _create_error_display(),
         ]
+    )
+
+
+def create_advisor_page_layout() -> html.Div:
+    """Phase 6 — `/advisor` AI-2 full-canvas page.
+
+    A thin shell. The actual hero / 4-quadrant grid / radar chart are
+    rendered into ``advisor-canvas`` by ``update_advisor_canvas`` in
+    callbacks.py based on the currently selected stock.
+    """
+    return html.Div(
+        id="advisor-page",
+        className="advisor-page",
+        children=[
+            html.Div(
+                id="advisor-canvas",
+                className="advisor-canvas",
+                children=[
+                    html.Div(
+                        "請從即時看板選擇股票後再查看 AI 顧問。",
+                        className="advisor-empty",
+                    ),
+                ],
+            ),
+        ],
     )
 
 
@@ -210,9 +241,11 @@ def _create_hidden_components() -> html.Div:
     return html.Div(
         style={"display": "none"},
         children=[
-            # App state store
+            # App state store — session storage so current_stock survives
+            # cross-page navigation (e.g. /, /news, /advisor) and reloads.
             dcc.Store(
                 id="app-state-store",
+                storage_type="session",
                 data={
                     "current_stock": None,
                     "current_tab": "intraday",
@@ -266,6 +299,7 @@ def _create_hidden_components() -> html.Div:
             dcc.Store(id="favorites-order-store", data=None),
             html.Button(id="favorites-reorder-btn", n_clicks=0,
                         style={"display": "none"}),
+
         ]
     )
 
@@ -338,8 +372,9 @@ def _create_header() -> html.Header:
                         className="header-nav",
                         children=[
                             html.Span("autoFetchStock", className="brand-name"),
-                            html.A("即時看板", href="/", className="header-nav-link"),
-                            html.A("市場新聞", href="/news", className="header-nav-link"),
+                            dcc.Link("即時看板", href="/", className="header-nav-link"),
+                            dcc.Link("市場新聞", href="/news", className="header-nav-link"),
+                            dcc.Link("AI 顧問", href="/advisor", className="header-nav-link header-nav-ai"),
                         ],
                     ),
                     html.Div(
@@ -379,6 +414,22 @@ def _create_header() -> html.Header:
                 ],
             ),
         ]
+    )
+
+
+def _create_alert_bar() -> html.Div:
+    """Phase 6.5 — system alert ribbon (DESIGN_SPEC §7).
+
+    Mounted directly under the header so it sticks regardless of which
+    route is showing. The container stays in the DOM but is hidden via
+    inline style; the alert callback toggles ``display`` and rewrites
+    children + className depending on state.
+    """
+    return html.Div(
+        id="system-alert-bar",
+        className="system-alert-bar",
+        style={"display": "none"},
+        children=[],
     )
 
 
@@ -760,7 +811,7 @@ def _create_bottom_data_row() -> html.Div:
 
 
 def _create_tabs_section() -> html.Div:
-    """Create main chart tabs section (Intraday / K-line)."""
+    """Create main chart tabs section (Intraday / K-line / Events)."""
     return html.Div(
         id="tabs-section",
         className="tabs-section",
@@ -786,9 +837,74 @@ def _create_tabs_section() -> html.Div:
                         selected_className="tab-selected",
                         children=_create_kline_tab_content(),
                     ),
+                    # Phase 6.4 — N1 per-stock event timeline tab
+                    dcc.Tab(
+                        label="事件時間軸",
+                        value="events",
+                        className="tab",
+                        selected_className="tab-selected",
+                        children=_create_events_tab_content(),
+                    ),
                 ]
             ),
         ]
+    )
+
+
+def _create_events_tab_content() -> html.Div:
+    """Phase 6.4 — Variant N1 vertical timeline (per-stock, 7-day window).
+
+    The list itself is rendered into ``stock-events-timeline`` by
+    ``update_stock_events_timeline`` based on the current stock and the
+    shared ``news-events-store`` payload. Window-size chips currently
+    decorate the header only; the data layer always serves 7 days.
+    """
+    return html.Div(
+        id="events-tab-content",
+        className="tab-content events-tab-content",
+        children=[
+            html.Div(
+                className="events-tab-header",
+                children=[
+                    html.Span(
+                        id="stock-events-summary",
+                        className="events-tab-summary",
+                        children="請先選擇股票",
+                    ),
+                    html.Div(
+                        className="events-window-chips",
+                        children=[
+                            html.Button(
+                                "當日",
+                                id="events-window-btn-today",
+                                className="events-window-chip",
+                                n_clicks=0,
+                            ),
+                            html.Button(
+                                "3日",
+                                id="events-window-btn-3",
+                                className="events-window-chip events-window-chip-active",
+                                n_clicks=0,
+                            ),
+                            html.Button(
+                                "全部",
+                                id="events-window-btn-all",
+                                className="events-window-chip",
+                                n_clicks=0,
+                            ),
+                            dcc.Store(id="events-window-store", data=3),
+                        ],
+                    ),
+                ],
+            ),
+            html.Div(
+                id="stock-events-timeline",
+                className="stock-events-timeline",
+                children=[
+                    html.Div("尚無事件資料", className="events-empty"),
+                ],
+            ),
+        ],
     )
 
 
