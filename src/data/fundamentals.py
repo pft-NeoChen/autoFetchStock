@@ -3,11 +3,22 @@
 Source: https://wwwc.twse.com.tw/rwd/zh/IIH/company/financial?code=<stock_id>
 Returns last-known EPS, gross margin, and P/E data. Missing or unsupported
 stocks return an empty snapshot so the UI can render stable `--` cells.
+
+Phase 7.4 — disk-backed cache so app restarts (typical: close after market,
+reopen pre-open next day) don't trigger 5-8s blocking re-fetches on first
+stock switch. Cache TTL = 18h (covers overnight); a 16:35 scheduler warmup
+refreshes favorites after market close. ``stale_fallback`` is returned when
+the network call fails so the UI never blank-screens just because a
+single endpoint is flaky.
 """
 
+import json
 import logging
+import os
+import threading
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -20,26 +31,166 @@ TWSE_IIH_FINANCIAL_URL = "https://wwwc.twse.com.tw/rwd/zh/IIH/company/financial"
 MOPS_COMPARE_DATA_URL = "https://mopsfin.twse.com.tw/compare/data"
 TPEX_DAILY_PE_URL = "https://www.tpex.org.tw/web/stock/aftertrading/peratio_analysis/pera_result.php"
 REQUEST_TIMEOUT = 8
-CACHE_TTL_SECONDS = 6 * 60 * 60
+CACHE_TTL_SECONDS = 18 * 60 * 60          # disk + memory TTL (covers overnight)
+STALE_FALLBACK_MAX_SECONDS = 7 * 24 * 60 * 60  # how long to honor stale disk on net failure
 
 _CACHE: Dict[str, Tuple[float, FundamentalsSnapshot]] = {}
+_DISK_CACHE_DIR: Optional[Path] = None
+_DISK_LOCK = threading.Lock()
+_TZ_TAIPEI = timezone(timedelta(hours=8))
+
+
+def configure_disk_cache(data_dir: str) -> None:
+    """Wire up disk-backed cache. Called once during app bootstrap."""
+    global _DISK_CACHE_DIR
+    path = Path(data_dir) / "cache" / "fundamentals"
+    path.mkdir(parents=True, exist_ok=True)
+    _DISK_CACHE_DIR = path
+    logger.info("fundamentals disk cache enabled: %s", path)
+
+
+def _disk_path(stock_id: str) -> Optional[Path]:
+    if _DISK_CACHE_DIR is None:
+        return None
+    safe = "".join(ch for ch in stock_id if ch.isalnum()) or "unknown"
+    return _DISK_CACHE_DIR / f"{safe}.json"
+
+
+def _load_from_disk(stock_id: str, *, allow_stale: bool = False) -> Optional[Tuple[float, FundamentalsSnapshot]]:
+    path = _disk_path(stock_id)
+    if path is None or not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        ts = float(data["ts"])
+        snap_dict = data["snapshot"]
+    except (json.JSONDecodeError, KeyError, OSError, TypeError, ValueError) as exc:
+        logger.debug("fundamentals disk cache read failed [%s]: %s", stock_id, exc)
+        return None
+    age = time.time() - ts
+    if not allow_stale and age >= CACHE_TTL_SECONDS:
+        return None
+    if allow_stale and age >= STALE_FALLBACK_MAX_SECONDS:
+        return None
+    try:
+        snapshot = FundamentalsSnapshot(
+            eps_q=snap_dict.get("eps_q"),
+            eps_yoy=snap_dict.get("eps_yoy"),
+            gross_margin=snap_dict.get("gross_margin"),
+            gm_delta=snap_dict.get("gm_delta"),
+            pe=snap_dict.get("pe"),
+            pe_avg=snap_dict.get("pe_avg"),
+            eps_period=str(snap_dict.get("eps_period") or ""),
+            gross_margin_period=str(snap_dict.get("gross_margin_period") or ""),
+            pe_period=str(snap_dict.get("pe_period") or ""),
+        )
+    except (TypeError, ValueError) as exc:
+        logger.debug("fundamentals disk cache decode failed [%s]: %s", stock_id, exc)
+        return None
+    return ts, snapshot
+
+
+def _save_to_disk(stock_id: str, ts: float, snapshot: FundamentalsSnapshot) -> None:
+    path = _disk_path(stock_id)
+    if path is None:
+        return
+    payload = {
+        "ts": ts,
+        "snapshot": {
+            "eps_q": snapshot.eps_q,
+            "eps_yoy": snapshot.eps_yoy,
+            "gross_margin": snapshot.gross_margin,
+            "gm_delta": snapshot.gm_delta,
+            "pe": snapshot.pe,
+            "pe_avg": snapshot.pe_avg,
+            "eps_period": snapshot.eps_period,
+            "gross_margin_period": snapshot.gross_margin_period,
+            "pe_period": snapshot.pe_period,
+        },
+    }
+    with _DISK_LOCK:
+        try:
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError as exc:
+            logger.debug("fundamentals disk cache write failed [%s]: %s", stock_id, exc)
+
+
+def is_disk_cache_fresh(stock_id: str) -> bool:
+    """Phase 7.4 — used by app bootstrap catchup to decide which favorites need refetch."""
+    return _load_from_disk(stock_id) is not None
+
+
+def warmup(stock_id: str, *, force: bool = False) -> bool:
+    """Pre-fill cache for ``stock_id``. Returns True when network was hit.
+
+    ``force=True`` bypasses fresh-cache short-circuit so the daily 16:35
+    job replaces yesterday's data even if TTL technically still valid.
+    """
+    if not stock_id:
+        return False
+    if not force and _has_fresh_cache(stock_id):
+        return False
+    snapshot = _fetch_network(stock_id)
+    if snapshot is not None:
+        ts = time.time()
+        _CACHE[stock_id] = (ts, snapshot)
+        _save_to_disk(stock_id, ts, snapshot)
+        return True
+    return False
+
+
+def _has_fresh_cache(stock_id: str) -> bool:
+    cached = _CACHE.get(stock_id)
+    now = time.time()
+    if cached and now - cached[0] < CACHE_TTL_SECONDS:
+        return True
+    return _load_from_disk(stock_id) is not None
 
 
 def get_fundamentals(stock_id: Optional[str]) -> FundamentalsSnapshot:
     """Fetch a compact fundamentals snapshot for one stock.
 
-    Network errors and no-data responses intentionally degrade to an empty
-    snapshot instead of hiding the strip.
+    Cache layers (in order):
+      1. process-level ``_CACHE`` (sub-millisecond)
+      2. disk cache at ``data/cache/fundamentals/{stock_id}.json`` (TTL 18h)
+      3. network (IIH + MOPS + TPEX, 5-8s blocking)
+
+    Network failures fall back to stale disk cache (≤7 days old) so the
+    UI keeps showing last-known values instead of `--`.
     """
     if not stock_id:
         return FundamentalsSnapshot()
 
     stock_id = str(stock_id)
-    cached = _CACHE.get(stock_id)
     now = time.time()
+
+    cached = _CACHE.get(stock_id)
     if cached and now - cached[0] < CACHE_TTL_SECONDS:
         return cached[1]
 
+    disk = _load_from_disk(stock_id)
+    if disk is not None:
+        _CACHE[stock_id] = disk
+        return disk[1]
+
+    snapshot = _fetch_network(stock_id)
+    if snapshot is None:
+        stale = _load_from_disk(stock_id, allow_stale=True)
+        if stale is not None:
+            logger.info("fundamentals network failed for %s, using stale disk cache", stock_id)
+            _CACHE[stock_id] = stale
+            return stale[1]
+        return FundamentalsSnapshot()
+
+    _CACHE[stock_id] = (now, snapshot)
+    _save_to_disk(stock_id, now, snapshot)
+    return snapshot
+
+
+def _fetch_network(stock_id: str) -> Optional[FundamentalsSnapshot]:
+    """Hit IIH + MOPS + TPEX. Returns None when no endpoint produced any value."""
     snapshot = FundamentalsSnapshot()
     try:
         response = requests.get(
@@ -56,7 +207,7 @@ def get_fundamentals(stock_id: Optional[str]) -> FundamentalsSnapshot:
         payload = response.json()
         snapshot = _parse_twse_iih_financial(payload)
     except (ValueError, requests.RequestException) as exc:
-        logger.debug("fundamentals fetch failed for %s: %s", stock_id, exc)
+        logger.debug("fundamentals IIH fetch failed for %s: %s", stock_id, exc)
 
     if not _has_fundamental_values(snapshot):
         snapshot = _fetch_mops_fundamentals(stock_id)
@@ -76,7 +227,8 @@ def get_fundamentals(stock_id: Optional[str]) -> FundamentalsSnapshot:
                 pe_period=pe_period,
             )
 
-    _CACHE[stock_id] = (now, snapshot)
+    if not _has_fundamental_values(snapshot):
+        return None
     return snapshot
 
 

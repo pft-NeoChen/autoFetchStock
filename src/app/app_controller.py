@@ -12,6 +12,7 @@ from dash import Dash
 
 from src.config import AppConfig, setup_logging
 from src.data import advisor as advisor_module
+from src.data import fundamentals as fundamentals_module
 from src.fetcher import DataFetcher
 from src.fetcher.shioaji_fetcher import ShioajiFetcher
 from src.storage import DataStorage
@@ -183,6 +184,14 @@ class AppController:
         from src.fetcher.index_fetcher import IndexFetcher
         self.index_fetcher = IndexFetcher()
 
+        # Phase 7.4 — fundamentals disk cache + daily 16:35 warmup + boot catchup.
+        # Typical usage: app closes after market, opens before market open next
+        # day. So at every boot, check disk cache freshness for favorites and
+        # refetch any missing/stale entries in a background thread.
+        fundamentals_module.configure_disk_cache(self.config.data_dir)
+        self.scheduler.add_fundamentals_warmup_job(self._run_fundamentals_warmup)
+        self._catchup_fundamentals()
+
         # Phase 7.4 — AI advisor LLM scorer + watchlist warmup.
         advisor_module.configure(self.config)
         runtime = advisor_module.get_runtime()
@@ -191,6 +200,66 @@ class AppController:
                 self._run_advisor_warmup,
                 interval_minutes=self.config.advisor_warmup_interval_min,
             )
+
+    def _run_fundamentals_warmup(self, *, force: bool = True) -> None:
+        """Refresh fundamentals for every favorite. Called by 16:35 cron + boot catchup."""
+        try:
+            favorites = self.storage.load_favorites() or []
+        except Exception as exc:
+            logger.warning("fundamentals warmup: load favorites failed: %s", exc)
+            return
+        if not favorites:
+            return
+        success = 0
+        for fav in favorites:
+            stock_id = fav.get("id")
+            if not stock_id:
+                continue
+            try:
+                if fundamentals_module.warmup(stock_id, force=force):
+                    success += 1
+            except Exception as exc:
+                logger.debug("fundamentals warmup [%s] failed: %s", stock_id, exc)
+        logger.info("fundamentals warmup done: %d/%d refreshed", success, len(favorites))
+
+    def _catchup_fundamentals(self) -> None:
+        """Boot-time catchup: refetch favorites whose disk cache is stale/missing.
+
+        Runs in a background thread so the Dash dev server boots immediately.
+        Skips already-fresh entries so a quick app restart doesn't re-burn
+        endpoints. ``force=False`` honors fresh disk cache.
+        """
+        import threading
+
+        try:
+            favorites = self.storage.load_favorites() or []
+        except Exception as exc:
+            logger.warning("fundamentals catchup: load favorites failed: %s", exc)
+            return
+        stale = [
+            f for f in favorites
+            if f.get("id") and not fundamentals_module.is_disk_cache_fresh(f["id"])
+        ]
+        if not stale:
+            logger.info("fundamentals catchup: all %d favorites have fresh cache", len(favorites))
+            return
+        logger.info(
+            "fundamentals catchup: %d/%d favorites need refresh",
+            len(stale), len(favorites),
+        )
+
+        def _run() -> None:
+            for fav in stale:
+                stock_id = fav.get("id")
+                if not stock_id:
+                    continue
+                try:
+                    fundamentals_module.warmup(stock_id, force=False)
+                except Exception as exc:
+                    logger.debug("fundamentals catchup [%s] failed: %s", stock_id, exc)
+            logger.info("fundamentals catchup done")
+
+        threading.Thread(target=_run, daemon=True, name="fund-catchup").start()
 
     def _run_advisor_warmup(self) -> None:
         """Iterate watchlist and refresh advisor cache via LLM."""

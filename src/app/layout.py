@@ -125,7 +125,7 @@ def create_advisor_page_layout() -> html.Div:
                 className="advisor-canvas",
                 children=[
                     html.Div(
-                        "請從即時看板選擇股票後再查看 AI 顧問。",
+                        "請選擇股票後再查看 AI 顧問。",
                         className="advisor-empty",
                     ),
                 ],
@@ -576,7 +576,9 @@ def _create_ai_panel(stock_id: Optional[str] = None) -> html.Div:
 
     The callback fills this with the selected stock's Advisor model.
     Keeping a stable id lets the right-rail tab remain mounted while
-    the user switches between tabs.
+    the user switches between tabs. A clientside callback swaps the
+    children to a skeleton when ``current_stock`` changes so the user
+    never sees stale advisor data while the LLM call is in flight.
     """
     message = f"正在建立 {stock_id} 的 AI 顧問" if stock_id else "請先選擇股票"
     return html.Div(

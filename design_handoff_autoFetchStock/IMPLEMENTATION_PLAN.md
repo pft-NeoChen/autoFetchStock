@@ -76,8 +76,23 @@ Added during Phase 6.2 review. These gaps surfaced while building the
       ROE — needs separate fetcher (IFRS 三表 or BWIBBU_d). HPC 占比 is
       issuer-specific revenue mix; only auto-derivable for TSMC via
       法說 PDF parse, otherwise drop the row.
-- [ ] Replace heuristic advisor scoring (`src/data/advisor.py`) with
-      real LLM scorer. (Listed in DESIGN_SPEC §5 as future story.)
+- [x] **Phase 7.4** — Replace heuristic advisor scoring with Gemini LLM
+      scorer. Single-call covers 4 dimensions + recommendation. Disk
+      cache (TTL 30 min, key = sha1 of inputs), watchlist warmup job
+      (Mon-Fri 09-13 every 30 min), daily quota cap (default 50) with
+      JSONL audit log at `logs/advisor_quota.jsonl`. Falls back to
+      heuristic on disable / quota exhausted / parse error.
+      Env vars: `ADVISOR_LLM_ENABLED`, `ADVISOR_DAILY_QUOTA`,
+      `ADVISOR_CACHE_TTL_MIN`, `ADVISOR_WARMUP_INTERVAL_MIN`.
+
+### 7.5 Dynamic TTL based on intraday volatility (backlog)
+
+Current TTL is fixed 30 min. No volatility detection exists today
+(`change_percent` is just price-vs-prev-close). After a week of
+`logs/advisor_quota.jsonl` data, decide whether to:
+- Add intraday volume ratio + change_pct threshold
+- Shorten TTL to 10 min when `abs(change_pct) > 3%` OR `vol_ratio > 2`
+- Otherwise keep 30 min
 
 ---
 

@@ -10,9 +10,16 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from datetime import datetime, timezone, timedelta
 from typing import Iterable, Optional, Sequence
 
 from src.config import AppConfig
+
+_TZ_TAIPEI = timezone(timedelta(hours=8))
+
+
+def _now_iso() -> str:
+    return datetime.now(_TZ_TAIPEI).isoformat(timespec="seconds")
 from src.data.advisor_cache import AdvisorCache, compute_key
 from src.data.advisor_llm import AdvisorLLM
 from src.data.advisor_quota import AdvisorQuota
@@ -229,6 +236,8 @@ def _try_llm_path(
             error=None if advisor is not None else "parse_or_call_failed",
         )
         if advisor is not None:
+            advisor.source = "llm"
+            advisor.generated_at = _now_iso()
             runtime.cache.put(stock_id, key, advisor)
             return advisor, False
         return None, False
@@ -282,6 +291,8 @@ def _heuristic_advisor(
         delta=delta,
         dimensions=dimensions,
         recommendation=recommendation,
+        source="heuristic",
+        generated_at=_now_iso(),
     )
 
 

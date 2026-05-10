@@ -436,6 +436,43 @@ class Scheduler:
                 f"News RAG index job failed: {e}\n{traceback.format_exc()}"
             )
 
+    def add_fundamentals_warmup_job(self, warmup_callback: Callable[[], object]) -> bool:
+        """Daily 16:35 Asia/Taipei (Mon-Fri) refresh of favorites' fundamentals.
+
+        Runs 5 minutes after the chips T86 job to avoid endpoint contention.
+        Callback iterates favorites and calls ``fundamentals.warmup(force=True)``
+        per stock so the next morning's first stock switch hits warm cache.
+        """
+        try:
+            self._scheduler.add_job(
+                self._fundamentals_warmup_job,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=16,
+                    minute=35,
+                    timezone=TW_TIMEZONE,
+                ),
+                id="fundamentals_warmup",
+                kwargs={"warmup_callback": warmup_callback},
+                name="Fundamentals daily warmup",
+                replace_existing=True,
+            )
+            logger.info("Registered fundamentals warmup job (Mon-Fri 16:35)")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to register fundamentals warmup job: {e}")
+            return False
+
+    def _fundamentals_warmup_job(self, warmup_callback: Callable[[], object]) -> None:
+        logger.info("Starting scheduled fundamentals warmup")
+        try:
+            warmup_callback()
+            logger.info("Scheduled fundamentals warmup completed")
+        except Exception as e:
+            logger.error(
+                f"Fundamentals warmup job failed: {e}\n{traceback.format_exc()}"
+            )
+
     def add_advisor_warmup_job(
         self,
         warmup_callback: Callable[[], object],

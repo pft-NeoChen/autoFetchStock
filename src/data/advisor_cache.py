@@ -108,8 +108,15 @@ class AdvisorCache:
             return None
         if datetime.now(_TZ_TAIPEI) - ts > self._ttl:
             return None
+        # Phase 7.4 — schema check: entries written before the badge commit
+        # lack `source` / `generated_at`. Treat them as stale so the next call
+        # re-queries LLM and overwrites with the new schema.
+        advisor_blob = data.get("advisor") or {}
+        if "source" not in advisor_blob or "generated_at" not in advisor_blob:
+            logger.debug("advisor cache stale schema [%s], invalidating", stock_id)
+            return None
         try:
-            return _deserialize(data["advisor"])
+            return _deserialize(advisor_blob)
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning("advisor cache decode failed [%s]: %s", stock_id, exc)
             return None
@@ -144,6 +151,8 @@ def _serialize(advisor: Advisor) -> dict:
         "confidence": advisor.confidence,
         "delta": advisor.delta,
         "recommendation": advisor.recommendation,
+        "source": advisor.source,
+        "generated_at": advisor.generated_at,
         "dimensions": [
             {
                 "key": d.key,
@@ -177,4 +186,6 @@ def _deserialize(data: dict) -> Advisor:
         delta=data.get("delta", ""),
         dimensions=dims,
         recommendation=data.get("recommendation", ""),
+        source=data.get("source", "heuristic"),
+        generated_at=data.get("generated_at", ""),
     )

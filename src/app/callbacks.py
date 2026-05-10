@@ -188,6 +188,90 @@ class CallbackManager:
     def _register_advisor_callbacks(self) -> None:
         """Register Phase 5 AI advisor right-rail callbacks."""
 
+        # Phase 7.4 — clientside skeleton swap on stock change.
+        # Avoids stale advisor data lingering while LLM call is in flight.
+        # Tracks last seen stock_id in window state so the swap only fires
+        # when current_stock actually changes (not on every news-store tick).
+        self.app.clientside_callback(
+            """
+            function(appState) {
+                if (!appState) return window.dash_clientside.no_update;
+                var stock = appState.current_stock || null;
+                window._lastAdvisorStock = window._lastAdvisorStock || null;
+                if (stock === window._lastAdvisorStock) {
+                    return window.dash_clientside.no_update;
+                }
+                window._lastAdvisorStock = stock;
+                if (!stock) {
+                    return window.dash_clientside.no_update;
+                }
+                var name = appState.current_stock_name || stock;
+                return [
+                    {
+                        namespace: 'dash_html_components',
+                        type: 'Div',
+                        props: {
+                            className: 'ai-panel-empty ai-panel-empty-loading',
+                            children: [
+                                {namespace: 'dash_html_components', type: 'Div',
+                                 props: {className: 'ai-panel-empty-icon', children: '⌛'}},
+                                {namespace: 'dash_html_components', type: 'Div',
+                                 props: {className: 'ai-panel-empty-message',
+                                         children: '正在分析 ' + stock + ' ' + name + '…'}},
+                                {namespace: 'dash_html_components', type: 'Div',
+                                 props: {className: 'ai-panel-empty-hint',
+                                         children: '首次查詢約 5–15 秒；後續快取命中即時顯示。'}},
+                            ],
+                        },
+                    },
+                ];
+            }
+            """,
+            Output("ai-panel", "children", allow_duplicate=True),
+            Input("app-state-store", "data"),
+            prevent_initial_call=True,
+        )
+
+        self.app.clientside_callback(
+            """
+            function(appState, pathname) {
+                if (pathname !== '/advisor') return window.dash_clientside.no_update;
+                if (!appState) return window.dash_clientside.no_update;
+                var stock = appState.current_stock || null;
+                window._lastAdvisorCanvasStock = window._lastAdvisorCanvasStock || null;
+                if (stock === window._lastAdvisorCanvasStock) {
+                    return window.dash_clientside.no_update;
+                }
+                window._lastAdvisorCanvasStock = stock;
+                if (!stock) {
+                    return window.dash_clientside.no_update;
+                }
+                var name = appState.current_stock_name || stock;
+                return {
+                    namespace: 'dash_html_components',
+                    type: 'Div',
+                    props: {
+                        className: 'advisor-empty',
+                        children: [
+                            {namespace: 'dash_html_components', type: 'Div',
+                             props: {className: 'advisor-empty-icon', children: '⌛'}},
+                            {namespace: 'dash_html_components', type: 'Div',
+                             props: {className: 'advisor-empty-title',
+                                     children: '正在分析 ' + stock + ' ' + name}},
+                            {namespace: 'dash_html_components', type: 'Div',
+                             props: {className: 'advisor-empty-desc',
+                                     children: 'AI 顧問首次分析約需 5–15 秒，請稍候…'}},
+                        ],
+                    },
+                };
+            }
+            """,
+            Output("advisor-canvas", "children", allow_duplicate=True),
+            Input("app-state-store", "data"),
+            Input("url", "pathname"),
+            prevent_initial_call=True,
+        )
+
         @self.app.callback(
             Output("ai-panel", "children"),
             Input("app-state-store", "data"),
@@ -197,7 +281,12 @@ class CallbackManager:
         def update_ai_panel(app_state: Optional[dict], news_data: Optional[dict]):
             stock_id = (app_state or {}).get("current_stock")
             if not stock_id:
-                return _render_ai_panel_empty("請先選擇股票")
+                favs = (app_state or {}).get("favorites") or []
+                return _render_ai_panel_empty(
+                    "尚未選擇股票",
+                    favorites=favs,
+                    state="no_stock",
+                )
 
             stock_name = (app_state or {}).get("current_stock_name") or stock_id
             articles: List[dict] = []
@@ -250,10 +339,8 @@ class CallbackManager:
 
             stock_id = (app_state or {}).get("current_stock")
             if not stock_id:
-                return html.Div(
-                    "請從即時看板選擇股票後再查看 AI 顧問。",
-                    className="advisor-empty",
-                )
+                favs = (app_state or {}).get("favorites") or []
+                return _render_advisor_canvas_empty(favs)
 
             stock_name = (app_state or {}).get("current_stock_name") or stock_id
             articles: List[dict] = []
@@ -890,6 +977,26 @@ class CallbackManager:
                 self._render_favorite_item(fav, current_stock, signal_map, anomaly_set)
                 for fav in favorites
             ]
+
+        @self.app.callback(
+            Output("stock-search-input", "value", allow_duplicate=True),
+            Output("stock-search-button", "n_clicks", allow_duplicate=True),
+            Input({"type": "ai-empty-fav-pick", "stock": ALL}, "n_clicks"),
+            Input({"type": "advisor-empty-fav-pick", "stock": ALL}, "n_clicks"),
+            State("stock-search-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def on_advisor_empty_fav_pick(ai_clicks, adv_clicks, current_search_clicks):
+            """Phase 7.4 — chip click in AI/advisor empty state triggers normal search flow."""
+            if not (any(ai_clicks or []) or any(adv_clicks or [])):
+                raise PreventUpdate
+            triggered = ctx.triggered_id
+            if not triggered or not isinstance(triggered, dict):
+                raise PreventUpdate
+            stock_id = triggered.get("stock")
+            if not stock_id:
+                raise PreventUpdate
+            return stock_id, (current_search_clicks or 0) + 1
 
         @self.app.callback(
             Output("stock-search-input", "value", allow_duplicate=True),
@@ -2503,6 +2610,48 @@ class CallbackManager:
     def _register_phase35_callbacks(self) -> None:
         """Register MarketStrip + ChipsKpi callbacks (Phase 3.5)."""
 
+        # Phase 7.4 — clientside skeleton swap for right-rail fund/chip
+        # panel. First-time fundamentals fetch hits 3 endpoints (IIH +
+        # MOPS + TPEX, ~5-8s) so we replace stale content immediately
+        # when current_stock changes; server callback overwrites when
+        # ready. Same pattern as ai-panel.
+        self.app.clientside_callback(
+            """
+            function(appState) {
+                if (!appState) return window.dash_clientside.no_update;
+                var stock = appState.current_stock || null;
+                window._lastFundStock = window._lastFundStock || null;
+                if (stock === window._lastFundStock) {
+                    return window.dash_clientside.no_update;
+                }
+                window._lastFundStock = stock;
+                if (!stock) {
+                    return window.dash_clientside.no_update;
+                }
+                var name = appState.current_stock_name || stock;
+                return [
+                    {
+                        namespace: 'dash_html_components',
+                        type: 'Div',
+                        props: {
+                            className: 'right-rail-fund-loading',
+                            children: [
+                                {namespace: 'dash_html_components', type: 'Div',
+                                 props: {className: 'fund-loading-icon', children: '⌛'}},
+                                {namespace: 'dash_html_components', type: 'Div',
+                                 props: {className: 'fund-loading-text',
+                                         children: '載入 ' + stock + ' ' + name + ' 籌碼與基本面…'}},
+                            ],
+                        },
+                    },
+                ];
+            }
+            """,
+            Output("right-rail-fund-content", "children", allow_duplicate=True),
+            Input("app-state-store", "data"),
+            prevent_initial_call=True,
+        )
+
         @self.app.callback(
             Output("market-strip", "children"),
             Input("market-strip-interval", "n_intervals"),
@@ -2609,9 +2758,96 @@ def _format_news_time(value: str, fmt: str = "%m/%d %H:%M") -> str:
     return local_time.strftime(fmt)
 
 
-def _render_ai_panel_empty(message: str) -> html.Div:
-    """Render the empty state inside the Phase 5 AI tab."""
-    return html.Div(message, className="ai-panel-empty")
+def _render_ai_panel_empty(
+    message: str,
+    favorites: Optional[List[dict]] = None,
+    state: str = "no_stock",
+) -> html.Div:
+    """Render the empty / loading state inside the AI tab.
+
+    state: ``no_stock`` (default), ``loading`` — drives styling.
+    favorites: list of {"id", "name"} dicts; rendered as quick-pick chips
+    so the user can select without leaving the AI tab.
+    """
+    children = [
+        html.Div(
+            className="ai-panel-empty-icon",
+            children=["⌛" if state == "loading" else "✦"],
+        ),
+        html.Div(message, className="ai-panel-empty-message"),
+    ]
+    favs = favorites or []
+    if state == "no_stock" and favs:
+        children.append(html.Div("從我的最愛快選一檔：", className="ai-panel-empty-hint"))
+        children.append(
+            html.Div(
+                className="ai-panel-empty-favs",
+                children=[
+                    html.Button(
+                        f"{f.get('id', '')}  {f.get('name', '')}".strip(),
+                        id={"type": "ai-empty-fav-pick", "stock": f.get("id", "")},
+                        n_clicks=0,
+                        className="ai-empty-fav-chip",
+                    )
+                    for f in favs[:8]
+                    if f.get("id")
+                ],
+            )
+        )
+    elif state == "no_stock":
+        children.append(
+            html.Div(
+                "在頂部搜尋框輸入股票代號或名稱開始。",
+                className="ai-panel-empty-hint",
+            )
+        )
+    return html.Div(children, className=f"ai-panel-empty ai-panel-empty-{state}")
+
+
+def _render_advisor_canvas_empty(favorites: Optional[List[dict]]) -> html.Div:
+    """Phase 7.4 — empty state for /advisor canvas with quick-pick favorites."""
+    favs = favorites or []
+    children = [
+        html.Div("✦", className="advisor-empty-icon"),
+        html.Div("尚未選擇股票", className="advisor-empty-title"),
+        html.Div(
+            "AI 顧問需要一檔股票才能產生分析。從下方我的最愛快選，或在頂部搜尋框輸入代號。",
+            className="advisor-empty-desc",
+        ),
+    ]
+    if favs:
+        children.append(
+            html.Div(
+                className="advisor-empty-favs",
+                children=[
+                    html.Button(
+                        f"{f.get('id', '')}  {f.get('name', '')}".strip(),
+                        id={"type": "advisor-empty-fav-pick", "stock": f.get("id", "")},
+                        n_clicks=0,
+                        className="advisor-empty-fav-chip",
+                    )
+                    for f in favs[:12]
+                    if f.get("id")
+                ],
+            )
+        )
+    return html.Div(children, className="advisor-empty")
+
+
+def _render_advisor_source_badge(advisor: Advisor) -> html.Span:
+    """Phase 7.4 — small pill showing whether output came from LLM cache or heuristic fallback."""
+    if advisor.source == "llm":
+        label = "LLM 分析"
+        cls = "llm"
+    else:
+        label = "規則式"
+        cls = "heuristic"
+    ts = advisor.generated_at[11:16] if len(advisor.generated_at) >= 16 else ""
+    return html.Span(
+        f"{label}{('  · ' + ts) if ts else ''}",
+        className=f"ai-source-badge ai-source-{cls}",
+        title=f"資料來源：{label}（{advisor.generated_at}）" if advisor.generated_at else f"資料來源：{label}",
+    )
 
 
 def _render_ai_panel(advisor: Advisor, stock_id: str, stock_name: str) -> List[Any]:
@@ -2632,6 +2868,7 @@ def _render_ai_panel(advisor: Advisor, stock_id: str, stock_name: str) -> List[A
                         html.Span(className="signal-dot ai"),
                         html.Span("AI 顧問", className="ai-advisor-title"),
                         html.Span(f"{stock_id} {stock_name}", className="num ai-advisor-stock"),
+                        _render_advisor_source_badge(advisor),
                     ],
                 ),
                 html.Div(
@@ -2836,7 +3073,13 @@ def _render_advisor_hero(
             html.Div(
                 className="advisor-hero-id",
                 children=[
-                    html.Div("AI ADVISOR", className="advisor-hero-eyebrow"),
+                    html.Div(
+                        className="advisor-hero-eyebrow-row",
+                        children=[
+                            html.Div("AI ADVISOR", className="advisor-hero-eyebrow"),
+                            _render_advisor_source_badge(advisor),
+                        ],
+                    ),
                     html.Div(
                         className="advisor-hero-name-row",
                         children=[

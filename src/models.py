@@ -450,6 +450,8 @@ class Advisor:
     delta: str
     dimensions: List[AdvisorDimension] = field(default_factory=list)
     recommendation: str = ""
+    source: str = "heuristic"        # "llm" | "heuristic"
+    generated_at: str = ""             # ISO timestamp Asia/Taipei
 
 
 # ─── Phase 6 — N1 per-stock event timeline ──────────────────────────
