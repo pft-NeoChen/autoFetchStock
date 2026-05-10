@@ -436,6 +436,50 @@ class Scheduler:
                 f"News RAG index job failed: {e}\n{traceback.format_exc()}"
             )
 
+    def add_advisor_warmup_job(
+        self,
+        warmup_callback: Callable[[], object],
+        interval_minutes: int,
+    ) -> bool:
+        """Pre-warm advisor cache for watchlist stocks every N minutes.
+
+        Runs only during trading hours (Mon-Fri 09:00-13:30 Asia/Taipei)
+        so we don't burn quota when nothing is moving. The callback is
+        responsible for iterating watchlist stocks and calling
+        ``advisor.warmup()`` per stock — quota / cache logic lives there.
+        """
+        try:
+            self._scheduler.add_job(
+                self._advisor_warmup_job,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour="9-13",
+                    minute=f"*/{max(1, int(interval_minutes))}",
+                    timezone=TW_TIMEZONE,
+                ),
+                id="advisor_warmup",
+                kwargs={"warmup_callback": warmup_callback},
+                name="Advisor LLM warmup",
+                replace_existing=True,
+            )
+            logger.info(
+                "Registered advisor warmup job (Mon-Fri 09-13, every %d min)",
+                interval_minutes,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to register advisor warmup job: {e}")
+            return False
+
+    def _advisor_warmup_job(self, warmup_callback: Callable[[], object]) -> None:
+        logger.debug("Starting scheduled advisor warmup")
+        try:
+            warmup_callback()
+        except Exception as e:
+            logger.error(
+                f"Advisor warmup job failed: {e}\n{traceback.format_exc()}"
+            )
+
     def _fetch_job(self, stock_id: str) -> None:
         """
         Execute fetch job for a stock (REQ-063).

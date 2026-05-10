@@ -1,14 +1,21 @@
-"""Phase 5 AI advisor heuristic data layer.
+"""Phase 7.4 AI advisor with Gemini scorer + heuristic fallback.
 
-The production LLM scorer is a Phase 6 story. This module builds the
-right-rail advisor panel from already-available local signals so the UI
-has stable, explainable data today.
+The dispatcher tries the LLM path (cache → quota check → Gemini call)
+and falls back to the deterministic heuristic when the LLM is disabled,
+quota is exhausted, parsing fails, or the network call errors.
 """
 
 from __future__ import annotations
 
+import logging
+import os
+import threading
 from typing import Iterable, Optional, Sequence
 
+from src.config import AppConfig
+from src.data.advisor_cache import AdvisorCache, compute_key
+from src.data.advisor_llm import AdvisorLLM
+from src.data.advisor_quota import AdvisorQuota
 from src.models import (
     Advisor,
     AdvisorBullet,
@@ -18,8 +25,54 @@ from src.models import (
     RealtimeQuote,
 )
 
+logger = logging.getLogger("autofetchstock.advisor")
 
 DIMENSION_ORDER = ("news", "chip", "fund", "tech")
+
+_runtime_lock = threading.Lock()
+_runtime: Optional["_AdvisorRuntime"] = None
+
+_inflight_lock = threading.Lock()
+_inflight: dict[str, threading.Event] = {}
+
+
+class _AdvisorRuntime:
+    def __init__(self, config: AppConfig) -> None:
+        self.config = config
+        self.llm = AdvisorLLM(config)
+        self.cache = AdvisorCache(
+            data_dir=config.data_dir,
+            ttl_minutes=config.advisor_cache_ttl_min,
+        )
+        log_dir = os.path.dirname(config.log_file) or "logs"
+        self.quota = AdvisorQuota(
+            data_dir=config.data_dir,
+            log_dir=log_dir,
+            daily_limit=config.advisor_daily_quota,
+        )
+        self.enabled = bool(config.advisor_llm_enabled and self.llm.available)
+        if config.advisor_llm_enabled and not self.llm.available:
+            logger.info(
+                "advisor LLM enabled in config but client unavailable: %s",
+                self.llm.disabled_reason,
+            )
+
+
+def configure(config: AppConfig) -> None:
+    """Install runtime (called once during app bootstrap)."""
+    global _runtime
+    with _runtime_lock:
+        _runtime = _AdvisorRuntime(config)
+        logger.info(
+            "advisor configured: llm=%s ttl=%dm quota=%d",
+            _runtime.enabled,
+            config.advisor_cache_ttl_min,
+            config.advisor_daily_quota,
+        )
+
+
+def get_runtime() -> Optional[_AdvisorRuntime]:
+    return _runtime
 
 
 def build_advisor(
@@ -30,18 +83,180 @@ def build_advisor(
     fundamentals: Optional[FundamentalsSnapshot] = None,
     quote: Optional[RealtimeQuote] = None,
     daily_closes: Optional[Sequence[float]] = None,
+    stock_name: Optional[str] = None,
+    trigger: str = "on_demand",
 ) -> Advisor:
-    """Build a deterministic advisor snapshot for ``stock_id``.
+    """Build an advisor snapshot.
 
-    Inputs are intentionally plain and optional so callbacks can pass the
-    freshest data they already have without introducing new fetch paths.
-    Missing sources degrade to neutral scores and explanatory bullets.
+    Tries LLM (cached) → falls back to heuristic on any failure. Inputs
+    are optional and missing sources degrade gracefully on either path.
     """
+    arts = list(articles or [])
+    cards = list(chip_cards or [])
+    fund = fundamentals or FundamentalsSnapshot()
+    closes = list(daily_closes or [])
+
+    runtime = _runtime
+    if runtime and runtime.enabled and stock_id:
+        cached, used_cache = _try_llm_path(
+            runtime,
+            stock_id=stock_id,
+            stock_name=stock_name or stock_id,
+            articles=arts,
+            chip_cards=cards,
+            fundamentals=fund,
+            quote=quote,
+            daily_closes=closes,
+            trigger=trigger,
+        )
+        if cached is not None:
+            if used_cache:
+                logger.debug("advisor cache hit [%s]", stock_id)
+            return cached
+
+    return _heuristic_advisor(
+        stock_id,
+        articles=arts,
+        chip_cards=cards,
+        fundamentals=fund,
+        quote=quote,
+        daily_closes=closes,
+    )
+
+
+def warmup(
+    stock_id: str,
+    *,
+    stock_name: Optional[str] = None,
+    articles: Optional[Sequence[dict]] = None,
+    chip_cards: Optional[Sequence[ChipKpiCard]] = None,
+    fundamentals: Optional[FundamentalsSnapshot] = None,
+    quote: Optional[RealtimeQuote] = None,
+    daily_closes: Optional[Sequence[float]] = None,
+) -> bool:
+    """Force a cache refresh for ``stock_id``. Returns True if LLM call succeeded."""
+    runtime = _runtime
+    if not (runtime and runtime.enabled and stock_id):
+        return False
+    advisor, used_cache = _try_llm_path(
+        runtime,
+        stock_id=stock_id,
+        stock_name=stock_name or stock_id,
+        articles=list(articles or []),
+        chip_cards=list(chip_cards or []),
+        fundamentals=fundamentals or FundamentalsSnapshot(),
+        quote=quote,
+        daily_closes=list(daily_closes or []),
+        trigger="warmup",
+        force_miss=True,
+    )
+    return advisor is not None and not used_cache
+
+
+def _try_llm_path(
+    runtime: _AdvisorRuntime,
+    *,
+    stock_id: str,
+    stock_name: str,
+    articles: Sequence[dict],
+    chip_cards: Sequence[ChipKpiCard],
+    fundamentals: FundamentalsSnapshot,
+    quote: Optional[RealtimeQuote],
+    daily_closes: Sequence[float],
+    trigger: str,
+    force_miss: bool = False,
+) -> tuple[Optional[Advisor], bool]:
+    """Returns (advisor_or_None, used_cache)."""
+    key = compute_key(
+        stock_id,
+        articles=articles,
+        chip_cards=chip_cards,
+        fundamentals=fundamentals,
+        quote=quote,
+        daily_closes=daily_closes,
+    )
+
+    if not force_miss:
+        cached = runtime.cache.get(stock_id, key)
+        if cached is not None:
+            return cached, True
+
+    inflight_key = f"{stock_id}:{key}"
+    wait_event: Optional[threading.Event] = None
+    own_inflight = False
+    with _inflight_lock:
+        existing = _inflight.get(inflight_key)
+        if existing is not None:
+            wait_event = existing
+        else:
+            own_event = threading.Event()
+            _inflight[inflight_key] = own_event
+            own_inflight = True
+
+    if wait_event is not None and not force_miss:
+        wait_event.wait(timeout=60)
+        cached = runtime.cache.get(stock_id, key)
+        if cached is not None:
+            return cached, True
+        return None, False
+
+    try:
+        if not runtime.quota.can_call():
+            runtime.quota.record(
+                stock_id=stock_id,
+                cache_status="quota_exhausted",
+                trigger=trigger,
+                error="daily limit reached",
+            )
+            return None, False
+
+        advisor, tin, tout, latency_ms = runtime.llm.score(
+            stock_id=stock_id,
+            stock_name=stock_name,
+            articles=articles,
+            chip_cards=chip_cards,
+            fundamentals=fundamentals,
+            quote=quote,
+            daily_closes=daily_closes,
+        )
+        runtime.quota.record(
+            stock_id=stock_id,
+            cache_status="miss" if advisor is not None else "miss_failed",
+            trigger=trigger,
+            tokens_in=tin,
+            tokens_out=tout,
+            latency_ms=latency_ms,
+            error=None if advisor is not None else "parse_or_call_failed",
+        )
+        if advisor is not None:
+            runtime.cache.put(stock_id, key, advisor)
+            return advisor, False
+        return None, False
+    finally:
+        if own_inflight:
+            with _inflight_lock:
+                evt = _inflight.pop(inflight_key, None)
+            if evt is not None:
+                evt.set()
+
+
+# ── Heuristic fallback (formerly the only implementation) ────────────────
+
+
+def _heuristic_advisor(
+    stock_id: Optional[str],
+    *,
+    articles: Sequence[dict],
+    chip_cards: Sequence[ChipKpiCard],
+    fundamentals: FundamentalsSnapshot,
+    quote: Optional[RealtimeQuote],
+    daily_closes: Sequence[float],
+) -> Advisor:
     dimensions = [
-        _build_news_dimension(articles or []),
-        _build_chip_dimension(chip_cards or []),
-        _build_fund_dimension(fundamentals or FundamentalsSnapshot()),
-        _build_tech_dimension(quote, daily_closes or []),
+        _build_news_dimension(articles),
+        _build_chip_dimension(chip_cards),
+        _build_fund_dimension(fundamentals),
+        _build_tech_dimension(quote, daily_closes),
     ]
 
     weights = {"news": 0.30, "chip": 0.25, "fund": 0.20, "tech": 0.25}
@@ -55,7 +270,7 @@ def build_advisor(
     else:
         stance = "中性"
 
-    confidence = _confidence(articles or [], chip_cards or [], fundamentals, quote, daily_closes or [])
+    confidence = _confidence(articles, chip_cards, fundamentals, quote, daily_closes)
     delta_value = (overall - 5.0) * 0.18
     delta = f"{delta_value:+.1f} vs 昨日"
     recommendation = _recommendation(stock_id, stance, overall, dimensions)

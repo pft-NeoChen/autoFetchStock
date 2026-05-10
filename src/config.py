@@ -136,6 +136,20 @@ class AppConfig:
         default_factory=lambda: _env_int("NEWS_RAG_EMBEDDING_BATCH_SIZE", 50)
     )
 
+    # ── Phase 7.4 — AI advisor LLM scorer ────────────────────────────────────
+    advisor_llm_enabled: bool = field(
+        default_factory=lambda: os.getenv("ADVISOR_LLM_ENABLED", "true").lower() == "true"
+    )
+    advisor_daily_quota: int = field(
+        default_factory=lambda: _env_int("ADVISOR_DAILY_QUOTA", 50)
+    )
+    advisor_cache_ttl_min: int = field(
+        default_factory=lambda: _env_int("ADVISOR_CACHE_TTL_MIN", 30)
+    )
+    advisor_warmup_interval_min: int = field(
+        default_factory=lambda: _env_int("ADVISOR_WARMUP_INTERVAL_MIN", 30)
+    )
+
     def get_shioaji_credentials(self) -> tuple[str, str]:
         """根據目前的模擬狀態回傳對應的 API Key 與 Secret."""
         if self.shioaji_simulation:

@@ -11,6 +11,7 @@ from typing import Optional
 from dash import Dash
 
 from src.config import AppConfig, setup_logging
+from src.data import advisor as advisor_module
 from src.fetcher import DataFetcher
 from src.fetcher.shioaji_fetcher import ShioajiFetcher
 from src.storage import DataStorage
@@ -181,6 +182,99 @@ class AppController:
         # Phase 3.5 #4 — MarketStrip indices (Shioaji local + yfinance foreign).
         from src.fetcher.index_fetcher import IndexFetcher
         self.index_fetcher = IndexFetcher()
+
+        # Phase 7.4 — AI advisor LLM scorer + watchlist warmup.
+        advisor_module.configure(self.config)
+        runtime = advisor_module.get_runtime()
+        if runtime and runtime.enabled:
+            self.scheduler.add_advisor_warmup_job(
+                self._run_advisor_warmup,
+                interval_minutes=self.config.advisor_warmup_interval_min,
+            )
+
+    def _run_advisor_warmup(self) -> None:
+        """Iterate watchlist and refresh advisor cache via LLM."""
+        from datetime import datetime, timezone, timedelta
+        from src.app.callbacks import _extract_articles_from_run
+        from src.data.chips_kpi import build_chips_kpi
+        from src.data.fundamentals import get_fundamentals
+
+        runtime = advisor_module.get_runtime()
+        if not (runtime and runtime.enabled):
+            return
+        try:
+            favorites = self.storage.load_favorites() or []
+        except Exception as exc:
+            logger.warning("advisor warmup: load favorites failed: %s", exc)
+            return
+        if not favorites:
+            return
+
+        today = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+        try:
+            news_file = self.storage.load_news(today)
+        except Exception as exc:
+            logger.debug("advisor warmup: news load failed: %s", exc)
+            news_file = None
+        run_dict = news_file.to_dict() if news_file else {}
+
+        success = 0
+        for fav in favorites:
+            if not runtime.quota.can_call():
+                logger.info("advisor warmup stopped: daily quota exhausted")
+                break
+            stock_id = fav.get("id")
+            stock_name = fav.get("name") or stock_id
+            if not stock_id:
+                continue
+            articles = _extract_articles_from_run(
+                run_dict, "ALL", stock_id, stock_name,
+            ) if run_dict else []
+            try:
+                cards = build_chips_kpi(stock_id, self.chips_storage)
+            except Exception:
+                cards = []
+            try:
+                fundamentals = get_fundamentals(stock_id)
+            except Exception:
+                fundamentals = None
+            quote = None
+            try:
+                if self.fetcher:
+                    get_cached_quote = getattr(self.fetcher, "get_cached_quote", None)
+                    if callable(get_cached_quote):
+                        quote = get_cached_quote(stock_id)
+            except Exception:
+                quote = None
+            closes = self._load_daily_closes_for_advisor(stock_id)
+            if advisor_module.warmup(
+                stock_id,
+                stock_name=stock_name,
+                articles=articles,
+                chip_cards=cards,
+                fundamentals=fundamentals,
+                quote=quote,
+                daily_closes=closes,
+            ):
+                success += 1
+        logger.info(
+            "advisor warmup done: %d/%d refreshed (remaining quota %d)",
+            success, len(favorites), runtime.quota.remaining(),
+        )
+
+    def _load_daily_closes_for_advisor(self, stock_id: str, limit: int = 80) -> list:
+        if not self.storage or not stock_id:
+            return []
+        try:
+            daily = self.storage.load_daily_data(stock_id)
+        except Exception:
+            return []
+        closes = []
+        for row in (getattr(daily, "daily_data", None) or [])[-limit:]:
+            close = getattr(row, "close", None)
+            if isinstance(close, (int, float)):
+                closes.append(float(close))
+        return closes
 
     def _subscribe_saved_favorites(self) -> None:
         """Subscribe to all saved favorites in Shioaji."""
