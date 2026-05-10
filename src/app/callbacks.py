@@ -14,7 +14,7 @@ import logging
 import time
 from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
 from dash import callback, Output, Input, State, no_update, html, dcc, ctx, ALL
@@ -311,15 +311,17 @@ class CallbackManager:
 
             cards = build_chips_kpi(stock_id, self.chips_storage)
             fundamentals = get_fundamentals(stock_id)
+            closes = self._load_daily_closes(stock_id)
             advisor = build_advisor(
                 stock_id,
                 articles=articles,
                 chip_cards=cards,
                 fundamentals=fundamentals,
                 quote=quote,
-                daily_closes=self._load_daily_closes(stock_id),
+                daily_closes=closes,
             )
-            return _render_ai_panel(advisor, stock_id, stock_name)
+            coverage = _compute_advisor_coverage(articles, cards, fundamentals, quote, closes)
+            return _render_ai_panel(advisor, stock_id, stock_name, coverage=coverage)
 
         # ── Phase 6 — /advisor full-canvas (Variant AI-2) ────────────────
         @self.app.callback(
@@ -362,22 +364,25 @@ class CallbackManager:
 
             cards = build_chips_kpi(stock_id, self.chips_storage)
             fundamentals = get_fundamentals(stock_id)
+            closes = self._load_daily_closes(stock_id)
             advisor = build_advisor(
                 stock_id,
                 articles=articles,
                 chip_cards=cards,
                 fundamentals=fundamentals,
                 quote=quote,
-                daily_closes=self._load_daily_closes(stock_id),
+                daily_closes=closes,
             )
+            coverage = _compute_advisor_coverage(articles, cards, fundamentals, quote, closes)
             return _render_advisor_canvas(
                 advisor, stock_id, stock_name,
                 quote=quote,
                 articles=articles,
                 cards=cards,
                 fundamentals=fundamentals,
-                daily_closes=self._load_daily_closes(stock_id),
+                daily_closes=closes,
                 daily_ohlc=self._load_daily_ohlc(stock_id),
+                coverage=coverage,
             )
 
     def _load_daily_closes(self, stock_id: str, limit: int = 80) -> List[float]:
@@ -2834,23 +2839,120 @@ def _render_advisor_canvas_empty(favorites: Optional[List[dict]]) -> html.Div:
     return html.Div(children, className="advisor-empty")
 
 
+def _compute_advisor_coverage(
+    articles: Sequence[dict],
+    chip_cards: Sequence[ChipKpiCard],
+    fundamentals: Optional[FundamentalsSnapshot],
+    quote: Optional[RealtimeQuote],
+    daily_closes: Sequence[float],
+) -> dict:
+    """Phase 7.5 — measure how many advisor inputs have real data."""
+    chip_real = sum(1 for c in chip_cards if c.value_text and c.value_text != "--")
+    fund_total = 5  # eps_q, eps_yoy, gross_margin, gm_delta, pe
+    fund_real = 0
+    if fundamentals:
+        fund_real = sum(1 for v in (
+            fundamentals.eps_q,
+            fundamentals.eps_yoy,
+            fundamentals.gross_margin,
+            fundamentals.gm_delta,
+            fundamentals.pe,
+        ) if v is not None)
+    return {
+        "news": len(articles or []),
+        "chip": (chip_real, len(chip_cards or [])),
+        "fund": (fund_real, fund_total),
+        "tech": bool(quote) and len(daily_closes or []) >= 20,
+    }
+
+
+def _render_coverage_strip(cov: dict) -> html.Div:
+    """One-line freshness strip: '新聞 12 · 籌碼 3/5 · 基本面 4/5 · 技術 ✓'."""
+    news_n = cov.get("news", 0)
+    chip = cov.get("chip", (0, 0))
+    fund = cov.get("fund", (0, 0))
+    tech_ok = cov.get("tech", False)
+
+    def _cls_count(real: int, total: int) -> str:
+        if total == 0:
+            return "cov-missing"
+        ratio = real / total
+        if ratio >= 0.8:
+            return "cov-ok"
+        if ratio >= 0.4:
+            return "cov-partial"
+        return "cov-missing"
+
+    return html.Div(
+        className="ai-coverage-strip",
+        title="advisor 4 個面向的資料完整度（齊全度高，分析品質越穩定）",
+        children=[
+            html.Span("資料", className="ai-coverage-label"),
+            html.Span(
+                f"新聞 {news_n}",
+                className=f"ai-coverage-pill {('cov-ok' if news_n >= 5 else 'cov-partial' if news_n > 0 else 'cov-missing')}",
+            ),
+            html.Span(
+                f"籌碼 {chip[0]}/{chip[1] or 5}",
+                className=f"ai-coverage-pill {_cls_count(chip[0], chip[1] or 5)}",
+            ),
+            html.Span(
+                f"基本面 {fund[0]}/{fund[1]}",
+                className=f"ai-coverage-pill {_cls_count(fund[0], fund[1])}",
+            ),
+            html.Span(
+                f"技術 {'✓' if tech_ok else '⚠'}",
+                className=f"ai-coverage-pill {'cov-ok' if tech_ok else 'cov-missing'}",
+            ),
+        ],
+    )
+
+
 def _render_advisor_source_badge(advisor: Advisor) -> html.Span:
-    """Phase 7.4 — small pill showing whether output came from LLM cache or heuristic fallback."""
+    """Phase 7.4/7.5 — pill showing source + freshness ("LLM · 12 分鐘前")."""
     if advisor.source == "llm":
-        label = "LLM 分析"
+        label = "LLM"
         cls = "llm"
     else:
         label = "規則式"
         cls = "heuristic"
-    ts = advisor.generated_at[11:16] if len(advisor.generated_at) >= 16 else ""
+    fresh_text = _humanize_age(advisor.generated_at)
+    text = f"{label}{('  · ' + fresh_text) if fresh_text else ''}"
+    full_ts = advisor.generated_at or "未知時間"
     return html.Span(
-        f"{label}{('  · ' + ts) if ts else ''}",
+        text,
         className=f"ai-source-badge ai-source-{cls}",
-        title=f"資料來源：{label}（{advisor.generated_at}）" if advisor.generated_at else f"資料來源：{label}",
+        title=f"資料來源：{'LLM 分析' if advisor.source == 'llm' else '規則式'}（生成於 {full_ts}）",
     )
 
 
-def _render_ai_panel(advisor: Advisor, stock_id: str, stock_name: str) -> List[Any]:
+def _humanize_age(iso_ts: str) -> str:
+    """Convert ISO timestamp to '剛剛 / N 分鐘前 / N 小時前 / HH:MM'."""
+    if not iso_ts:
+        return ""
+    try:
+        from datetime import datetime, timezone, timedelta
+        ts = datetime.fromisoformat(iso_ts)
+        now = datetime.now(ts.tzinfo or timezone(timedelta(hours=8)))
+        delta = now - ts
+        secs = int(delta.total_seconds())
+    except (ValueError, TypeError):
+        return iso_ts[11:16] if len(iso_ts) >= 16 else ""
+    if secs < 60:
+        return "剛剛"
+    if secs < 3600:
+        return f"{secs // 60} 分鐘前"
+    if secs < 24 * 3600:
+        return f"{secs // 3600} 小時前"
+    return iso_ts[5:10] if len(iso_ts) >= 10 else ""
+
+
+def _render_ai_panel(
+    advisor: Advisor,
+    stock_id: str,
+    stock_name: str,
+    coverage: Optional[dict] = None,
+) -> List[Any]:
     """Render the Phase 5 AI advisor right-rail panel."""
     score = float(advisor.overall_score)
     stance_cls = _advisor_pill_class(advisor.stance)
@@ -2899,6 +3001,7 @@ def _render_ai_panel(advisor: Advisor, stock_id: str, stock_name: str) -> List[A
                         html.Span(f"{confidence_pct}%", className="num ai-confidence-value"),
                     ],
                 ),
+                _render_coverage_strip(coverage) if coverage else html.Div(),
             ],
         ),
         html.Div(
@@ -3016,10 +3119,11 @@ def _render_advisor_canvas(
     fundamentals: Optional[FundamentalsSnapshot],
     daily_closes: Optional[List[float]] = None,
     daily_ohlc: Optional[List[Tuple[float, float, float]]] = None,
+    coverage: Optional[dict] = None,
 ) -> List[Any]:
     """Phase 6 — Variant AI-2 full-canvas renderer."""
     return [
-        _render_advisor_hero(advisor, stock_id, stock_name, quote),
+        _render_advisor_hero(advisor, stock_id, stock_name, quote, coverage),
         html.Div(
             id="advisor-grid",
             className="advisor-grid",
@@ -3044,6 +3148,7 @@ def _render_advisor_hero(
     stock_id: str,
     stock_name: str,
     quote: Optional[RealtimeQuote],
+    coverage: Optional[dict] = None,
 ) -> html.Div:
     score = float(advisor.overall_score)
     stance_cls = _advisor_pill_class(advisor.stance)
@@ -3089,6 +3194,7 @@ def _render_advisor_hero(
                             html.Span(pct_text, className=f"num advisor-hero-change {price_cls}"),
                         ],
                     ),
+                    _render_coverage_strip(coverage) if coverage else html.Div(),
                 ],
             ),
             html.Div(className="advisor-hero-spacer"),
@@ -4886,27 +4992,40 @@ def _render_chip_kpi_card(card: ChipKpiCard) -> html.Div:
 
 
 def _render_fundamentals_strip(fund: FundamentalsSnapshot) -> html.Div:
-    """Three-cell fundamentals strip below the chip KPI cards."""
-    return html.Div(
-        className="fund-strip",
-        children=[
-            _fund_cell(
-                _period_label("EPS", fund.eps_period),
-                _fmt_optional(fund.eps_q, "{:.2f}"),
-                _fmt_optional(fund.eps_yoy, "{:+.0f}% YoY"),
-            ),
-            _fund_cell(
-                "毛利率",
-                _fmt_optional(fund.gross_margin, "{:.1f}%"),
-                _fmt_optional(fund.gm_delta, "{:+.1f} PP"),
-            ),
-            _fund_cell(
-                "本益比",
-                _fmt_optional(fund.pe, "{:.1f}x"),
-                _fmt_optional(fund.pe_avg, "vs avg {:.1f}"),
-            ),
-        ],
-    )
+    """Three-cell fundamentals strip below the chip KPI cards.
+
+    Phase 7.5 — when ``fund.is_stale`` is True (network failed → fell
+    back to old disk cache), prepend a small badge so the user knows
+    the numbers may be out of date.
+    """
+    cells = [
+        _fund_cell(
+            _period_label("EPS", fund.eps_period),
+            _fmt_optional(fund.eps_q, "{:.2f}"),
+            _fmt_optional(fund.eps_yoy, "{:+.0f}% YoY"),
+        ),
+        _fund_cell(
+            "毛利率",
+            _fmt_optional(fund.gross_margin, "{:.1f}%"),
+            _fmt_optional(fund.gm_delta, "{:+.1f} PP"),
+        ),
+        _fund_cell(
+            "本益比",
+            _fmt_optional(fund.pe, "{:.1f}x"),
+            _fmt_optional(fund.pe_avg, "vs avg {:.1f}"),
+        ),
+    ]
+    children: List[Any] = []
+    if fund.is_stale and fund.fetched_at:
+        from datetime import datetime, timezone, timedelta
+        ts = datetime.fromtimestamp(fund.fetched_at, tz=timezone(timedelta(hours=8)))
+        children.append(html.Div(
+            f"⚠ 基本面資料離線（最後更新 {ts.strftime('%m-%d %H:%M')}）",
+            className="fund-stale-badge",
+            title="網路失敗，使用最近一次成功取得的資料",
+        ))
+    children.extend(cells)
+    return html.Div(children, className="fund-strip" + (" fund-strip-stale" if fund.is_stale else ""))
 
 
 def _fund_cell(label: str, value: str, note: str) -> html.Div:

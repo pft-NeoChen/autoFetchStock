@@ -168,12 +168,12 @@ def get_fundamentals(stock_id: Optional[str]) -> FundamentalsSnapshot:
 
     cached = _CACHE.get(stock_id)
     if cached and now - cached[0] < CACHE_TTL_SECONDS:
-        return cached[1]
+        return _stamp(cached[1], cached[0], stale=False)
 
     disk = _load_from_disk(stock_id)
     if disk is not None:
         _CACHE[stock_id] = disk
-        return disk[1]
+        return _stamp(disk[1], disk[0], stale=False)
 
     snapshot = _fetch_network(stock_id)
     if snapshot is None:
@@ -181,12 +181,29 @@ def get_fundamentals(stock_id: Optional[str]) -> FundamentalsSnapshot:
         if stale is not None:
             logger.info("fundamentals network failed for %s, using stale disk cache", stock_id)
             _CACHE[stock_id] = stale
-            return stale[1]
+            return _stamp(stale[1], stale[0], stale=True)
         return FundamentalsSnapshot()
 
     _CACHE[stock_id] = (now, snapshot)
     _save_to_disk(stock_id, now, snapshot)
-    return snapshot
+    return _stamp(snapshot, now, stale=False)
+
+
+def _stamp(snapshot: FundamentalsSnapshot, fetched_at: float, *, stale: bool) -> FundamentalsSnapshot:
+    """Attach freshness metadata without mutating cached snapshots."""
+    return FundamentalsSnapshot(
+        eps_q=snapshot.eps_q,
+        eps_yoy=snapshot.eps_yoy,
+        gross_margin=snapshot.gross_margin,
+        gm_delta=snapshot.gm_delta,
+        pe=snapshot.pe,
+        pe_avg=snapshot.pe_avg,
+        eps_period=snapshot.eps_period,
+        gross_margin_period=snapshot.gross_margin_period,
+        pe_period=snapshot.pe_period,
+        is_stale=stale,
+        fetched_at=fetched_at,
+    )
 
 
 def _fetch_network(stock_id: str) -> Optional[FundamentalsSnapshot]:

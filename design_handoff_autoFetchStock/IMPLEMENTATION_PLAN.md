@@ -85,11 +85,36 @@ Added during Phase 6.2 review. These gaps surfaced while building the
       Env vars: `ADVISOR_LLM_ENABLED`, `ADVISOR_DAILY_QUOTA`,
       `ADVISOR_CACHE_TTL_MIN`, `ADVISOR_WARMUP_INTERVAL_MIN`.
 
-### 7.5 Dynamic TTL based on intraday volatility (backlog)
+### 7.5 Advisor freshness + UX clarity (5-pack)
 
-Current TTL is fixed 30 min. No volatility detection exists today
-(`change_percent` is just price-vs-prev-close). After a week of
-`logs/advisor_quota.jsonl` data, decide whether to:
+Five small, independent improvements landing together:
+
+- [x] **A. Real `delta vs 昨日`** — `src/data/advisor_history.py` records
+      one `{date, score}` row per stock per day; `_stamp_delta()` in
+      `advisor.py` overwrites the synthetic placeholder at render time.
+      First-time stocks show "首次分析"; subsequent days show actual
+      score diff.
+- [x] **C. Post-close + evening warmup** — three cron bands instead of
+      one: intraday Mon-Fri 09-13 / N min, post-close 14:30, evening
+      21:00 (daily). Quota check inside `advisor.warmup` short-circuits
+      when budget exhausted, so adding slots is safe.
+- [x] **D. Source badge freshness** — `LLM · 12 分鐘前` / `規則式 · 剛剛`
+      via `_humanize_age()`; tooltip shows full ISO timestamp.
+- [x] **F. Coverage strip** — `_compute_advisor_coverage()` measures
+      input completeness (news count, chip non-empty, fund non-null,
+      tech threshold) and `_render_coverage_strip()` shows a small
+      pill row under confidence + below the canvas hero so users see
+      *why* a score is low confidence.
+- [x] **G. Fundamentals stale UI** — `FundamentalsSnapshot.is_stale`
+      and `fetched_at` flagged when `get_fundamentals` falls back to
+      old disk cache after a network failure; strip shows `⚠ 基本面
+      資料離線（最後更新 ...）` so the numbers can't be misread as live.
+
+### 7.6 Dynamic TTL based on intraday volatility (backlog)
+
+Original 7.5. Re-deferred until `logs/advisor_quota.jsonl` shows
+sustained quota pressure that the 7.5 multi-band warmup can't absorb.
+Approach when revisited:
 - Add intraday volume ratio + change_pct threshold
 - Shorten TTL to 10 min when `abs(change_pct) > 3%` OR `vol_ratio > 2`
 - Otherwise keep 30 min

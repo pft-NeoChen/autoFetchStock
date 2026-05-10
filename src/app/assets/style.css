@@ -4580,3 +4580,72 @@ textarea:focus-visible,
     font-size: 12px;
     color: var(--txt-2);
 }
+
+/* Phase 7.5 — fundamentals stale fallback badge */
+
+.fund-stale-badge {
+    grid-column: 1 / -1;
+    padding: 4px 10px;
+    margin-bottom: 6px;
+    background: rgba(255, 152, 0, 0.10);
+    border: 1px solid rgba(255, 152, 0, 0.4);
+    border-radius: 6px;
+    color: #FFB74D;
+    font-size: 11px;
+    text-align: center;
+    cursor: help;
+}
+
+.fund-strip-stale {
+    opacity: 0.85;
+}
+
+/* Phase 7.5 — advisor coverage strip (4-dimension data freshness) */
+
+.ai-coverage-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.08);
+    cursor: help;
+}
+
+.ai-coverage-label {
+    font-size: 10px;
+    color: var(--txt-3);
+    margin-right: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.ai-coverage-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 500;
+    border: 1px solid transparent;
+    line-height: 1.4;
+}
+
+.ai-coverage-pill.cov-ok {
+    background: rgba(38, 166, 154, 0.12);
+    color: #4DD0C7;
+    border-color: rgba(38, 166, 154, 0.35);
+}
+
+.ai-coverage-pill.cov-partial {
+    background: rgba(255, 193, 7, 0.10);
+    color: #FFD54F;
+    border-color: rgba(255, 193, 7, 0.35);
+}
+
+.ai-coverage-pill.cov-missing {
+    background: rgba(239, 83, 80, 0.10);
+    color: #EF9A9A;
+    border-color: rgba(239, 83, 80, 0.35);
+}

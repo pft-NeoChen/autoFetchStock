@@ -20,6 +20,7 @@ _TZ_TAIPEI = timezone(timedelta(hours=8))
 
 def _now_iso() -> str:
     return datetime.now(_TZ_TAIPEI).isoformat(timespec="seconds")
+from src.data import advisor_history
 from src.data.advisor_cache import AdvisorCache, compute_key
 from src.data.advisor_llm import AdvisorLLM
 from src.data.advisor_quota import AdvisorQuota
@@ -70,6 +71,7 @@ def configure(config: AppConfig) -> None:
     global _runtime
     with _runtime_lock:
         _runtime = _AdvisorRuntime(config)
+        advisor_history.configure(config.data_dir)
         logger.info(
             "advisor configured: llm=%s ttl=%dm quota=%d",
             _runtime.enabled,
@@ -119,9 +121,9 @@ def build_advisor(
         if cached is not None:
             if used_cache:
                 logger.debug("advisor cache hit [%s]", stock_id)
-            return cached
+            return _stamp_delta(cached, stock_id, record=not used_cache)
 
-    return _heuristic_advisor(
+    advisor = _heuristic_advisor(
         stock_id,
         articles=arts,
         chip_cards=cards,
@@ -129,6 +131,22 @@ def build_advisor(
         quote=quote,
         daily_closes=closes,
     )
+    return _stamp_delta(advisor, stock_id, record=True)
+
+
+def _stamp_delta(advisor: Advisor, stock_id: Optional[str], *, record: bool) -> Advisor:
+    """Phase 7.5 — overwrite synthetic delta with vs-yesterday diff from history."""
+    if not stock_id:
+        return advisor
+    prev = advisor_history.previous_score(stock_id)
+    if prev is None:
+        advisor.delta = "首次分析"
+    else:
+        diff = advisor.overall_score - prev
+        advisor.delta = f"{diff:+.1f} vs 昨日"
+    if record:
+        advisor_history.record_score(stock_id, advisor.overall_score)
+    return advisor
 
 
 def warmup(
@@ -157,7 +175,10 @@ def warmup(
         trigger="warmup",
         force_miss=True,
     )
-    return advisor is not None and not used_cache
+    if advisor is not None and not used_cache:
+        advisor_history.record_score(stock_id, advisor.overall_score)
+        return True
+    return False
 
 
 def _try_llm_path(

@@ -478,13 +478,18 @@ class Scheduler:
         warmup_callback: Callable[[], object],
         interval_minutes: int,
     ) -> bool:
-        """Pre-warm advisor cache for watchlist stocks every N minutes.
+        """Pre-warm advisor cache for watchlist stocks.
 
-        Runs only during trading hours (Mon-Fri 09:00-13:30 Asia/Taipei)
-        so we don't burn quota when nothing is moving. The callback is
-        responsible for iterating watchlist stocks and calling
-        ``advisor.warmup()`` per stock — quota / cache logic lives there.
+        Phase 7.5 — three time bands:
+        - Intraday (Mon-Fri 09-13): every ``interval_minutes`` while market open
+        - Post-close (Mon-Fri 14:30): one pass right after the auction close
+        - Evening (daily 21:00): one pass for users who check after dinner
+
+        Quota check happens inside the callback (``advisor.warmup``) so an
+        exhausted day silently no-ops; we don't need to throttle here.
         """
+        success = True
+
         try:
             self._scheduler.add_job(
                 self._advisor_warmup_job,
@@ -494,19 +499,56 @@ class Scheduler:
                     minute=f"*/{max(1, int(interval_minutes))}",
                     timezone=TW_TIMEZONE,
                 ),
-                id="advisor_warmup",
+                id="advisor_warmup_intraday",
                 kwargs={"warmup_callback": warmup_callback},
-                name="Advisor LLM warmup",
+                name="Advisor LLM warmup (intraday)",
                 replace_existing=True,
             )
+        except Exception as e:
+            logger.error(f"Failed to register advisor intraday warmup job: {e}")
+            success = False
+
+        try:
+            self._scheduler.add_job(
+                self._advisor_warmup_job,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=14,
+                    minute=30,
+                    timezone=TW_TIMEZONE,
+                ),
+                id="advisor_warmup_postclose",
+                kwargs={"warmup_callback": warmup_callback},
+                name="Advisor LLM warmup (post-close)",
+                replace_existing=True,
+            )
+        except Exception as e:
+            logger.error(f"Failed to register advisor post-close warmup job: {e}")
+            success = False
+
+        try:
+            self._scheduler.add_job(
+                self._advisor_warmup_job,
+                trigger=CronTrigger(
+                    hour=21,
+                    minute=0,
+                    timezone=TW_TIMEZONE,
+                ),
+                id="advisor_warmup_evening",
+                kwargs={"warmup_callback": warmup_callback},
+                name="Advisor LLM warmup (evening)",
+                replace_existing=True,
+            )
+        except Exception as e:
+            logger.error(f"Failed to register advisor evening warmup job: {e}")
+            success = False
+
+        if success:
             logger.info(
-                "Registered advisor warmup job (Mon-Fri 09-13, every %d min)",
+                "Registered advisor warmup jobs: intraday Mon-Fri 09-13/%dmin, post-close 14:30, evening 21:00",
                 interval_minutes,
             )
-            return True
-        except Exception as e:
-            logger.error(f"Failed to register advisor warmup job: {e}")
-            return False
+        return success
 
     def _advisor_warmup_job(self, warmup_callback: Callable[[], object]) -> None:
         logger.debug("Starting scheduled advisor warmup")

@@ -419,6 +419,8 @@ class FundamentalsSnapshot:
     eps_period: str = ""
     gross_margin_period: str = ""
     pe_period: str = ""
+    is_stale: bool = False             # True when network failed and we fell back to old disk cache
+    fetched_at: float = 0.0            # unix ts of underlying fetch (0 = unknown / empty)
 
 
 # ─── Phase 5 — AI Advisor models ────────────────────────────────────────
