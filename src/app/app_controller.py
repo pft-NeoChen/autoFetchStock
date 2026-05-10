@@ -44,6 +44,9 @@ class AppController:
     REQ-073 (history load), REQ-080 (performance).
     """
 
+    _TPEX_T86_SENTINEL_IDS = ("3081", "3363", "3163", "6187")
+    _TPEX_MARGIN_SENTINEL_IDS = ("3081", "3363", "3163", "6187")
+
     def __init__(self, config: AppConfig = None):
         """
         Initialize application controller.
@@ -248,65 +251,108 @@ class AppController:
             return []
 
     def _run_chips_t86_fetch(self) -> None:
-        """Scheduled-job body: fetch today's T86 and MI_MARGN, persist."""
+        """Scheduled-job body: fetch today's T86 + MI_MARGN from both
+        TWSE (上市) and TPEX (上櫃) and persist as a single merged daily
+        snapshot. Stock IDs do not collide across markets so a flat dict
+        union is safe. Phase 7.2: TPEX coverage so small-cap OTC names
+        (e.g. 聯亞 3081) surface real chip data.
+        """
         from datetime import date as _date
         today = _date.today()
+
+        # ── T86 (三大法人買賣超) ────────────────────────────────────
+        merged_t86: dict = {}
         try:
-            snap = self.chips_fetcher.fetch_t86(today)
-            if snap:
-                self.chips_storage.save_t86_snapshot(today, snap)
-                logger.info("Scheduled chips T86: saved %s (%d stocks)", today, len(snap))
-            else:
-                logger.info("Scheduled chips T86: no data for %s yet", today)
+            twse = self.chips_fetcher.fetch_t86(today)
+            if twse:
+                merged_t86.update(twse)
         except Exception as exc:
-            logger.warning("Scheduled chips T86 fetch failed: %s", exc)
+            logger.warning("Scheduled chips TWSE T86 fetch failed: %s", exc)
         try:
-            margin = self.chips_fetcher.fetch_margin(today)
-            if margin:
-                self.chips_storage.save_margin_snapshot(today, margin)
-                logger.info("Scheduled MI_MARGN: saved %s (%d stocks)", today, len(margin))
-            else:
-                logger.info("Scheduled MI_MARGN: no data for %s yet", today)
+            tpex = self.chips_fetcher.fetch_tpex_t86(today)
+            if tpex:
+                merged_t86.update(tpex)
         except Exception as exc:
-            logger.warning("Scheduled MI_MARGN fetch failed: %s", exc)
+            logger.warning("Scheduled chips TPEX T86 fetch failed: %s", exc)
+        if merged_t86:
+            self.chips_storage.save_t86_snapshot(today, merged_t86)
+            logger.info(
+                "Scheduled chips T86: saved %s (%d stocks across TWSE+TPEX)",
+                today, len(merged_t86),
+            )
+        else:
+            logger.info("Scheduled chips T86: no data for %s yet", today)
+
+        # ── MI_MARGN (融資融券餘額) ─────────────────────────────────
+        merged_margin: dict = {}
+        try:
+            twse_m = self.chips_fetcher.fetch_margin(today)
+            if twse_m:
+                merged_margin.update(twse_m)
+        except Exception as exc:
+            logger.warning("Scheduled MI_MARGN TWSE fetch failed: %s", exc)
+        try:
+            tpex_m = self.chips_fetcher.fetch_tpex_margin(today)
+            if tpex_m:
+                merged_margin.update(tpex_m)
+        except Exception as exc:
+            logger.warning("Scheduled MI_MARGN TPEX fetch failed: %s", exc)
+        if merged_margin:
+            self.chips_storage.save_margin_snapshot(today, merged_margin)
+            logger.info(
+                "Scheduled MI_MARGN: saved %s (%d stocks across TWSE+TPEX)",
+                today, len(merged_margin),
+            )
+        else:
+            logger.info("Scheduled MI_MARGN: no data for %s yet", today)
 
     def _catchup_chips_t86(self) -> None:
-        """Backfill the most recent T86 snapshot if storage is empty.
+        """Backfill or repair the most recent T86 snapshot on startup.
 
         Runs in a background thread so the app can boot immediately;
         TWSE responses can take a few seconds and we don't want to
         block the Dash dev server. Walks back up to 7 calendar days
-        to land on the last actual trading day.
+        to land on the last actual trading day. Existing snapshots from
+        before TPEX support are repaired by merging in TPEX rows.
         """
         import threading
-        from datetime import date as _date
 
-        need_t86 = self.chips_storage.latest_snapshot_date() is None
-        need_margin = self.chips_storage.latest_margin_date() is None
-        if not need_t86 and not need_margin:
+        latest_t86_date = self.chips_storage.latest_snapshot_date()
+        latest_margin_date = self.chips_storage.latest_margin_date()
+        need_t86 = latest_t86_date is None
+        repair_tpex_t86 = (
+            latest_t86_date is not None
+            and self._t86_snapshot_needs_tpex_repair(latest_t86_date)
+        )
+        need_margin = latest_margin_date is None
+        repair_tpex_margin = (
+            latest_margin_date is not None
+            and self._margin_snapshot_needs_tpex_repair(latest_margin_date)
+        )
+        if not need_t86 and not repair_tpex_t86 and not need_margin and not repair_tpex_margin:
             return
 
         def _run() -> None:
             if need_t86:
                 try:
-                    result = self.chips_fetcher.latest_available()
-                    if result:
-                        snap_date, by_stock = result
-                        self.chips_storage.save_t86_snapshot(snap_date, by_stock)
-                        logger.info(
-                            "Chips T86 catch-up saved snapshot for %s (%d stocks)",
-                            snap_date,
-                            len(by_stock),
-                        )
-                    else:
-                        logger.info("Chips T86 catch-up: no snapshot in last 7 days")
+                    self._catchup_t86_merged()
                 except Exception as exc:
                     logger.warning("Chips T86 catch-up failed: %s", exc)
+            elif repair_tpex_t86:
+                try:
+                    self._repair_t86_tpex_snapshot(latest_t86_date)
+                except Exception as exc:
+                    logger.warning("Chips T86 TPEX repair failed: %s", exc)
             if need_margin:
                 try:
                     self._catchup_margin_window()
                 except Exception as exc:
                     logger.warning("MI_MARGN catch-up failed: %s", exc)
+            elif repair_tpex_margin:
+                try:
+                    self._repair_margin_tpex_snapshot(latest_margin_date)
+                except Exception as exc:
+                    logger.warning("MI_MARGN TPEX repair failed: %s", exc)
 
         threading.Thread(
             target=_run,
@@ -314,9 +360,119 @@ class AppController:
             daemon=True,
         ).start()
 
+    def _t86_snapshot_needs_tpex_repair(self, snapshot_date) -> bool:
+        """Return True when the latest T86 cache appears to miss TPEX rows."""
+        snapshot = self.chips_storage.load_t86_day(snapshot_date)
+        if not snapshot:
+            return True
+        return not any(sid in snapshot for sid in self._TPEX_T86_SENTINEL_IDS)
+
+    def _repair_t86_tpex_snapshot(self, snapshot_date) -> None:
+        """Merge TPEX T86 rows into an existing daily cache file."""
+        existing = self.chips_storage.load_t86_day(snapshot_date) or {}
+        tpex = self.chips_fetcher.fetch_tpex_t86(snapshot_date)
+        if tpex is None:
+            logger.info("Chips T86 TPEX repair: fetch failed for %s", snapshot_date)
+            return
+        if not tpex:
+            logger.info("Chips T86 TPEX repair: no TPEX rows for %s", snapshot_date)
+            return
+
+        merged = dict(existing)
+        changed = False
+        new_rows = 0
+        for stock_id, row in tpex.items():
+            if stock_id not in merged:
+                new_rows += 1
+            if merged.get(stock_id) != row:
+                merged[stock_id] = row
+                changed = True
+
+        if not changed:
+            logger.info("Chips T86 TPEX repair: snapshot already complete for %s", snapshot_date)
+            return
+
+        self.chips_storage.save_t86_snapshot(snapshot_date, merged)
+        logger.info(
+            "Chips T86 TPEX repair saved snapshot for %s (%d TPEX rows, %d new, %d total)",
+            snapshot_date, len(tpex), new_rows, len(merged),
+        )
+
+    def _margin_snapshot_needs_tpex_repair(self, snapshot_date) -> bool:
+        """Return True when the latest MI_MARGN cache appears to miss TPEX rows."""
+        snapshot = self.chips_storage.load_margin_day(snapshot_date)
+        if not snapshot:
+            return True
+        return not any(sid in snapshot for sid in self._TPEX_MARGIN_SENTINEL_IDS)
+
+    def _repair_margin_tpex_snapshot(self, snapshot_date) -> None:
+        """Merge TPEX MI_MARGN rows into an existing daily cache file."""
+        existing = self.chips_storage.load_margin_day(snapshot_date) or {}
+        tpex = self.chips_fetcher.fetch_tpex_margin(snapshot_date)
+        if tpex is None:
+            logger.info("MI_MARGN TPEX repair: fetch failed for %s", snapshot_date)
+            return
+        if not tpex:
+            logger.info("MI_MARGN TPEX repair: no TPEX rows for %s", snapshot_date)
+            return
+
+        merged = dict(existing)
+        changed = False
+        new_rows = 0
+        for stock_id, row in tpex.items():
+            if stock_id not in merged:
+                new_rows += 1
+            if merged.get(stock_id) != row:
+                merged[stock_id] = row
+                changed = True
+
+        if not changed:
+            logger.info("MI_MARGN TPEX repair: snapshot already complete for %s", snapshot_date)
+            return
+
+        self.chips_storage.save_margin_snapshot(snapshot_date, merged)
+        logger.info(
+            "MI_MARGN TPEX repair saved snapshot for %s (%d TPEX rows, %d new, %d total)",
+            snapshot_date, len(tpex), new_rows, len(merged),
+        )
+
+    def _catchup_t86_merged(self, max_lookback_days: int = 7) -> None:
+        """Walk back day-by-day to find the most recent T86 snapshot,
+        fetching TWSE + TPEX in parallel and merging both before save.
+        Runs only when storage holds nothing.
+        """
+        from datetime import date as _date, timedelta as _td
+
+        cur = _date.today()
+        for _ in range(max_lookback_days + 1):
+            merged: dict = {}
+            try:
+                twse = self.chips_fetcher.fetch_t86(cur)
+                if twse:
+                    merged.update(twse)
+            except Exception as exc:
+                logger.debug("T86 catch-up TWSE %s failed: %s", cur, exc)
+            try:
+                tpex = self.chips_fetcher.fetch_tpex_t86(cur)
+                if tpex:
+                    merged.update(tpex)
+            except Exception as exc:
+                logger.debug("T86 catch-up TPEX %s failed: %s", cur, exc)
+
+            if merged:
+                self.chips_storage.save_t86_snapshot(cur, merged)
+                logger.info(
+                    "Chips T86 catch-up saved snapshot for %s (%d stocks across TWSE+TPEX)",
+                    cur, len(merged),
+                )
+                return
+            cur -= _td(days=1)
+        logger.info("Chips T86 catch-up: no snapshot in last %d days", max_lookback_days)
+
     def _catchup_margin_window(self, max_days: int = 25) -> None:
-        """Walk back day-by-day collecting MI_MARGN snapshots until the
-        storage holds ~20 trading days. Runs only when storage is empty.
+        """Walk back day-by-day collecting MI_MARGN snapshots (TWSE +
+        TPEX merged) until the storage holds ~20 trading days. Runs only
+        when storage is empty.
         """
         from datetime import date as _date, timedelta as _td
 
@@ -325,16 +481,24 @@ class AppController:
         for _ in range(max_days):
             if saved >= 20:
                 break
+            merged: dict = {}
             try:
-                margin = self.chips_fetcher.fetch_margin(cur)
+                twse_m = self.chips_fetcher.fetch_margin(cur)
+                if twse_m:
+                    merged.update(twse_m)
             except Exception as exc:
-                logger.debug("MI_MARGN catch-up day %s failed: %s", cur, exc)
-                margin = None
-            if margin:
-                self.chips_storage.save_margin_snapshot(cur, margin)
+                logger.debug("MI_MARGN catch-up TWSE %s failed: %s", cur, exc)
+            try:
+                tpex_m = self.chips_fetcher.fetch_tpex_margin(cur)
+                if tpex_m:
+                    merged.update(tpex_m)
+            except Exception as exc:
+                logger.debug("MI_MARGN catch-up TPEX %s failed: %s", cur, exc)
+            if merged:
+                self.chips_storage.save_margin_snapshot(cur, merged)
                 saved += 1
             cur -= _td(days=1)
-        logger.info("MI_MARGN catch-up saved %d days", saved)
+        logger.info("MI_MARGN catch-up saved %d days (TWSE+TPEX merged)", saved)
 
     def _catchup_news_event_timeline(self) -> None:
         """Run the daily event timeline build if it was missed today.

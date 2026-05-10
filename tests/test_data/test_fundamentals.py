@@ -1,6 +1,10 @@
-"""Tests for TWSE fundamentals parsing."""
+"""Tests for fundamentals parsing."""
 
-from src.data.fundamentals import _parse_twse_iih_financial
+from src.data.fundamentals import (
+    _parse_mops_compare_data,
+    _parse_tpex_pe_payload,
+    _parse_twse_iih_financial,
+)
 
 
 def test_parse_twse_iih_financial_extracts_latest_snapshot():
@@ -42,3 +46,41 @@ def test_parse_twse_iih_financial_returns_empty_snapshot_on_error_status():
     assert snapshot.eps_q is None
     assert snapshot.gross_margin is None
     assert snapshot.pe is None
+
+
+def test_parse_mops_compare_data_maps_indexed_points_to_categories():
+    values, cats = _parse_mops_compare_data(
+        {
+            "xaxisList": ["2025Q3", "2025Q4", "2026Q1"],
+            "graphData": [
+                {
+                    "data": [
+                        [0, 1.2, "A"],
+                        [2, 3.4, "A"],
+                    ]
+                }
+            ],
+        }
+    )
+
+    assert cats == ["2025Q3", "2025Q4", "2026Q1"]
+    assert values == [1.2, None, 3.4]
+
+
+def test_parse_tpex_pe_payload_extracts_target_stock():
+    pe, period = _parse_tpex_pe_payload(
+        {
+            "tables": [
+                {
+                    "data": [
+                        ["2330", "台積電", "25.1", "", "", "", "", "115Q1"],
+                        ["3081", "聯亞", "344.28", "", "", "", "", "115Q1"],
+                    ]
+                }
+            ]
+        },
+        "3081",
+    )
+
+    assert pe == 344.28
+    assert period == "115Q1"

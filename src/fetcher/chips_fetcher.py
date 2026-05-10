@@ -48,6 +48,11 @@ _FIELD_ALIASES: Dict[str, List[str]] = {
 }
 
 
+def _roc_date(d: date) -> str:
+    """Convert a Western-calendar ``date`` to TPEX's ROC ``yyy/mm/dd``."""
+    return f"{d.year - 1911}/{d.month:02d}/{d.day:02d}"
+
+
 # Margin trading (MI_MARGN) field aliases. TWSE has historically split the
 # day's payload into a "融資" (margin) block and "融券" (short) block. We
 # capture both balance pairs so the 籌碼 KPI cards (融資 + 融券) and the
@@ -77,6 +82,19 @@ class ChipsFetcher:
 
     T86_URL = "https://www.twse.com.tw/rwd/zh/fund/T86"
     MARGIN_URL = "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN"
+
+    # Phase 7.2 — TPEX (上櫃) coverage. Same overall data shape as the
+    # TWSE endpoints but the date param is in ROC year format (民國/月/日)
+    # and the schemas are positional in the 3insti case.
+    TPEX_T86_URL = (
+        "https://www.tpex.org.tw/web/stock/3insti/daily_trade/"
+        "3itrade_hedge_result.php"
+    )
+    TPEX_MARGIN_URL = (
+        "https://www.tpex.org.tw/web/stock/margin_trading/margin_balance/"
+        "margin_bal_result.php"
+    )
+
     REQUEST_INTERVAL = 3.0
     CONNECTION_TIMEOUT = 10
 
@@ -196,6 +214,152 @@ class ChipsFetcher:
                 continue
             out[rec["stock_id"]] = rec
         return out
+
+    # ── TPEX (上櫃) ──────────────────────────────────────────────────
+
+    def fetch_tpex_t86(self, target_date: date) -> Optional[Dict[str, dict]]:
+        """Fetch the TPEX 三大法人個股買賣超 snapshot for ``target_date``.
+
+        Output shape matches ``fetch_t86`` so both can be merged into the
+        same daily snapshot file. Net positions are converted to **股**
+        (shares) consistent with TWSE T86 — the chip KPI builder later
+        converts to 張. Uses positional column mapping because the TPEX
+        endpoint reuses ``買進股數``/``賣出股數``/``買賣超股數`` headers
+        across 7 investor groups.
+        """
+        params = {
+            "l": "zh-tw",
+            "d": _roc_date(target_date),
+            "s": "0,asc,0",
+        }
+        self._respect_rate_limit()
+        payload = self._get_json(self.TPEX_T86_URL, params, target_date, label="TPEX T86")
+        if payload is None:
+            return None
+
+        tables = payload.get("tables") or []
+        if not tables:
+            return {}
+        t = tables[0]
+        fields = t.get("fields") or []
+        rows = t.get("data") or []
+        if not fields or not rows:
+            return {}
+        if len(fields) < 24:
+            logger.warning(
+                "TPEX T86 schema unexpected on %s (cols=%d)",
+                target_date, len(fields),
+            )
+            return None
+
+        out: Dict[str, dict] = {}
+        for row in rows:
+            try:
+                rec = self._parse_tpex_t86_row(row)
+            except Exception as exc:
+                logger.debug("TPEX T86 row parse skipped: %s", exc)
+                continue
+            if rec is None:
+                continue
+            out[rec["stock_id"]] = rec
+        return out
+
+    def fetch_tpex_margin(self, target_date: date) -> Optional[Dict[str, dict]]:
+        """Fetch the TPEX 上櫃股票融資融券餘額 snapshot.
+
+        Schema field names are unique here (``資餘額`` / ``前資餘額(張)`` /
+        ``券餘額`` / ``前券餘額(張)``) so a name-based map is sufficient.
+        Returned shape matches ``fetch_margin``.
+        """
+        params = {
+            "l": "zh-tw",
+            "d": _roc_date(target_date),
+            "s": "0,asc,0",
+        }
+        self._respect_rate_limit()
+        payload = self._get_json(self.TPEX_MARGIN_URL, params, target_date, label="TPEX MARGIN")
+        if payload is None:
+            return None
+
+        tables = payload.get("tables") or []
+        if not tables:
+            return {}
+        t = tables[0]
+        fields = t.get("fields") or []
+        rows = t.get("data") or []
+        if not fields or not rows:
+            return {}
+
+        cleaned = [self._clean_header(f) for f in fields]
+        try:
+            idx = {
+                "stock_id":       cleaned.index("代號"),
+                "stock_name":     cleaned.index("名稱"),
+                "margin_prev":    cleaned.index("前資餘額(張)"),
+                "margin_balance": cleaned.index("資餘額"),
+                "short_prev":     cleaned.index("前券餘額(張)"),
+                "short_balance":  cleaned.index("券餘額"),
+            }
+        except ValueError as exc:
+            logger.warning(
+                "TPEX MARGIN schema unrecognised on %s: %s, headers=%r",
+                target_date, exc, fields,
+            )
+            return None
+
+        out: Dict[str, dict] = {}
+        for row in rows:
+            try:
+                rec = self._parse_margin_row(row, idx)
+            except Exception as exc:
+                logger.debug("TPEX MARGIN row parse skipped: %s", exc)
+                continue
+            if rec is None:
+                continue
+            out[rec["stock_id"]] = rec
+        return out
+
+    @staticmethod
+    def _parse_tpex_t86_row(row: List) -> Optional[dict]:
+        """Positional 24-col TPEX 3insti per-stock row.
+
+        Column groups (3 cols each — buy / sell / net):
+            0-1   : 代號, 名稱
+            2-4   : 外資及陸資合計
+            5-7   : 外資自營商
+            8-10  : 外資合計（不含外資自營商）
+            11-13 : 投信
+            14-16 : 自營商(自行買賣)
+            17-19 : 自營商(避險)
+            20-22 : 自營商合計
+            23    : 三大法人買賣超合計
+
+        For chip KPI parity with TWSE T86 we keep:
+            foreign_net = col 4  (外資及陸資合計買賣超)
+            trust_net   = col 13 (投信買賣超)
+            dealer_net  = col 22 (自營商合計買賣超)
+            all_net     = col 23
+        """
+        if len(row) < 24:
+            return None
+        sid = (str(row[0]) or "").strip()
+        if not sid:
+            return None
+
+        def to_int(s) -> int:
+            try:
+                return int(str(s).replace(",", "").replace(" ", "").strip() or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        return {
+            "stock_id":    sid,
+            "stock_name":  (str(row[1]) or "").strip(),
+            "foreign_net": to_int(row[4]),
+            "trust_net":   to_int(row[13]),
+            "dealer_net":  to_int(row[22]),
+            "all_net":     to_int(row[23]),
+        }
 
     def latest_available(
         self,
