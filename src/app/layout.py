@@ -284,13 +284,13 @@ def _create_hidden_components() -> html.Div:
                 disabled=False,
             ),
 
-            # MarketStrip refresh (5s). Local 3 indices via Shioaji
-            # snapshots — no rate limit. Foreign 4 via yfinance with
-            # an internal 30s TTL cache, so 5s callback won't actually
-            # poll yfinance more often.
+            # MarketStrip refresh (2s). Local indices/futures are pushed via
+            # Shioaji tick streams into IndexFetcher's in-memory cache, so
+            # the callback reads cache only — no broker hit per tick.
+            # Foreign indices still honour yfinance's 30s TTL cache.
             dcc.Interval(
                 id="market-strip-interval",
-                interval=5 * 1000,
+                interval=1 * 1000,
                 n_intervals=0,
                 disabled=False,
             ),
@@ -317,15 +317,30 @@ def _create_nav_bar() -> html.Div:
 
 
 def _create_market_strip() -> html.Div:
-    """Phase 3.5 — top global market index ribbon (28px).
-
-    Container only; populated by the `update_market_strip` callback that
-    fires every 30s. See atoms.jsx::MarketStrip for the visual contract.
+    """Header MarketStrip — keeps the indices the user didn't ask to move
+    (台50 / 美元 / 金價 / WTI / VIX). Populated by ``update_market_strip``.
     """
     return html.Div(
         id="market-strip",
         className="market-strip",
         children=[],  # filled by callback
+    )
+
+
+def _create_below_chart_strip() -> html.Div:
+    """Two-row MarketStrip mounted below the chart tabs.
+
+    Row 1 follows the TWSE session (加權 / 櫃買 / 台指近 / 台指近全).
+    Row 2 holds the foreign references the user added (S&P 500 / 納斯達克 / 費半).
+    Both rows are filled by ``update_market_strip``.
+    """
+    return html.Div(
+        id="market-strip-below",
+        className="market-strip-below",
+        children=[
+            html.Div(id="market-strip-below-row1", className="market-strip-row"),
+            html.Div(id="market-strip-below-row2", className="market-strip-row"),
+        ],
     )
 
 
@@ -849,6 +864,8 @@ def _create_tabs_section() -> html.Div:
                     ),
                 ]
             ),
+            # Two-row MarketStrip mounted directly under the chart.
+            _create_below_chart_strip(),
         ]
     )
 

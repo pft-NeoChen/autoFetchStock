@@ -16,6 +16,16 @@ from src.models import RealtimeQuote, IntradayTick, DailyOHLC, PriceDirection
 
 logger = get_logger("autofetchstock.fetcher")
 
+
+def _to_float_or_none(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class ShioajiFetcher:
     """
     Singleton fetcher for Shioaji API.
@@ -47,6 +57,10 @@ class ShioajiFetcher:
         self._quote_subscribed: set[str] = set()  # Stocks with QuoteType.Quote subscription
         self._on_quote_callback: Optional[Callable[[RealtimeQuote], None]] = None
         self._on_tick_callback: Optional[Callable[[IntradayTick], None]] = None
+        # MarketStrip — symbol→reference cache and tick handler for index/future streams.
+        self._index_subscribed: set[str] = set()
+        self._index_reference: Dict[str, float] = {}
+        self._index_tick_handler: Optional[Callable[[str, float, float, Optional[float], Optional[float], Optional[float]], None]] = None
         
         self._initialized = True
         logger.info(f"ShioajiFetcher initialized (Simulation: {self.config.shioaji_simulation})")
@@ -131,6 +145,14 @@ class ShioajiFetcher:
             self.api.quote.set_on_bidask_stk_v1_callback(self._handle_bidask)
             self.api.quote.set_event_callback(self._handle_event)
             self.api.set_session_down_callback(self._handle_session_down)
+
+            # MarketStrip — FOP tick stream for TXF futures used by the
+            # below-chart strip (台指近 / 台指近全). Failure tolerated:
+            # IndexFetcher falls back to snapshots() if no ticks land.
+            try:
+                self.api.quote.set_on_tick_fop_v1_callback(self._handle_fop_tick)
+            except Exception as exc:
+                logger.debug("set_on_tick_fop_v1_callback unavailable: %s", exc)
             
             self.is_connected = True
             return True
@@ -437,6 +459,75 @@ class ShioajiFetcher:
         """Get the last received bid/ask five-level data for a stock."""
         return self._last_bidask.get(stock_id)
         
+    # ── MarketStrip: index / futures streaming ─────────────────────
+
+    def register_index_tick_handler(self, handler: Callable) -> None:
+        """Register IndexFetcher's tick callback. Called on every tick from
+        subscribed Indexs (stk callback) or Futures (fop callback).
+
+        Signature: (symbol, close, reference, change_price, change_rate, total_amount).
+        """
+        self._index_tick_handler = handler
+
+    def subscribe_index_or_future(self, contract, kind: str) -> None:
+        """Subscribe to a tick stream for an index or futures contract.
+
+        Idempotent per contract code. Failures are logged at debug and
+        tolerated — the IndexFetcher's snapshot fallback covers gaps.
+        """
+        code = getattr(contract, "code", None)
+        if not code:
+            return
+        if code in self._index_subscribed:
+            return
+        try:
+            # Cache reference price so the tick handler can compute change/pct
+            # when the tick payload itself doesn't carry it.
+            ref = float(getattr(contract, "reference", 0) or 0)
+            if ref > 0:
+                self._index_reference[code] = ref
+            # Also map continuous-contract aliases (TXFR1) → reference, so
+            # ticks delivered under either code path route correctly.
+            for alias in (getattr(contract, "symbol", None), getattr(contract, "category", None)):
+                if alias and isinstance(alias, str):
+                    self._index_subscribed.add(alias)
+                    if ref > 0:
+                        self._index_reference[alias] = ref
+
+            self.api.quote.subscribe(
+                contract,
+                quote_type=sj.constant.QuoteType.Tick,
+                version=QuoteVersion.v1,
+            )
+            self._index_subscribed.add(code)
+            logger.info(
+                f"MarketStrip: subscribed {kind}/{code} ref={ref}"
+            )
+        except Exception as exc:
+            logger.debug(f"MarketStrip subscribe {kind}/{code} failed: {exc}")
+
+    def _handle_fop_tick(self, exchange, tick):
+        """FOP tick callback — route to index/future stream cache."""
+        try:
+            code = getattr(tick, "code", None)
+            if not code or self._index_tick_handler is None:
+                return
+            close = float(getattr(tick, "close", 0) or 0)
+            if close <= 0:
+                return
+            reference = self._index_reference.get(code, 0.0)
+            logger.debug(
+                f"FOP tick: code={code} close={close} ref={reference}"
+            )
+            self._index_tick_handler(
+                code, close, reference,
+                _to_float_or_none(getattr(tick, "price_chg", None)),
+                _to_float_or_none(getattr(tick, "pct_chg", None)),
+                _to_float_or_none(getattr(tick, "total_amount", None)),
+            )
+        except Exception as exc:
+            logger.debug(f"_handle_fop_tick failed: {exc}")
+
     def is_subscribed(self, stock_id: str) -> bool:
         """Check if stock is currently subscribed."""
         with self._subscription_lock:
@@ -598,6 +689,25 @@ class ShioajiFetcher:
         """Callback handler for Shioaji Quote updates."""
         try:
             stock_id = quote.code
+
+            # MarketStrip — Indexs quote events may arrive on the stk channel
+            # depending on Shioaji version. Route to the index handler and
+            # bail before the stock-specific code path (reference lookup,
+            # bid/ask extraction) executes.
+            if stock_id in self._index_subscribed and self._index_tick_handler is not None:
+                try:
+                    close = float(getattr(quote, "close", 0) or 0)
+                    if close > 0:
+                        reference = self._index_reference.get(stock_id, 0.0)
+                        self._index_tick_handler(
+                            stock_id, close, reference,
+                            _to_float_or_none(getattr(quote, "price_chg", None)),
+                            _to_float_or_none(getattr(quote, "pct_chg", None)),
+                            _to_float_or_none(getattr(quote, "total_amount", None)),
+                        )
+                except Exception as exc:
+                    logger.debug(f"index quote route failed for {stock_id}: {exc}")
+                return
             vol_sum = int(getattr(quote, 'total_volume', getattr(quote, 'vol_sum', 0)))
             logger.debug(f"[Shioaji] Quote for {stock_id}: vol={vol_sum}, price={quote.close}")
             
@@ -772,7 +882,26 @@ class ShioajiFetcher:
     def _handle_tick(self, exchange, tick):
         """Callback handler for Shioaji Tick updates."""
         # logger.info(f"Raw Tick: code={tick.code}, type={tick.tick_type}, vol={tick.volume}, odd={tick.intraday_odd}")
-        
+
+        # MarketStrip — Indexs (TSE 001 / OTC 101) tick events ride the stk
+        # channel. Route to IndexFetcher's cache and bail out before stock
+        # tick processing (which assumes Stocks-shaped fields like tick_type).
+        code = getattr(tick, "code", None)
+        if code and code in self._index_subscribed and self._index_tick_handler is not None:
+            try:
+                close = float(getattr(tick, "close", 0) or 0)
+                if close > 0:
+                    reference = self._index_reference.get(code, 0.0)
+                    self._index_tick_handler(
+                        code, close, reference,
+                        _to_float_or_none(getattr(tick, "price_chg", None)),
+                        _to_float_or_none(getattr(tick, "pct_chg", None)),
+                        _to_float_or_none(getattr(tick, "total_amount", None)),
+                    )
+            except Exception as exc:
+                logger.debug(f"index tick route failed for {code}: {exc}")
+            return
+
         # filter out simtrade (trial trades before market open/during pauses)
         if tick.simtrade:
             return

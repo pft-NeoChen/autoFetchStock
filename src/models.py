@@ -381,9 +381,10 @@ class MarketIndexEntry:
     label: str           # 中文短標籤，如「加權」
     symbol: str          # 對應 yfinance / 資料源 symbol
     value: float         # 最新點數
-    change: float        # 漲跌幅絕對值
+    change: float        # 漲跌幅絕對值（vs 前一交易日收盤）
     pct: float           # 漲跌百分比（例：+0.60 表 +0.60%）
     direction: str = "flat"   # "up" | "down" | "flat"
+    open_price: float = 0.0   # 今日開盤點數；0 表示尚無開盤資料
 
 
 @dataclass

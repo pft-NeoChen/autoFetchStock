@@ -40,7 +40,10 @@ from src.exceptions import (
     StockNotFoundError,
     ServiceUnavailableError,
 )
-from src.data.market_indices import fetch_market_strip, market_strip_tail
+from src.data.market_indices import (
+    fetch_market_strip,
+    split_strip_entries,
+)
 from src.data.advisor import build_advisor
 from src.data.events import build_stock_event_timeline
 from src.data.chips_kpi import build_chips_kpi
@@ -2669,6 +2672,8 @@ class CallbackManager:
 
         @self.app.callback(
             Output("market-strip", "children"),
+            Output("market-strip-below-row1", "children"),
+            Output("market-strip-below-row2", "children"),
             Input("market-strip-interval", "n_intervals"),
             prevent_initial_call=False,
         )
@@ -2677,7 +2682,12 @@ class CallbackManager:
                 shioaji_fetcher=self.shioaji_fetcher,
                 index_fetcher=self.index_fetcher,
             )
-            return _render_market_strip(entries, market_strip_tail(self.index_fetcher))
+            header, row1, row2 = split_strip_entries(entries)
+            return (
+                _render_market_strip(header, ""),
+                _render_strip_cards(row1),
+                _render_strip_cards(row2),
+            )
 
         @self.app.callback(
             Output("right-rail-fund-content", "children"),
@@ -4944,6 +4954,64 @@ def _fmt_signed(n: float, digits: int = 2) -> str:
     """Format a signed number with explicit + prefix on positives."""
     sign = "+" if n >= 0 else ""
     return f"{sign}{n:,.{digits}f}"
+
+
+def _render_strip_cards(entries: List[MarketIndexEntry]) -> List[Any]:
+    """Below-chart MarketStrip — one card per entry, three stacked rows:
+    title / value / pct%. Cards live in a CSS grid (1fr each) with
+    container queries so all three font sizes scale with column width.
+    """
+    cards: List[Any] = []
+    for e in entries:
+        # Sub line shows the **today** move (vs session open) so the
+        # delta number and the % share the same baseline. The card-level
+        # direction/color is also driven by this delta — for foreign
+        # indices the entry-wide ``direction`` is computed against the
+        # previous-day close, which can disagree in sign with the
+        # intraday move and is meaningless once we display vs-open.
+        if e.open_price > 0:
+            delta_open = e.value - e.open_price
+            pct_open = (delta_open / e.open_price * 100.0) if e.open_price else 0.0
+            cls = _dir_class(_direction_for(delta_open))
+            arrow = "▲" if cls == "up" else "▼" if cls == "down" else "─"
+            delta_txt = f"{abs(delta_open):.2f}"
+            pct_txt = f"{abs(pct_open):.2f}%"
+        else:
+            cls = _dir_class(e.direction)
+            arrow = "▲" if cls == "up" else "▼" if cls == "down" else "─"
+            delta_txt = "--"
+            pct_txt = f"{abs(e.pct):.2f}%"
+        cards.append(
+            html.Div(
+                className="strip-card",
+                children=[
+                    html.Div(e.label, className="strip-card-label"),
+                    html.Div(
+                        _fmt_index_value(e.value),
+                        className=f"strip-card-value {cls}",
+                    ),
+                    html.Div(
+                        className=f"strip-card-sub {cls}",
+                        children=[
+                            html.Span(f"{arrow} {delta_txt}"),
+                            html.Span(
+                                f" ({pct_txt})",
+                                className="strip-card-pct",
+                            ),
+                        ],
+                    ),
+                ],
+            )
+        )
+    return cards
+
+
+def _direction_for(delta: float) -> str:
+    if delta > 0:
+        return "up"
+    if delta < 0:
+        return "down"
+    return "flat"
 
 
 def _render_market_strip(

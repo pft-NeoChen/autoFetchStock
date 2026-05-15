@@ -2283,6 +2283,83 @@ html {
     color: var(--txt-3);
 }
 
+/* Two-row card-strip mounted below the chart tabs.
+ * Mirrors the right-rail 籌碼面 .data-card visual; uses CSS container
+ * queries so label/value/sub font sizes scale with each card's width.
+ */
+.market-strip-below {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-3);
+    border-top: 1px solid var(--line);
+    background: var(--bg-2);
+}
+
+.market-strip-below .market-strip-row {
+    display: grid;
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+    gap: var(--sp-3);
+    min-height: 0;
+}
+
+.market-strip-below .strip-card {
+    container-type: inline-size;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: var(--sp-3) var(--sp-4);
+    background: var(--bg-3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.market-strip-below .strip-card-label {
+    font-size: clamp(11px, 7cqw, 18px);
+    line-height: 1.1;
+    color: var(--txt-3);
+    letter-spacing: 0.04em;
+    font-weight: 600;
+}
+
+.market-strip-below .strip-card-value {
+    font-family: var(--font-num);
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(20px, 18cqw, 56px);
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--txt-0);
+}
+
+.market-strip-below .strip-card-value.up   { color: var(--up); }
+.market-strip-below .strip-card-value.down { color: var(--down); }
+.market-strip-below .strip-card-value.flat { color: var(--txt-0); }
+
+.market-strip-below .strip-card-sub {
+    font-family: var(--font-num);
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(11px, 8cqw, 20px);
+    line-height: 1.15;
+    color: var(--txt-2);
+    margin-top: auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.market-strip-below .strip-card-sub.up   { color: var(--up); }
+.market-strip-below .strip-card-sub.down { color: var(--down); }
+.market-strip-below .strip-card-sub.flat { color: var(--txt-2); }
+
+.market-strip-below .strip-card-pct {
+    font-size: 0.75em;
+    opacity: 0.85;
+    margin-left: 2px;
+}
+
 .session-badge {
     display: flex;
     align-items: center;

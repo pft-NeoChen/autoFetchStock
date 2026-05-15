@@ -20,14 +20,35 @@ from src.models import MarketIndexEntry
 # STUB fallback — matches reference/04-layout-A.png + atoms.jsx exactly.
 # Order is the on-screen order; do not reorder without updating the spec.
 _STUB_ENTRIES: List[MarketIndexEntry] = [
-    MarketIndexEntry(label="加權", symbol="^TWII",   value=21485.62, change=128.40, pct=0.60,  direction="up"),
-    MarketIndexEntry(label="櫃買", symbol="^TWOII",  value=248.91,   change=1.85,   pct=0.75,  direction="up"),
-    MarketIndexEntry(label="台50", symbol="0050.TW", value=195.20,   change=1.40,   pct=0.72,  direction="up"),
-    MarketIndexEntry(label="美元", symbol="TWD=X",   value=31.485,   change=-0.025, pct=-0.08, direction="down"),
-    MarketIndexEntry(label="金價", symbol="GC=F",    value=7182.0,   change=22.0,   pct=0.31,  direction="up"),
-    MarketIndexEntry(label="WTI",  symbol="CL=F",    value=82.35,    change=-0.42,  pct=-0.51, direction="down"),
-    MarketIndexEntry(label="VIX",  symbol="^VIX",    value=14.82,    change=-0.21,  pct=-1.40, direction="down"),
+    MarketIndexEntry(label="加權",      symbol="^TWII",   value=21485.62, change=128.40, pct=0.60,  direction="up",   open_price=21420.0),
+    MarketIndexEntry(label="櫃買",      symbol="^TWOII",  value=248.91,   change=1.85,   pct=0.75,  direction="up",   open_price=247.50),
+    MarketIndexEntry(label="台50",      symbol="0050.TW", value=195.20,   change=1.40,   pct=0.72,  direction="up",   open_price=194.10),
+    MarketIndexEntry(label="台指近",    symbol="TXFR1",   value=21480.0,  change=120.0,  pct=0.56,  direction="up",   open_price=21400.0),
+    MarketIndexEntry(label="美元",      symbol="TWD=X",   value=31.485,   change=-0.025, pct=-0.08, direction="down", open_price=31.510),
+    MarketIndexEntry(label="金價",      symbol="GC=F",    value=7182.0,   change=22.0,   pct=0.31,  direction="up",   open_price=7165.0),
+    MarketIndexEntry(label="WTI",       symbol="CL=F",    value=82.35,    change=-0.42,  pct=-0.51, direction="down", open_price=82.70),
+    MarketIndexEntry(label="VIX",       symbol="^VIX",    value=14.82,    change=-0.21,  pct=-1.40, direction="down", open_price=15.00),
+    MarketIndexEntry(label="S&P 500",   symbol="^GSPC",   value=5234.18,  change=12.45,  pct=0.24,  direction="up",   open_price=5225.00),
+    MarketIndexEntry(label="納斯達克",  symbol="^IXIC",   value=16384.47, change=-48.32, pct=-0.29, direction="down", open_price=16420.00),
+    MarketIndexEntry(label="費半",      symbol="^SOX",    value=4982.10,  change=22.85,  pct=0.46,  direction="up",   open_price=4965.00),
 ]
+
+# Labels carried by the original header strip (no row movement requested).
+HEADER_LABELS = {"台50", "美元", "金價", "WTI", "VIX"}
+# Below-chart strip — row 1 = TWSE-session indices, row 2 = others.
+BELOW_ROW1_LABELS = ["加權", "櫃買", "台指近"]
+BELOW_ROW2_LABELS = ["S&P 500", "納斯達克", "費半"]
+
+
+def split_strip_entries(
+    entries: List[MarketIndexEntry],
+) -> tuple[List[MarketIndexEntry], List[MarketIndexEntry], List[MarketIndexEntry]]:
+    """Partition the 12-entry payload into (header, below_row1, below_row2)."""
+    by_label = {e.label: e for e in entries}
+    header = [e for e in entries if e.label in HEADER_LABELS]
+    row1 = [by_label[lbl] for lbl in BELOW_ROW1_LABELS if lbl in by_label]
+    row2 = [by_label[lbl] for lbl in BELOW_ROW2_LABELS if lbl in by_label]
+    return header, row1, row2
 
 
 def fetch_market_strip(
