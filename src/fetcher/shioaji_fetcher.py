@@ -2,11 +2,14 @@
 Shioaji (Sinopac) API fetcher implementation for real-time streaming data.
 """
 
+import json
 import os
 import threading
 import time
 from typing import Dict, List, Optional, Callable, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import shioaji as sj
 from shioaji.constant import QuoteVersion
@@ -15,6 +18,52 @@ from src.config import AppConfig, get_logger
 from src.models import RealtimeQuote, IntradayTick, DailyOHLC, PriceDirection
 
 logger = get_logger("autofetchstock.fetcher")
+
+_TZ_TAIPEI = ZoneInfo("Asia/Taipei")
+_TZ_UTC = timezone.utc
+
+_TS_DEBUG_ENABLED = os.environ.get("SHIOAJI_TS_DEBUG", "").lower() in ("1", "true", "yes")
+_TS_DEBUG_MAX = 50
+_TS_DEBUG_PATH = Path("logs/ts_debug.jsonl")
+
+_TZ_STATE_LOCK = threading.Lock()
+_TZ_STATE: Dict[str, Any] = {
+    "total": 0,
+    "by_source": {"datetime_aware": 0, "datetime_naive": 0, "epoch": 0, "string": 0},
+    "debug_written": 0,
+}
+
+
+def get_tz_stats() -> Dict[str, Any]:
+    """Snapshot of timezone-normalization counters (read-only)."""
+    with _TZ_STATE_LOCK:
+        return {
+            "total": _TZ_STATE["total"],
+            "by_source": dict(_TZ_STATE["by_source"]),
+            "debug_written": _TZ_STATE["debug_written"],
+        }
+
+
+def _record_ts_debug(raw: Any, corrected: Optional[datetime], source: str) -> None:
+    """Increment counters and (optionally) append a JSONL diagnostic row."""
+    with _TZ_STATE_LOCK:
+        _TZ_STATE["total"] += 1
+        _TZ_STATE["by_source"][source] = _TZ_STATE["by_source"].get(source, 0) + 1
+        if not _TS_DEBUG_ENABLED or _TZ_STATE["debug_written"] >= _TS_DEBUG_MAX:
+            return
+        _TZ_STATE["debug_written"] += 1
+        try:
+            _TS_DEBUG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            entry = {
+                "logged_at": datetime.now(_TZ_TAIPEI).isoformat(),
+                "source_type": source,
+                "raw_repr": repr(raw),
+                "corrected": corrected.isoformat() if corrected else None,
+            }
+            with open(_TS_DEBUG_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            logger.debug("ts_debug write failed: %s", exc)
 
 
 def _to_float_or_none(value) -> Optional[float]:
@@ -67,46 +116,65 @@ class ShioajiFetcher:
 
     @staticmethod
     def _normalize_datetime(value: Any) -> Optional[datetime]:
-        """Normalize Shioaji timestamp fields to local naive datetimes."""
+        """Normalize Shioaji timestamp fields to Asia/Taipei naive datetimes.
+
+        Shioaji SDK 1.3.2 yields timestamps in three flavours:
+        * `datetime` with `tzinfo` set — already correct; just convert.
+        * `datetime` naive — SDK internally uses `utcfromtimestamp(ns/1e9)`
+          which strips tz, so the literal HH:MM is UTC. Re-attach UTC and
+          convert to Asia/Taipei.
+        * `int` / `float` epoch (s or ns) — same UTC re-interpretation.
+
+        All branches funnel through `zoneinfo.ZoneInfo("Asia/Taipei")` so
+        results are stable regardless of system TZ (Docker UTC vs host TPE).
+        """
         if value is None:
             return None
 
-        parsed = None
+        parsed: Optional[datetime] = None
+        source: Optional[str] = None
 
         if isinstance(value, datetime):
             if value.tzinfo is not None:
-                parsed = value.astimezone().replace(tzinfo=None)
+                source = "datetime_aware"
+                parsed = value.astimezone(_TZ_TAIPEI).replace(tzinfo=None)
             else:
-                parsed = value
+                source = "datetime_naive"
+                parsed = (
+                    value.replace(tzinfo=_TZ_UTC)
+                    .astimezone(_TZ_TAIPEI)
+                    .replace(tzinfo=None)
+                )
         elif isinstance(value, (int, float)):
             if value > 0:
-                # Shioaji snapshot ts is commonly epoch nanoseconds.
+                source = "epoch"
                 seconds = value / 1_000_000_000 if value > 10_000_000_000 else value
                 try:
-                    parsed = datetime.fromtimestamp(seconds)
+                    parsed = (
+                        datetime.fromtimestamp(seconds, tz=_TZ_UTC)
+                        .astimezone(_TZ_TAIPEI)
+                        .replace(tzinfo=None)
+                    )
                 except (OSError, OverflowError, ValueError):
                     pass
         elif isinstance(value, str) and value:
+            source = "string"
             try:
                 parsed_str = datetime.fromisoformat(value.replace("Z", "+00:00"))
                 if parsed_str.tzinfo is not None:
-                    parsed = parsed_str.astimezone().replace(tzinfo=None)
+                    parsed = parsed_str.astimezone(_TZ_TAIPEI).replace(tzinfo=None)
                 else:
-                    parsed = parsed_str
+                    parsed = (
+                        parsed_str.replace(tzinfo=_TZ_UTC)
+                        .astimezone(_TZ_TAIPEI)
+                        .replace(tzinfo=None)
+                    )
             except ValueError:
                 pass
 
-        if parsed is not None:
-            # TODO(phase 7.1): Replace hour-band heuristic with zoneinfo-based
-            # fix at source. Current band masks symptom (22:30 / 06:30 ticks)
-            # but will misfire on legit after-hours sessions (盤後定盤 14:30+,
-            # 早盤試撮 08:00–09:00). See IMPLEMENTATION_PLAN.md Phase 7.1.
-            if parsed.hour >= 15:
-                parsed -= timedelta(hours=8)
-            elif parsed.hour < 8:
-                parsed += timedelta(hours=8)
+        if parsed is not None and source is not None:
+            _record_ts_debug(value, parsed, source)
             return parsed
-
         return None
 
     @classmethod
