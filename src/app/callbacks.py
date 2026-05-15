@@ -1210,8 +1210,18 @@ class CallbackManager:
                         if self._current_stock_id not in fav_ids:
                             self.shioaji_fetcher.unsubscribe(self._current_stock_id)
                     
-                    self.shioaji_fetcher.subscribe(stock_id)
-                    is_using_shioaji = True
+                    is_using_shioaji = bool(self.shioaji_fetcher.subscribe(stock_id))
+
+                    # Switch the 1Hz Quote snapshot stream onto the newly
+                    # selected stock so its `timestamp` keeps advancing even
+                    # without trades — fixes stale-data alert on illiquid
+                    # names. Quota stays at 1 msg/s regardless of watchlist
+                    # size because set_active_quote drops the previous sub.
+                    if is_using_shioaji and self.scheduler and self.scheduler.is_market_open():
+                        try:
+                            self.shioaji_fetcher.set_active_quote(stock_id)
+                        except Exception as exc:
+                            logger.debug(f"set_active_quote({stock_id}) failed: {exc}")
 
                 # Update internal state
                 self._current_stock_id = stock_id

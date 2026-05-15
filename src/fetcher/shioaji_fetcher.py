@@ -39,8 +39,12 @@ class ShioajiFetcher:
         self.api = sj.Shioaji(simulation=self.config.shioaji_simulation)
         self.is_connected = False
         self._subscriptions: Dict[str, Any] = {}
+        self._subscription_failures: Dict[str, set[str]] = {}
+        self._active_streams: Dict[str, set[str]] = {}
+        self._subscription_lock = threading.RLock()
         self._last_quotes: Dict[str, RealtimeQuote] = {}  # Cache for latest quotes
         self._last_bidask: Dict[str, dict] = {}  # Cache for latest bid/ask five-level data
+        self._quote_subscribed: set[str] = set()  # Stocks with QuoteType.Quote subscription
         self._on_quote_callback: Optional[Callable[[RealtimeQuote], None]] = None
         self._on_tick_callback: Optional[Callable[[IntradayTick], None]] = None
         
@@ -124,6 +128,9 @@ class ShioajiFetcher:
             logger.info("Setting Shioaji callbacks...")
             self.api.quote.set_on_quote_stk_v1_callback(self._handle_quote)
             self.api.quote.set_on_tick_stk_v1_callback(self._handle_tick)
+            self.api.quote.set_on_bidask_stk_v1_callback(self._handle_bidask)
+            self.api.quote.set_event_callback(self._handle_event)
+            self.api.set_session_down_callback(self._handle_session_down)
             
             self.is_connected = True
             return True
@@ -135,51 +142,292 @@ class ShioajiFetcher:
     def logout(self):
         """Log out from Shioaji API."""
         if self.is_connected:
+            try:
+                self.set_active_quote(None)
+            except Exception as exc:
+                logger.debug(f"clear Quote subs on logout failed: {exc}")
             self.api.logout()
             self.is_connected = False
             logger.info("Shioaji logged out.")
 
-    def subscribe(self, stock_id: str):
+    @staticmethod
+    def _extract_stock_id_from_topic(info: str) -> Optional[str]:
+        """Extract a stock code from Shioaji event topic text."""
+        for part in reversed(str(info or "").split("/")):
+            if part.isdigit() and len(part) == 4:
+                return part
+        return None
+
+    @staticmethod
+    def _stream_kind_from_topic(info: str) -> str:
+        """Map Shioaji topic prefixes to the stream state we care about."""
+        topic = str(info or "")
+        prefix = topic.split("/", 1)[0]
+        if prefix in {"TIC", "MKT"}:
+            return "tick"
+        if prefix in {"QUO", "QUT"}:
+            return "bidask"
+        return "unknown"
+
+    def _handle_event(
+        self,
+        resp_code: int,
+        event_code: int,
+        info: str,
+        event: str,
+    ) -> None:
+        """Track Shioaji quote session events for subscription fallback."""
+        stock_id = self._extract_stock_id_from_topic(info)
+        stream_kind = self._stream_kind_from_topic(info)
+
+        if event_code == 4:
+            if stock_id and stream_kind != "unknown":
+                with self._subscription_lock:
+                    self._subscription_failures.setdefault(stock_id, set()).add(
+                        stream_kind
+                    )
+                    active = self._active_streams.get(stock_id)
+                    if active:
+                        active.discard(stream_kind)
+                logger.warning(
+                    "Shioaji subscription rejected for %s (%s): resp=%s info=%s event=%s",
+                    stock_id,
+                    stream_kind,
+                    resp_code,
+                    info,
+                    event,
+                )
+            else:
+                logger.warning(
+                    "Shioaji subscription event error: resp=%s code=%s info=%s event=%s",
+                    resp_code,
+                    event_code,
+                    info,
+                    event,
+                )
+            return
+
+        if event_code == 16 and stock_id and stream_kind != "unknown":
+            with self._subscription_lock:
+                self._active_streams.setdefault(stock_id, set()).add(stream_kind)
+                failures = self._subscription_failures.get(stock_id)
+                if failures:
+                    failures.discard(stream_kind)
+                    if not failures:
+                        self._subscription_failures.pop(stock_id, None)
+            logger.debug(
+                "Shioaji subscription confirmed for %s (%s): info=%s",
+                stock_id,
+                stream_kind,
+                info,
+            )
+            return
+
+        if event_code in {1, 2}:
+            self.is_connected = False
+            logger.warning(
+                "Shioaji quote session down: resp=%s code=%s info=%s event=%s",
+                resp_code,
+                event_code,
+                info,
+                event,
+            )
+        elif event_code in {0, 13}:
+            self.is_connected = True
+            logger.info(
+                "Shioaji quote session connected: info=%s event=%s",
+                info,
+                event,
+            )
+        else:
+            logger.debug(
+                "Shioaji quote event: resp=%s code=%s info=%s event=%s",
+                resp_code,
+                event_code,
+                info,
+                event,
+            )
+
+    def _handle_session_down(self) -> None:
+        """Mark the Shioaji session as disconnected when the SDK reports it."""
+        self.is_connected = False
+        with self._subscription_lock:
+            self._active_streams.clear()
+        logger.warning("Shioaji quote session down")
+
+    def subscribe(self, stock_id: str) -> bool:
         """Subscribe to real-time quotes and ticks for a stock."""
         if not self.is_connected:
             logger.warning(f"Cannot subscribe to {stock_id}: Not connected.")
-            return
+            return False
+
+        with self._subscription_lock:
+            if (
+                stock_id in self._subscriptions
+                and "tick" not in self._subscription_failures.get(stock_id, set())
+            ):
+                logger.debug(f"Stock {stock_id} already subscribed to Shioaji")
+                return True
 
         try:
             contract = self.api.Contracts.Stocks[stock_id]
             if not contract:
                 logger.error(f"Stock contract not found: {stock_id}")
-                return
+                return False
 
             # Store metadata for callback use
-            self._subscriptions[stock_id] = {
-                "contract": contract,
-                "name": contract.name,
-                "reference": getattr(contract, "reference", 0)
-            }
+            with self._subscription_lock:
+                self._subscriptions[stock_id] = {
+                    "contract": contract,
+                    "name": contract.name,
+                    "reference": getattr(contract, "reference", 0),
+                }
+                self._subscription_failures.pop(stock_id, None)
             
-            # Subscribe to Quote and Tick
+            # Subscribe to tick data and five-level bid/ask. Tick keeps the
+            # realtime quote cache current; BidAsk feeds order-book display.
             logger.info(f"Subscribing to {stock_id} ({contract.name})...")
-            self.api.quote.subscribe(contract, quote_type=sj.constant.QuoteType.Quote, version=QuoteVersion.v1)
-            self.api.quote.subscribe(contract, quote_type=sj.constant.QuoteType.Tick, version=QuoteVersion.v1)
+            self.api.quote.subscribe(
+                contract,
+                quote_type=sj.constant.QuoteType.Tick,
+                version=QuoteVersion.v1,
+            )
+            self.api.quote.subscribe(
+                contract,
+                quote_type=sj.constant.QuoteType.BidAsk,
+                version=QuoteVersion.v1,
+            )
             
-            logger.info(f"Subscribed to Shioaji streaming for {stock_id} ({contract.name})")
+            logger.info(
+                f"Subscribed to Shioaji streaming for {stock_id} ({contract.name})"
+            )
+            return True
         except Exception as e:
             logger.error(f"Error subscribing to {stock_id}: {str(e)}")
+            with self._subscription_lock:
+                self._subscription_failures.setdefault(stock_id, set()).add("tick")
+            return False
 
     def unsubscribe(self, stock_id: str):
         """Unsubscribe from a stock."""
-        if stock_id in self._subscriptions:
-            sub_info = self._subscriptions.pop(stock_id)
+        with self._subscription_lock:
+            sub_info = self._subscriptions.pop(stock_id, None)
+            self._subscription_failures.pop(stock_id, None)
+            self._active_streams.pop(stock_id, None)
+
+        if sub_info:
             contract = sub_info["contract"]
-            self.api.quote.unsubscribe(contract, quote_type=sj.constant.QuoteType.Quote)
-            self.api.quote.unsubscribe(contract, quote_type=sj.constant.QuoteType.Tick)
+            self.api.quote.unsubscribe(
+                contract,
+                quote_type=sj.constant.QuoteType.Tick,
+                version=QuoteVersion.v1,
+            )
+            self.api.quote.unsubscribe(
+                contract,
+                quote_type=sj.constant.QuoteType.BidAsk,
+                version=QuoteVersion.v1,
+            )
             
             # Remove from cache
             self._last_quotes.pop(stock_id, None)
             self._last_bidask.pop(stock_id, None)
-            
+
+            # Also drop any Quote (snapshot) subscription tied to this stock.
+            if stock_id in self._quote_subscribed:
+                try:
+                    self.api.quote.unsubscribe(
+                        contract,
+                        quote_type=sj.constant.QuoteType.Quote,
+                        version=QuoteVersion.v1,
+                    )
+                except Exception as exc:
+                    logger.debug(f"Quote unsubscribe failed for {stock_id}: {exc}")
+                self._quote_subscribed.discard(stock_id)
+
             logger.info(f"Unsubscribed from {stock_id}")
+
+    def subscribe_quote(self, stock_id: str) -> bool:
+        """Subscribe to QuoteType.Quote (1Hz snapshot) for one stock.
+
+        Keeps `_last_quotes[stock_id].timestamp` advancing even when the
+        stock has no trades, so the stale-data alert (5s threshold) does
+        not fire on illiquid names. Idempotent.
+        """
+        if not self.is_connected:
+            logger.warning(f"Cannot subscribe Quote for {stock_id}: Not connected.")
+            return False
+
+        with self._subscription_lock:
+            if stock_id in self._quote_subscribed:
+                return True
+            sub_info = self._subscriptions.get(stock_id)
+
+        try:
+            contract = (sub_info or {}).get("contract") if sub_info else None
+            if contract is None:
+                contract = self.api.Contracts.Stocks[stock_id]
+                if not contract:
+                    logger.error(f"Stock contract not found for Quote sub: {stock_id}")
+                    return False
+
+            self.api.quote.subscribe(
+                contract,
+                quote_type=sj.constant.QuoteType.Quote,
+                version=QuoteVersion.v1,
+            )
+            with self._subscription_lock:
+                self._quote_subscribed.add(stock_id)
+            logger.info(f"Subscribed Quote snapshot stream for {stock_id}")
+            return True
+        except Exception as exc:
+            logger.error(f"Quote subscribe failed for {stock_id}: {exc}")
+            return False
+
+    def unsubscribe_quote(self, stock_id: str) -> None:
+        """Drop QuoteType.Quote subscription for one stock. Idempotent."""
+        with self._subscription_lock:
+            if stock_id not in self._quote_subscribed:
+                return
+            sub_info = self._subscriptions.get(stock_id)
+
+        contract = (sub_info or {}).get("contract") if sub_info else None
+        if contract is None:
+            try:
+                contract = self.api.Contracts.Stocks[stock_id]
+            except Exception:
+                contract = None
+
+        if contract is not None:
+            try:
+                self.api.quote.unsubscribe(
+                    contract,
+                    quote_type=sj.constant.QuoteType.Quote,
+                    version=QuoteVersion.v1,
+                )
+            except Exception as exc:
+                logger.debug(f"Quote unsubscribe failed for {stock_id}: {exc}")
+
+        with self._subscription_lock:
+            self._quote_subscribed.discard(stock_id)
+        logger.info(f"Unsubscribed Quote snapshot stream for {stock_id}")
+
+    def set_active_quote(self, stock_id: Optional[str]) -> None:
+        """Ensure only ``stock_id`` (if any) has a QuoteType.Quote subscription.
+
+        Caller passes the currently selected stock. Any previously active
+        Quote subscriptions on other stocks are dropped, so total snapshot
+        traffic stays at ~1 msg/s regardless of watchlist size.
+        Pass ``None`` to clear all Quote subs (e.g. on logout).
+        """
+        with self._subscription_lock:
+            previous = set(self._quote_subscribed)
+
+        for prev in previous:
+            if prev != stock_id:
+                self.unsubscribe_quote(prev)
+
+        if stock_id:
+            self.subscribe_quote(stock_id)
 
     def get_last_quote(self, stock_id: str) -> Optional[RealtimeQuote]:
         """Get the last received quote for a stock."""
@@ -191,7 +439,11 @@ class ShioajiFetcher:
         
     def is_subscribed(self, stock_id: str) -> bool:
         """Check if stock is currently subscribed."""
-        return stock_id in self._subscriptions
+        with self._subscription_lock:
+            if stock_id not in self._subscriptions:
+                return False
+            failures = self._subscription_failures.get(stock_id, set())
+            return "tick" not in failures
 
     def fetch_quote(self, stock_id: str) -> Optional[RealtimeQuote]:
         """
@@ -426,6 +678,97 @@ class ShioajiFetcher:
         except Exception as e:
             logger.error(f"Error handling shioaji quote: {str(e)}")
 
+    def _handle_bidask(self, exchange, bidask):
+        """Callback handler for Shioaji BidAsk updates."""
+        try:
+            stock_id = bidask.code
+            bid_prices = [float(p) for p in getattr(bidask, "bid_price", []) or []]
+            bid_volumes = [int(v) for v in getattr(bidask, "bid_volume", []) or []]
+            ask_prices = [float(p) for p in getattr(bidask, "ask_price", []) or []]
+            ask_volumes = [int(v) for v in getattr(bidask, "ask_volume", []) or []]
+
+            if not bid_prices and not ask_prices:
+                return
+
+            self._last_bidask[stock_id] = {
+                "bid_price": bid_prices,
+                "bid_volume": bid_volumes,
+                "ask_price": ask_prices,
+                "ask_volume": ask_volumes,
+                "bid_side_total_vol": int(
+                    getattr(bidask, "bid_side_total_vol", 0) or 0
+                ),
+                "ask_side_total_vol": int(
+                    getattr(bidask, "ask_side_total_vol", 0) or 0
+                ),
+            }
+
+            cached_quote = self._last_quotes.get(stock_id)
+            if cached_quote:
+                if bid_prices:
+                    cached_quote.best_bid = bid_prices[0]
+                if ask_prices:
+                    cached_quote.best_ask = ask_prices[0]
+
+        except Exception as e:
+            logger.error(f"Error handling shioaji bidask: {str(e)}")
+
+    def _cache_quote_from_tick(self, tick, sub_info: dict, timestamp: datetime) -> None:
+        """Refresh the realtime quote cache from a Shioaji tick event."""
+        stock_id = tick.code
+        stock_name = sub_info.get("name", "")
+        reference = sub_info.get("reference", 0) or 0
+        contract = sub_info.get("contract")
+        limit_up = float(getattr(contract, "limit_up", 0)) if contract else 0.0
+        limit_down = float(getattr(contract, "limit_down", 0)) if contract else 0.0
+
+        current_price = float(tick.close)
+        if hasattr(tick, "price_chg"):
+            change = float(getattr(tick, "price_chg", 0) or 0)
+        elif reference > 0:
+            change = current_price - float(reference)
+        else:
+            change = 0.0
+
+        if hasattr(tick, "pct_chg"):
+            change_percent = float(getattr(tick, "pct_chg", 0) or 0)
+        elif reference > 0:
+            change_percent = (change / float(reference)) * 100
+        else:
+            change_percent = 0.0
+
+        if change > 0:
+            direction = PriceDirection.UP
+        elif change < 0:
+            direction = PriceDirection.DOWN
+        else:
+            direction = PriceDirection.FLAT
+
+        bidask = self._last_bidask.get(stock_id, {})
+        bid_prices = bidask.get("bid_price") or []
+        ask_prices = bidask.get("ask_price") or []
+
+        self._last_quotes[stock_id] = RealtimeQuote(
+            stock_id=stock_id,
+            stock_name=stock_name,
+            current_price=current_price,
+            open_price=float(getattr(tick, "open", current_price) or current_price),
+            high_price=float(getattr(tick, "high", current_price) or current_price),
+            low_price=float(getattr(tick, "low", current_price) or current_price),
+            previous_close=float(reference),
+            change_amount=change,
+            change_percent=change_percent,
+            direction=direction,
+            total_volume=int(getattr(tick, "total_volume", 0) or 0),
+            tick_volume=int(getattr(tick, "volume", 0) or 0),
+            best_bid=float(bid_prices[0]) if bid_prices else 0.0,
+            best_ask=float(ask_prices[0]) if ask_prices else 0.0,
+            timestamp=timestamp,
+            limit_up_price=limit_up,
+            limit_down_price=limit_down,
+            is_simtrade=bool(getattr(tick, "simtrade", False)),
+        )
+
     def _handle_tick(self, exchange, tick):
         """Callback handler for Shioaji Tick updates."""
         # logger.info(f"Raw Tick: code={tick.code}, type={tick.tick_type}, vol={tick.volume}, odd={tick.intraday_odd}")
@@ -444,6 +787,7 @@ class ShioajiFetcher:
             
             # Normalize datetime to fix timezone shift bug
             corrected_dt = self._normalize_datetime(tick.datetime) or tick.datetime
+            self._cache_quote_from_tick(tick, sub_info, corrected_dt)
             
             it_tick = IntradayTick(
                 time=corrected_dt.time(),
@@ -466,7 +810,11 @@ class ShioajiFetcher:
         except Exception as e:
             logger.error(f"Error handling shioaji tick: {str(e)}")
 
-    def set_callbacks(self, on_quote: Optional[Callable] = None, on_tick: Optional[Callable] = None):
+    def set_callbacks(
+        self,
+        on_quote: Optional[Callable] = None,
+        on_tick: Optional[Callable] = None,
+    ):
         """Set external callbacks for data processing."""
         self._on_quote_callback = on_quote
         self._on_tick_callback = on_tick

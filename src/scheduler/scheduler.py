@@ -9,6 +9,7 @@ This module handles automatic data fetching scheduling:
 """
 
 import logging
+import threading
 import traceback
 from datetime import datetime, time
 from typing import Callable, Dict, Optional, Set
@@ -69,6 +70,8 @@ class Scheduler:
         self._active_stocks: Set[str] = set()
         self._paused: bool = False
         self._consecutive_errors: Dict[str, int] = {}
+        self._running_fetches: Set[str] = set()
+        self._running_fetches_lock = threading.Lock()
 
         # Register job event listeners
         self._scheduler.add_listener(
@@ -147,6 +150,7 @@ class Scheduler:
                 id=job_id,
                 args=[stock_id],
                 name=f"Fetch {stock_id}",
+                max_instances=2,
                 replace_existing=True,
             )
             self._active_stocks.add(stock_id)
@@ -571,56 +575,72 @@ class Scheduler:
         Raises:
             SchedulerTaskError: If fetch fails (REQ-106)
         """
-        # Debug trace
-        # logger.debug(f"APScheduler triggering job for {stock_id}")
-
-        # Skip if paused or outside market hours
-        if self._paused:
-            logger.debug(f"Skipping fetch for {stock_id} - scheduler paused")
-            return
-
-        # Bypass market hours check for development/testing
-        # if not self.is_market_open():
-        #     # Log this only once per minute to avoid spamming if interval is short
-        #     # logger.debug(f"Skipping fetch for {stock_id} - market closed")
-        #     return
-        if not self.is_market_open():
-             logger.debug(f"Market closed, but forcing fetch for {stock_id} (DEV MODE)")
-
-        if not self._fetch_callback:
-            logger.warning(f"No fetch callback set, skipping {stock_id}")
-            return
+        with self._running_fetches_lock:
+            if stock_id in self._running_fetches:
+                logger.debug(
+                    f"Skipping fetch for {stock_id} - previous fetch still running"
+                )
+                return
+            self._running_fetches.add(stock_id)
 
         try:
-            # Execute fetch callback
-            self._fetch_callback(stock_id)
+            # Debug trace
+            # logger.debug(f"APScheduler triggering job for {stock_id}")
 
-            # Reset error counter on success
-            self._consecutive_errors[stock_id] = 0
-            logger.debug(f"Fetch completed for {stock_id}")
+            # Skip if paused or outside market hours
+            if self._paused:
+                logger.debug(f"Skipping fetch for {stock_id} - scheduler paused")
+                return
 
-        except ServiceUnavailableError as e:
-            # Service is unavailable, pause all fetching (REQ-104)
-            logger.error(f"Service unavailable: {e}")
-            self.pause_auto_fetch()
-            raise SchedulerTaskError(
-                task_name=f"fetch_{stock_id}",
-                reason=str(e)
-            )
+            # Bypass market hours check for development/testing
+            # if not self.is_market_open():
+            #     # Log this only once per minute to avoid spamming if interval is short
+            #     # logger.debug(f"Skipping fetch for {stock_id} - market closed")
+            #     return
+            if not self.is_market_open():
+                logger.debug(
+                    f"Market closed, but forcing fetch for {stock_id} (DEV MODE)"
+                )
 
-        except Exception as e:
-            # Increment error counter
-            self._consecutive_errors[stock_id] = self._consecutive_errors.get(stock_id, 0) + 1
-            error_count = self._consecutive_errors[stock_id]
+            if not self._fetch_callback:
+                logger.warning(f"No fetch callback set, skipping {stock_id}")
+                return
 
-            # Log the error with full traceback (REQ-106)
-            logger.error(
-                f"Fetch failed for {stock_id} ({error_count} consecutive errors):\n"
-                f"{traceback.format_exc()}"
-            )
+            try:
+                # Execute fetch callback
+                self._fetch_callback(stock_id)
 
-            # Don't raise - let scheduler continue (REQ-106)
-            # The job will retry at next interval
+                # Reset error counter on success
+                self._consecutive_errors[stock_id] = 0
+                logger.debug(f"Fetch completed for {stock_id}")
+
+            except ServiceUnavailableError as e:
+                # Service is unavailable, pause all fetching (REQ-104)
+                logger.error(f"Service unavailable: {e}")
+                self.pause_auto_fetch()
+                raise SchedulerTaskError(
+                    task_name=f"fetch_{stock_id}",
+                    reason=str(e)
+                )
+
+            except Exception as e:
+                # Increment error counter
+                self._consecutive_errors[stock_id] = (
+                    self._consecutive_errors.get(stock_id, 0) + 1
+                )
+                error_count = self._consecutive_errors[stock_id]
+
+                # Log the error with full traceback (REQ-106)
+                logger.error(
+                    f"Fetch failed for {stock_id} ({error_count} consecutive errors):\n"
+                    f"{traceback.format_exc()}"
+                )
+
+                # Don't raise - let scheduler continue (REQ-106)
+                # The job will retry at next interval
+        finally:
+            with self._running_fetches_lock:
+                self._running_fetches.discard(stock_id)
 
     def _get_job_id(self, stock_id: str) -> str:
         """Generate job ID for a stock."""
