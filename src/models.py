@@ -481,3 +481,138 @@ class StockEvent:
     is_anomaly: bool = False
     articles: List[dict] = field(default_factory=list)
     event_id: str = ""
+
+
+# ─── Volume Spike Detection ─────────────────────────────────────────────
+
+class SpikeSeverity(Enum):
+    """1 分 K 爆量強度分級。對應 src/config.py SPIKE_THRESHOLD_*。"""
+    NORMAL = "normal"
+    LOW = "low"          # 2.0× ~ 3.0×
+    MID = "mid"          # 3.0× ~ 5.0×
+    HIGH = "high"        # 5.0× ~ 10.0×
+    EXTREME = "extreme"  # >= 10.0×
+
+    @property
+    def display_name(self) -> str:
+        names = {
+            SpikeSeverity.NORMAL: "",
+            SpikeSeverity.LOW: "LOW",
+            SpikeSeverity.MID: "MID",
+            SpikeSeverity.HIGH: "HIGH 🔥",
+            SpikeSeverity.EXTREME: "EXTREME 💥",
+        }
+        return names.get(self, "")
+
+
+@dataclass
+class MinuteKBar:
+    """單根 1 分鐘 K 棒，爆量偵測基本單位。
+
+    Detection result fields (baseline_volume, volume_ratio,
+    is_volume_spike, spike_severity, baseline_low_confidence) are
+    populated by VolumeSpikeDetector — empty/default until then.
+    """
+    stock_id: str
+    timestamp: datetime         # K 棒起始時間，需帶 tzinfo (Asia/Taipei)
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int                 # 該分鐘成交張數
+    amount: float               # 該分鐘成交金額 (TWD)
+    tick_count: int             # 該分鐘內成交筆數 (Shioaji kbars 無提供時為 0)
+    vwap: float                 # amount / (volume * 1000)，0 量時 = close
+
+    # 偵測結果（由 detector 填入）
+    baseline_volume: Optional[float] = None
+    volume_ratio: Optional[float] = None
+    is_volume_spike: bool = False
+    spike_severity: SpikeSeverity = SpikeSeverity.NORMAL
+    baseline_low_confidence: bool = False
+    price_direction: PriceDirection = PriceDirection.FLAT
+
+    def __post_init__(self):
+        if any(p <= 0 for p in [self.open, self.high, self.low, self.close]):
+            raise ValueError("All prices must be positive")
+        if self.high < max(self.open, self.close):
+            raise ValueError(
+                f"high ({self.high}) must be >= max(open, close) ({max(self.open, self.close)})"
+            )
+        if self.low > min(self.open, self.close):
+            raise ValueError(
+                f"low ({self.low}) must be <= min(open, close) ({min(self.open, self.close)})"
+            )
+        if self.volume < 0:
+            raise ValueError("volume must be non-negative")
+        if self.amount < 0:
+            raise ValueError("amount must be non-negative")
+        if self.tick_count < 0:
+            raise ValueError("tick_count must be non-negative")
+
+    def to_dict(self) -> dict:
+        return {
+            "stock_id": self.stock_id,
+            "timestamp": self.timestamp.isoformat(),
+            "open": self.open,
+            "high": self.high,
+            "low": self.low,
+            "close": self.close,
+            "volume": self.volume,
+            "amount": self.amount,
+            "tick_count": self.tick_count,
+            "vwap": self.vwap,
+            "baseline_volume": self.baseline_volume,
+            "volume_ratio": self.volume_ratio,
+            "is_volume_spike": self.is_volume_spike,
+            "spike_severity": self.spike_severity.value,
+            "baseline_low_confidence": self.baseline_low_confidence,
+            "price_direction": self.price_direction.value,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MinuteKBar":
+        return cls(
+            stock_id=data["stock_id"],
+            timestamp=datetime.fromisoformat(data["timestamp"]),
+            open=float(data["open"]),
+            high=float(data["high"]),
+            low=float(data["low"]),
+            close=float(data["close"]),
+            volume=int(data["volume"]),
+            amount=float(data["amount"]),
+            tick_count=int(data.get("tick_count", 0)),
+            vwap=float(data.get("vwap", data["close"])),
+            baseline_volume=data.get("baseline_volume"),
+            volume_ratio=data.get("volume_ratio"),
+            is_volume_spike=bool(data.get("is_volume_spike", False)),
+            spike_severity=SpikeSeverity(data.get("spike_severity", "normal")),
+            baseline_low_confidence=bool(data.get("baseline_low_confidence", False)),
+            price_direction=PriceDirection(data.get("price_direction", "flat")),
+        )
+
+
+@dataclass
+class StockMinuteKFile:
+    """1 分 K 單日檔案結構：data/minute_kbars/{stock_id}_{YYYYMMDD}.json"""
+    stock_id: str
+    stock_name: str
+    date: date
+    bars: List[MinuteKBar] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "stock_id": self.stock_id,
+            "stock_name": self.stock_name,
+            "date": self.date.isoformat(),
+            "bars": [b.to_dict() for b in self.bars],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "StockMinuteKFile":
+        return cls(
+            stock_id=data["stock_id"],
+            stock_name=data["stock_name"],
+            date=date.fromisoformat(data["date"]),
+            bars=[MinuteKBar.from_dict(b) for b in data.get("bars", [])],
+        )
