@@ -197,7 +197,7 @@ data/minute_kbars/{stock_id}_{yyyymmdd}.json
 | 1 | 新增 MinuteKBar / SpikeSeverity / StockMinuteKFile 資料模型 | ✅ completed | 30m |
 | 2 | minute_kbar_storage 模組（原子寫入 + 同時段查詢）| ✅ completed | 1h |
 | 3 | Shioaji kbars 整合 + IntradayTick 聚合 fallback | ✅ completed | 2h |
-| 4 | 爆量偵測核心（混合 baseline + severity 分級）| ⬜ pending | 2h |
+| 4 | 爆量偵測核心（混合 baseline + severity 分級）| ✅ completed | 2h |
 | 5 | Warmup 機制：首次載入股票 backfill 5 日 1 分 K | ⬜ pending | 1h |
 | 6 | Scheduler 每分鐘排程偵測 | ⬜ pending | 1h |
 | 7 | UI: 大戶逐筆下方新增爆量 K 棒面板 | ⬜ pending | 1h |
@@ -209,7 +209,7 @@ data/minute_kbars/{stock_id}_{yyyymmdd}.json
 
 **狀態圖示**：⬜ pending / 🟡 in_progress / ✅ completed / ❌ blocked
 
-**進度**：3 / 12（25%）
+**進度**：4 / 12（33%）
 
 ---
 

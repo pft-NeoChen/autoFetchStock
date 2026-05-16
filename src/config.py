@@ -176,6 +176,18 @@ TWSE_API_ENDPOINTS = {
     "stock_list": "https://isin.twse.com.tw/isin/C_public.jsp",
 }
 
+# ── Volume Spike Detection thresholds (1-min K bars) ────────────────────
+# See design_handoff_autoFetchStock/VOLUME_SPIKE_PLAN.md §1.2
+SPIKE_THRESHOLD_LOW: float = 2.0       # 進入列表最低門檻
+SPIKE_THRESHOLD_MID: float = 3.0
+SPIKE_THRESHOLD_HIGH: float = 5.0      # 觸發瀏覽器推播
+SPIKE_THRESHOLD_EXTREME: float = 10.0
+SPIKE_MIN_ABS_VOLUME: int = 100        # 張，低於此量不判定（避免冷門股誤報）
+SPIKE_BASELINE_DAYS: int = 5           # 法 B 取近幾日同時段
+SPIKE_BASELINE_MIN_DAYS: int = 3       # 法 B 最少需要幾日才採用
+SPIKE_FALLBACK_WINDOW: int = 20        # 法 A 取近幾根 1 分 K
+SPIKE_FALLBACK_SKIP_OPENING: int = 5   # 法 A 跳過開盤前幾根（量天生大）
+
 # Default User-Agent for API requests
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
