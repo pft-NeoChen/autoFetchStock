@@ -300,6 +300,12 @@ def _create_hidden_components() -> html.Div:
             html.Button(id="favorites-reorder-btn", n_clicks=0,
                         style={"display": "none"}),
 
+            # Volume spike browser-notification payload.
+            # A server callback writes {title, body, tag, ...} here when
+            # a fresh HIGH+ spike fires; a clientside callback turns
+            # that into a Notification(). Initial null = no-op.
+            dcc.Store(id="spike-notification-store", data=None),
+
         ]
     )
 
@@ -1188,4 +1194,5 @@ COMPONENT_IDS = {
     "volume_spike_panel": "volume-spike-panel",
     "volume_spike_list": "volume-spike-list",
     "volume_spike_interval": "volume-spike-interval",
+    "spike_notification_store": "spike-notification-store",
 }

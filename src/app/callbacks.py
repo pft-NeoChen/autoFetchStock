@@ -559,12 +559,20 @@ class CallbackManager:
 
     # ── Volume Spike Panel ─────────────────────────────────────────────────
 
+    # Track the most recent spike timestamp per stock that has been pushed
+    # as a notification, to avoid re-pushing the same minute on every tick.
+    _spike_notification_window_seconds: int = 90
+
     def _register_volume_spike_callbacks(self) -> None:
         """Render volume spike rows from the in-memory SpikeDetectionStore.
 
         Triggered by the 60s dcc.Interval AND by stock changes so the
         panel refreshes immediately when the user switches favorites.
+        Also pushes browser-notification payloads for fresh HIGH+ spikes.
         """
+        # Per-instance state for notification dedupe. Keys are stock_id,
+        # values are ISO timestamp strings of the most recent pushed spike.
+        self._last_pushed_spike_ts: Dict[str, str] = {}
 
         @self.app.callback(
             Output("volume-spike-list", "children"),
@@ -586,6 +594,99 @@ class CallbackManager:
             except Exception as exc:
                 logger.error("update_volume_spike_panel failed: %s", exc)
                 return [html.Div("資料載入錯誤", className="no-data")]
+
+        @self.app.callback(
+            Output("spike-notification-store", "data"),
+            Input("volume-spike-interval", "n_intervals"),
+            Input("app-state-store", "data"),
+            prevent_initial_call=True,
+        )
+        def push_spike_notification(_n, app_state):
+            """
+            Compose a Notification payload for the latest HIGH+ spike
+            within the last `_spike_notification_window_seconds` seconds
+            on the *currently-viewed* stock. Skipped outside trading hours
+            and when the same minute has already been pushed.
+            """
+            try:
+                if self.spike_detection_store is None:
+                    return no_update
+                if self.scheduler is not None and not self.scheduler.is_market_open():
+                    return no_update
+                stock_id = (app_state or {}).get("current_stock")
+                if not stock_id:
+                    return no_update
+
+                bars = self.spike_detection_store.get_recent(stock_id, n=1)
+                if not bars:
+                    return no_update
+                bar = bars[0]
+                if bar.spike_severity not in (
+                    SpikeSeverity.HIGH, SpikeSeverity.EXTREME
+                ):
+                    return no_update
+
+                now = datetime.now(_VOLUME_SPIKE_TZ)
+                if bar.timestamp.tzinfo is None:
+                    bar_ts = bar.timestamp.replace(tzinfo=_VOLUME_SPIKE_TZ)
+                else:
+                    bar_ts = bar.timestamp
+                age = (now - bar_ts).total_seconds()
+                if age > self._spike_notification_window_seconds or age < -60:
+                    return no_update
+
+                ts_iso = bar_ts.isoformat()
+                if self._last_pushed_spike_ts.get(stock_id) == ts_iso:
+                    return no_update
+
+                payload = _build_spike_notification_payload(stock_id, bar)
+                self._last_pushed_spike_ts[stock_id] = ts_iso
+                logger.info(
+                    "spike notification queued: %s @ %s severity=%s",
+                    stock_id, bar_ts.strftime("%H:%M"),
+                    bar.spike_severity.value,
+                )
+                return payload
+            except Exception as exc:
+                logger.error("push_spike_notification failed: %s", exc)
+                return no_update
+
+        # Clientside: turn the store payload into a desktop Notification.
+        # Permission is requested lazily on first payload (rather than on
+        # page load) so we don't prompt users who never see a HIGH spike.
+        self.app.clientside_callback(
+            """
+            function(data) {
+                if (!data || !data.title) {
+                    return window.dash_clientside.no_update;
+                }
+                if (!('Notification' in window)) {
+                    return window.dash_clientside.no_update;
+                }
+                if (Notification.permission === 'default') {
+                    Notification.requestPermission();
+                    return window.dash_clientside.no_update;
+                }
+                if (Notification.permission !== 'granted') {
+                    return window.dash_clientside.no_update;
+                }
+                try {
+                    new Notification(data.title, {
+                        body: data.body || '',
+                        tag: data.tag || '',
+                        icon: data.icon || '/assets/favicon.ico',
+                        requireInteraction: false,
+                    });
+                } catch (err) {
+                    console.warn('spike notification failed', err);
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("spike-notification-store", "data", allow_duplicate=True),
+            Input("spike-notification-store", "data"),
+            prevent_initial_call=True,
+        )
 
     def _register_events_tab_callbacks(self) -> None:
         """Phase 6.4 — fill the per-stock event timeline tab."""
@@ -5175,6 +5276,9 @@ def _fmt_duration(delta) -> str:
 
 # ── Volume Spike Panel helpers ─────────────────────────────────────────────
 
+_VOLUME_SPIKE_TZ = ZoneInfo("Asia/Taipei")
+
+
 def _format_lot_volume(volume: int) -> str:
     """Compact lot count: 2,341 → '2.3K', 234 → '234'."""
     if volume >= 1000:
@@ -5232,6 +5336,22 @@ def _build_spike_tooltip(bar: MinuteKBar) -> str:
         f"倍數      {ratio_text}  {severity_label}".rstrip(),
         sep,
     ])
+
+
+def _build_spike_notification_payload(stock_id: str, bar: MinuteKBar) -> Dict[str, Any]:
+    """Compose the dict consumed by the clientside Notification callback."""
+    open_close_pct = (
+        (bar.close - bar.open) / bar.open * 100 if bar.open else 0.0
+    )
+    ratio_text = f"{bar.volume_ratio:.1f}×" if bar.volume_ratio else "—×"
+    title = f"⚡ {stock_id} 爆量 {ratio_text}"
+    body = (
+        f"{bar.timestamp.strftime('%H:%M')} "
+        f"{bar.close:.2f} {open_close_pct:+.2f}% "
+        f"{bar.volume:,}張"
+    )
+    tag = f"{stock_id}_{bar.timestamp.isoformat()}"
+    return {"title": title, "body": body, "tag": tag}
 
 
 def _render_volume_spike_row(bar: MinuteKBar) -> html.Div:
