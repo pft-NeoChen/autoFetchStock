@@ -2053,6 +2053,98 @@ html {
     font-size: 10px;
 }
 
+/* ── Volume Spike Panel (爆量 1 分 K) ─────────────────────────────── */
+.volume-spike-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+    margin-top: var(--sp-2);
+    padding-top: var(--sp-2);
+    border-top: 1px solid var(--line);
+}
+.volume-spike-header {
+    display: grid;
+    grid-template-columns: 56px 28px 1fr 1.2fr;
+    gap: 6px;
+    padding: 2px 6px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: var(--sp-1);
+    font-size: 10px;
+    color: var(--txt-2);
+}
+.volume-spike-header .vs-col-time   { text-align: left; }
+.volume-spike-header .vs-col-kbar   { text-align: center; }
+.volume-spike-header .vs-col-price  { text-align: right; }
+.volume-spike-header .vs-col-vol    { text-align: right; }
+
+.volume-spike-list {
+    flex: 1;
+    min-height: 0;
+    max-height: 280px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+.volume-spike-row {
+    display: grid;
+    grid-template-columns: 56px 28px 1fr 1.2fr;
+    gap: 6px;
+    padding: 3px 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    font-size: 11px;
+    position: relative;
+    cursor: help;
+}
+.volume-spike-row .vs-col-time   { text-align: left;  color: var(--txt-1); }
+.volume-spike-row .vs-col-kbar   { text-align: center; font-weight: 700; }
+.volume-spike-row .vs-col-price  { text-align: right; font-weight: 600; }
+.volume-spike-row .vs-col-vol    { text-align: right; font-weight: 600; }
+
+/* Severity colors (volume column) */
+.vs-severity-low     { color: #FFEB3B; }
+.vs-severity-mid     { color: #FF9800; }
+.vs-severity-high    { color: #EF5350; }
+.vs-severity-extreme { color: #9C27B0; font-weight: 700; }
+.vs-severity-normal  { color: var(--txt-2); }
+
+/* K-bar direction colors (kbar + price columns).
+   Taiwan convention: red = up, green = down. */
+.vs-kbar-up   { color: #EF5350; }
+.vs-kbar-down { color: #26A69A; }
+.vs-kbar-flat { color: var(--txt-2); }
+
+/* Low-confidence baseline marker (法 A fallback). */
+.vs-low-confidence::after {
+    content: " *";
+    color: var(--txt-2);
+    font-weight: 400;
+}
+
+/* Pure-CSS hover tooltip — no JS, no Dash callback round-trip. */
+.vs-tooltip {
+    display: none;
+    position: absolute;
+    right: calc(100% + 8px);
+    top: 0;
+    background: #2A2A2A;
+    color: var(--txt-0);
+    border: 1px solid var(--line-2);
+    border-radius: 4px;
+    padding: 8px 12px;
+    z-index: 100;
+    min-width: 220px;
+    white-space: pre-line;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+}
+.volume-spike-row:hover .vs-tooltip { display: block; }
+
+/* Empty state inherits the existing .no-data style. */
+
 /* ── ChipKpiCard direction colors ─────────────────────────────────── */
 .data-card-value.up   { color: var(--up); }
 .data-card-value.down { color: var(--down); }

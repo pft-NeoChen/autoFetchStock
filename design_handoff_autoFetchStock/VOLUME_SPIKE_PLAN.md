@@ -201,7 +201,7 @@ data/minute_kbars/{stock_id}_{yyyymmdd}.json
 | 5 | Warmup 機制：首次載入股票 backfill 5 日 1 分 K | ✅ completed | 1h |
 | 6 | Scheduler 每分鐘排程偵測 | ✅ completed | 1h |
 | 7 | UI: 大戶逐筆下方新增爆量 K 棒面板 | ✅ completed | 1h |
-| 8 | UI: hover tooltip + severity 配色 CSS | ⬜ pending | 1.5h |
+| 8 | UI: hover tooltip + severity 配色 CSS | ✅ completed | 1.5h |
 | 9 | Callback: 爆量面板資料更新 | ⬜ pending | 1h |
 | 10 | K 線圖（1 分 K）爆量根標記 | ⬜ pending | 2h |
 | 11 | 瀏覽器 Notification API 推播 | ⬜ pending | 2h |
@@ -209,7 +209,7 @@ data/minute_kbars/{stock_id}_{yyyymmdd}.json
 
 **狀態圖示**：⬜ pending / 🟡 in_progress / ✅ completed / ❌ blocked
 
-**進度**：7 / 12（58%）
+**進度**：8 / 12（67%）
 
 ---
 
