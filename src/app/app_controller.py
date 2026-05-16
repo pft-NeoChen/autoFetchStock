@@ -18,6 +18,9 @@ from src.fetcher.shioaji_fetcher import ShioajiFetcher
 from src.fetcher.minute_kbar_warmup import MinuteKBarWarmup
 from src.storage import DataStorage
 from src.storage.minute_kbar_storage import MinuteKBarStorage
+from src.processor.volume_spike_detector import VolumeSpikeDetector
+from src.data.spike_store import SpikeDetectionStore
+from src.scheduler.volume_spike_job import VolumeSpikeJob
 from src.processor.data_processor import DataProcessor
 from src.renderer.chart_renderer import ChartRenderer
 from src.scheduler import Scheduler
@@ -123,7 +126,14 @@ class AppController:
             fetcher=self.shioaji_fetcher,
             storage=self.minute_kbar_storage,
         )
-        logger.debug("MinuteKBarStorage + MinuteKBarWarmup initialized")
+        self.volume_spike_detector = VolumeSpikeDetector(
+            storage=self.minute_kbar_storage,
+        )
+        self.spike_detection_store = SpikeDetectionStore()
+        logger.debug(
+            "MinuteKBarStorage + MinuteKBarWarmup + VolumeSpikeDetector + "
+            "SpikeDetectionStore initialized"
+        )
 
         # Auto-subscribe to saved favorites after DataFetcher exists so cache warm-up works.
         if self.shioaji_fetcher and self.shioaji_fetcher.is_connected:
@@ -152,6 +162,22 @@ class AppController:
             fetch_interval=self.config.fetch_interval
         )
         logger.debug("Scheduler initialized")
+
+        # Volume Spike Detection: per-minute job over favorite stocks.
+        # tracked_stocks_provider must be a fresh-on-each-call lambda so
+        # newly added favorites get detected without restart.
+        self.volume_spike_job = VolumeSpikeJob(
+            fetcher=self.shioaji_fetcher,
+            storage=self.minute_kbar_storage,
+            detector=self.volume_spike_detector,
+            detection_store=self.spike_detection_store,
+            tracked_stocks_provider=lambda: [
+                fav.get("id") for fav in (self.storage.load_favorites() or [])
+                if fav.get("id")
+            ],
+        )
+        self.scheduler.add_volume_spike_job(self.volume_spike_job)
+        logger.debug("VolumeSpikeJob registered with Scheduler")
 
         # News processor
         self.news_processor = NewsProcessor(

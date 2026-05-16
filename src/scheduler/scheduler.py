@@ -642,6 +642,50 @@ class Scheduler:
             with self._running_fetches_lock:
                 self._running_fetches.discard(stock_id)
 
+    def add_volume_spike_job(self, job: "VolumeSpikeJob") -> bool:
+        """
+        Per-minute volume spike detection during trading hours.
+
+        Cron: Mon-Fri 09:00-13:30, every minute at second=5 (slight
+        delay so the broker has time to publish the just-closed bar).
+        The trading-hours guard inside `_volume_spike_job` is a defensive
+        second check in case anything tweaks the cron window later.
+        """
+        try:
+            self._scheduler.add_job(
+                self._volume_spike_job,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour="9-13",
+                    minute="*",
+                    second=5,
+                    timezone=TW_TIMEZONE,
+                ),
+                id="volume_spike_detect",
+                kwargs={"job": job},
+                name="Volume spike detection (per-minute)",
+                replace_existing=True,
+            )
+            logger.info(
+                "Registered volume spike job (Mon-Fri 09-13, every minute @s=5)"
+            )
+            return True
+        except Exception as exc:
+            logger.error(f"Failed to register volume spike job: {exc}")
+            return False
+
+    def _volume_spike_job(self, job: "VolumeSpikeJob") -> None:
+        """Wrap VolumeSpikeJob.run_once with market-hours guard + error log."""
+        if not self.is_market_open():
+            logger.debug("[spike_job] market closed, skipping")
+            return
+        try:
+            job.run_once()
+        except Exception as exc:
+            logger.error(
+                f"Volume spike job failed: {exc}\n{traceback.format_exc()}"
+            )
+
     def _get_job_id(self, stock_id: str) -> str:
         """Generate job ID for a stock."""
         return f"fetch_{stock_id}"
