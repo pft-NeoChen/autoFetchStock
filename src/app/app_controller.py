@@ -15,7 +15,9 @@ from src.data import advisor as advisor_module
 from src.data import fundamentals as fundamentals_module
 from src.fetcher import DataFetcher
 from src.fetcher.shioaji_fetcher import ShioajiFetcher
+from src.fetcher.minute_kbar_warmup import MinuteKBarWarmup
 from src.storage import DataStorage
+from src.storage.minute_kbar_storage import MinuteKBarStorage
 from src.processor.data_processor import DataProcessor
 from src.renderer.chart_renderer import ChartRenderer
 from src.scheduler import Scheduler
@@ -114,6 +116,14 @@ class AppController:
             shioaji_fetcher=self.shioaji_fetcher
         )
         logger.debug("DataFetcher initialized")
+
+        # Volume Spike Detection: minute-kbar storage + warmup backfiller
+        self.minute_kbar_storage = MinuteKBarStorage()
+        self.minute_kbar_warmup = MinuteKBarWarmup(
+            fetcher=self.shioaji_fetcher,
+            storage=self.minute_kbar_storage,
+        )
+        logger.debug("MinuteKBarStorage + MinuteKBarWarmup initialized")
 
         # Auto-subscribe to saved favorites after DataFetcher exists so cache warm-up works.
         if self.shioaji_fetcher and self.shioaji_fetcher.is_connected:
@@ -367,6 +377,16 @@ class AppController:
                                 self.fetcher._quote_cache[stock_id] = quote
                     except Exception:
                         pass # Ignore snapshot errors during startup
+
+                    # Volume Spike Detection: backfill 5 trading days of 1-min K
+                    # bars in the background so 法 B baselines are available
+                    # immediately. No-op if disk already has enough days.
+                    try:
+                        self.minute_kbar_warmup.warmup_async(
+                            stock_id, stock_name=fav.get("name", "")
+                        )
+                    except Exception as exc:
+                        logger.debug("warmup_async(%s) failed: %s", stock_id, exc)
         except Exception as e:
             logger.error(f"Failed to auto-subscribe favorites: {e}")
 
