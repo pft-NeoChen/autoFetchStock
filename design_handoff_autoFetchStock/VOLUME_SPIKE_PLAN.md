@@ -203,13 +203,13 @@ data/minute_kbars/{stock_id}_{yyyymmdd}.json
 | 7 | UI: 大戶逐筆下方新增爆量 K 棒面板 | ✅ completed | 1h |
 | 8 | UI: hover tooltip + severity 配色 CSS | ✅ completed | 1.5h |
 | 9 | Callback: 爆量面板資料更新 | ✅ completed | 1h |
-| 10 | K 線圖（1 分 K）爆量根標記 | ⬜ pending | 2h |
+| 10 | K 線圖（1 分 K）爆量根標記 | ✅ completed | 2h |
 | 11 | 瀏覽器 Notification API 推播 | ⬜ pending | 2h |
 | 12 | 單元測試：detector + storage + parser | ⬜ pending | 2h |
 
 **狀態圖示**：⬜ pending / 🟡 in_progress / ✅ completed / ❌ blocked
 
-**進度**：9 / 12（75%）
+**進度**：10 / 12（83%）
 
 ---
 

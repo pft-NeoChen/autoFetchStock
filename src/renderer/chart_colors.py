@@ -62,6 +62,12 @@ class ChartColors:
     WARNING_BG_COLOR: str = "#F57F17"   # Dark yellow - warning
     INFO_BG_COLOR: str = "#1565C0"      # Dark blue - info
 
+    # Volume spike severity colors (for 1-min K bar marking)
+    SPIKE_LOW: str = "#FFEB3B"      # Yellow  — 2× ~ 3×
+    SPIKE_MID: str = "#FF9800"      # Orange  — 3× ~ 5×
+    SPIKE_HIGH: str = "#EF5350"     # Red     — 5× ~ 10×
+    SPIKE_EXTREME: str = "#9C27B0"  # Purple  — >= 10×
+
 
 # Default color instance for easy import
 DEFAULT_COLORS = ChartColors()

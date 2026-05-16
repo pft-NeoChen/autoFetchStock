@@ -25,7 +25,7 @@ from src.renderer.chart_colors import (
     get_ma_color,
     get_volume_ma_color,
 )
-from src.models import PriceExtremes, KlinePeriod
+from src.models import PriceExtremes, KlinePeriod, MinuteKBar, SpikeSeverity
 
 logger = logging.getLogger("autofetchstock.renderer")
 
@@ -48,7 +48,8 @@ class ChartRenderer:
         df: pd.DataFrame,
         stock_name: str = "",
         period_label: str = "日K",
-        uirevision: Optional[str] = None
+        uirevision: Optional[str] = None,
+        spike_bars: Optional[List[MinuteKBar]] = None,
     ) -> go.Figure:
         """
         Render complete K-line chart with volume subplot.
@@ -62,6 +63,11 @@ class ChartRenderer:
             stock_name: Stock name for chart title
             period_label: Period label (e.g., "日K", "週K")
             uirevision: Unique ID to preserve UI state
+            spike_bars: Optional 1-min MinuteKBar list with detection
+                fields filled. When provided, volume bars matching a
+                spike-severity bar are recolored and an annotation is
+                drawn above the high. Caller is responsible for only
+                passing this in 1-min K mode.
 
         Returns:
             Plotly Figure object
@@ -91,11 +97,16 @@ class ChartRenderer:
         # Render price extremes annotation
         self._render_price_extremes(fig, df, row=1, col=1)
 
-        # Render volume bars
-        self._render_volume_bars(fig, df, row=2, col=1)
+        # Render volume bars (spike-aware when 1-min spike data supplied)
+        spike_lookup = self._build_spike_lookup(spike_bars)
+        self._render_volume_bars(fig, df, row=2, col=1, spike_lookup=spike_lookup)
 
         # Render volume moving averages
         self._render_volume_moving_averages(fig, df, row=2, col=1)
+
+        # Spike annotations on the price subplot (above the bar's high).
+        if spike_lookup:
+            self._render_volume_spike_annotations(fig, df, spike_lookup, row=1, col=1)
 
         # Apply unified layout
         title = f"{stock_name} {period_label}" if stock_name else period_label
@@ -290,7 +301,8 @@ class ChartRenderer:
         fig: go.Figure,
         df: pd.DataFrame,
         row: int,
-        col: int
+        col: int,
+        spike_lookup: Optional[Dict[Any, MinuteKBar]] = None,
     ) -> None:
         """
         Render volume bar chart (colors match K-line candles).
@@ -300,24 +312,37 @@ class ChartRenderer:
             df: DataFrame with OHLC and volume data
             row: Subplot row
             col: Subplot column
+            spike_lookup: Optional {date_key: MinuteKBar} so spike bars
+                are recolored by severity instead of plain up/down/flat.
         """
         x_values = df["date"] if "date" in df.columns else df.index
 
-        # Determine colors based on price change
-        colors = []
-        for _, r in df.iterrows():
-            if r["close"] > r["open"]:
+        # Build color + outline lists per row.
+        colors: List[str] = []
+        line_widths: List[float] = []
+        for x_val, r in zip(x_values, df.iterrows()):
+            _, row_data = r
+            spike_bar = self._lookup_spike(x_val, spike_lookup)
+            if spike_bar is not None and spike_bar.is_volume_spike:
+                colors.append(self._spike_color(spike_bar.spike_severity))
+                line_widths.append(1.5)
+                continue
+            if row_data["close"] > row_data["open"]:
                 colors.append(self.colors.UP_COLOR)
-            elif r["close"] < r["open"]:
+            elif row_data["close"] < row_data["open"]:
                 colors.append(self.colors.DOWN_COLOR)
             else:
                 colors.append(self.colors.FLAT_COLOR)
+            line_widths.append(0)
 
         fig.add_trace(
             go.Bar(
                 x=x_values,
                 y=df["volume"],
-                marker_color=colors,
+                marker=dict(
+                    color=colors,
+                    line=dict(color="#ffffff", width=line_widths),
+                ),
                 name="成交量",
                 showlegend=False,
                 hovertemplate="成交量: %{y:,.0f}<extra></extra>",
@@ -325,6 +350,102 @@ class ChartRenderer:
             row=row,
             col=col
         )
+
+    # ── Volume spike helpers ───────────────────────────────────────────────
+
+    @staticmethod
+    def _build_spike_lookup(
+        spike_bars: Optional[List[MinuteKBar]],
+    ) -> Dict[Any, MinuteKBar]:
+        """
+        Build a dict keyed by both pandas Timestamp and ISO string of the
+        bar's timestamp so caller can match whichever shape df["date"] uses.
+        """
+        lookup: Dict[Any, MinuteKBar] = {}
+        if not spike_bars:
+            return lookup
+        for bar in spike_bars:
+            ts = bar.timestamp
+            lookup[pd.Timestamp(ts)] = bar
+            lookup[ts.isoformat()] = bar
+            lookup[ts.strftime("%Y-%m-%d %H:%M:%S")] = bar
+            lookup[ts.strftime("%H:%M")] = bar
+        return lookup
+
+    @staticmethod
+    def _lookup_spike(
+        x_value: Any, lookup: Optional[Dict[Any, MinuteKBar]]
+    ) -> Optional[MinuteKBar]:
+        if not lookup:
+            return None
+        if x_value in lookup:
+            return lookup[x_value]
+        try:
+            return lookup.get(pd.Timestamp(x_value))
+        except (ValueError, TypeError):
+            return None
+
+    def _spike_color(self, severity: SpikeSeverity) -> str:
+        if severity == SpikeSeverity.EXTREME:
+            return self.colors.SPIKE_EXTREME
+        if severity == SpikeSeverity.HIGH:
+            return self.colors.SPIKE_HIGH
+        if severity == SpikeSeverity.MID:
+            return self.colors.SPIKE_MID
+        if severity == SpikeSeverity.LOW:
+            return self.colors.SPIKE_LOW
+        return self.colors.FLAT_COLOR
+
+    # Annotations get crowded fast: drop LOW-severity ones whenever there
+    # are more than this many spikes on screen.
+    _SPIKE_ANNOTATION_DROP_LOW_THRESHOLD: int = 20
+
+    def _render_volume_spike_annotations(
+        self,
+        fig: go.Figure,
+        df: pd.DataFrame,
+        spike_lookup: Dict[Any, MinuteKBar],
+        row: int,
+        col: int,
+    ) -> None:
+        """Place a `5.2×` text annotation above the high of each spike bar."""
+        x_values = df["date"] if "date" in df.columns else df.index
+
+        # Collect spikes that have a matching df row.
+        candidates: List[tuple] = []
+        for x_val in x_values:
+            bar = self._lookup_spike(x_val, spike_lookup)
+            if bar is None or not bar.is_volume_spike:
+                continue
+            candidates.append((x_val, bar))
+
+        if (
+            len(candidates) > self._SPIKE_ANNOTATION_DROP_LOW_THRESHOLD
+        ):
+            candidates = [
+                c for c in candidates if c[1].spike_severity != SpikeSeverity.LOW
+            ]
+
+        for x_val, bar in candidates:
+            ratio_text = (
+                f"{bar.volume_ratio:.1f}×" if bar.volume_ratio is not None else ""
+            )
+            fig.add_annotation(
+                x=x_val,
+                y=bar.high * 1.005,
+                text=ratio_text,
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=0.8,
+                arrowwidth=1,
+                arrowcolor=self._spike_color(bar.spike_severity),
+                font=dict(
+                    color=self._spike_color(bar.spike_severity),
+                    size=10,
+                ),
+                row=row,
+                col=col,
+            )
 
     def _render_volume_moving_averages(
         self,
