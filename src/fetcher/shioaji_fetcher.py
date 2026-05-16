@@ -7,7 +7,7 @@ import os
 import threading
 import time
 from typing import Dict, List, Optional, Callable, Any
-from datetime import datetime, timezone
+from datetime import datetime, date, time as dtime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -15,7 +15,13 @@ import shioaji as sj
 from shioaji.constant import QuoteVersion
 
 from src.config import AppConfig, get_logger
-from src.models import RealtimeQuote, IntradayTick, DailyOHLC, PriceDirection
+from src.models import (
+    RealtimeQuote,
+    IntradayTick,
+    DailyOHLC,
+    PriceDirection,
+    MinuteKBar,
+)
 
 logger = get_logger("autofetchstock.fetcher")
 
@@ -752,6 +758,207 @@ class ShioajiFetcher:
         except Exception as e:
             logger.error(f"Failed to fetch Shioaji daily history for {stock_id}: {e}")
             return []
+
+    # ── Volume Spike Detection: 1-minute K bar fetch ───────────────────────
+
+    TRADING_START: dtime = dtime(9, 0)
+    TRADING_END: dtime = dtime(13, 30)
+
+    def fetch_minute_kbars(
+        self,
+        stock_id: str,
+        target_date: date,
+        start_time: Optional[dtime] = None,
+        end_time: Optional[dtime] = None,
+    ) -> List[MinuteKBar]:
+        """
+        Fetch 1-minute K bars for a single trading day.
+
+        Primary path: Shioaji `api.kbars(contract, start, end)`.
+        Fallback: aggregate from `api.ticks()` if kbars fails or returns empty.
+
+        Bars outside the trading session [09:00, 13:30] (or the
+        explicit start_time/end_time window) are filtered out.
+        """
+        if not self.is_connected:
+            logger.warning("fetch_minute_kbars called while disconnected")
+            return []
+
+        start_t = start_time or self.TRADING_START
+        end_t = end_time or self.TRADING_END
+
+        bars: List[MinuteKBar] = []
+        try:
+            bars = self._fetch_minute_kbars_via_kbars_api(stock_id, target_date)
+        except Exception as exc:
+            logger.warning(
+                "Shioaji kbars failed for %s on %s: %s — falling back to ticks",
+                stock_id, target_date, exc,
+            )
+
+        if not bars:
+            try:
+                ticks = self._fetch_ticks_for_date(stock_id, target_date)
+                if ticks:
+                    bars = self._aggregate_from_ticks(stock_id, target_date, ticks)
+            except Exception as exc:
+                logger.error(
+                    "Tick fallback failed for %s on %s: %s",
+                    stock_id, target_date, exc,
+                )
+                return []
+
+        return [b for b in bars if start_t <= b.timestamp.time() <= end_t]
+
+    def _fetch_minute_kbars_via_kbars_api(
+        self, stock_id: str, target_date: date
+    ) -> List[MinuteKBar]:
+        """Call Shioaji kbars API and convert to MinuteKBar list."""
+        import pandas as pd
+
+        contract = self.api.Contracts.Stocks[stock_id]
+        if not contract:
+            logger.error("Stock contract not found: %s", stock_id)
+            return []
+
+        date_str = target_date.strftime("%Y-%m-%d")
+        kbars = self.api.kbars(contract, start=date_str, end=date_str)
+        if not kbars or not getattr(kbars, "ts", None):
+            return []
+
+        df = pd.DataFrame({**kbars})
+        if df.empty:
+            return []
+
+        bars: List[MinuteKBar] = []
+        for _, row in df.iterrows():
+            ts_local = self._normalize_datetime(row["ts"])
+            if ts_local is None or ts_local.date() != target_date:
+                continue
+            volume = int(row.get("Volume", 0) or 0)
+            amount = float(row.get("Amount", 0) or 0)
+            close_px = float(row["Close"])
+            vwap = (amount / (volume * 1000)) if volume > 0 else close_px
+            bars.append(MinuteKBar(
+                stock_id=stock_id,
+                timestamp=ts_local.replace(tzinfo=_TZ_TAIPEI),
+                open=float(row["Open"]),
+                high=float(row["High"]),
+                low=float(row["Low"]),
+                close=close_px,
+                volume=volume,
+                amount=amount,
+                tick_count=0,  # Shioaji kbars does not provide tick count
+                vwap=vwap,
+            ))
+
+        bars.sort(key=lambda b: b.timestamp)
+        return bars
+
+    def _fetch_ticks_for_date(
+        self, stock_id: str, target_date: date
+    ) -> List[IntradayTick]:
+        """
+        Pull historical ticks via Shioaji `api.ticks()` for fallback aggregation.
+        """
+        contract = self.api.Contracts.Stocks[stock_id]
+        if not contract:
+            return []
+
+        date_str = target_date.strftime("%Y-%m-%d")
+        raw = self.api.ticks(contract, date=date_str)
+        if not raw or not getattr(raw, "ts", None):
+            return []
+
+        ticks: List[IntradayTick] = []
+        ts_list = list(raw.ts)
+        close_list = list(getattr(raw, "close", []))
+        volume_list = list(getattr(raw, "volume", []))
+        bid_volume = list(getattr(raw, "bid_volume", []))
+        ask_volume = list(getattr(raw, "ask_volume", []))
+        tick_type = list(getattr(raw, "tick_type", []))
+
+        accumulated = 0
+        for i, raw_ts in enumerate(ts_list):
+            ts_local = self._normalize_datetime(raw_ts)
+            if ts_local is None or ts_local.date() != target_date:
+                continue
+            try:
+                price = float(close_list[i])
+                vol = int(volume_list[i])
+            except (IndexError, TypeError, ValueError):
+                continue
+            if vol < 0 or price <= 0:
+                continue
+            accumulated += vol
+
+            tt = tick_type[i] if i < len(tick_type) else 0
+            bv = float(bid_volume[i]) if i < len(bid_volume) else 0.0
+            av = float(ask_volume[i]) if i < len(ask_volume) else 0.0
+            buy_vol = float(vol) if tt == 1 else (av if av else 0.0)
+            sell_vol = float(vol) if tt == 2 else (bv if bv else 0.0)
+
+            ticks.append(IntradayTick(
+                time=ts_local.time().replace(microsecond=0),
+                price=price,
+                volume=vol,
+                buy_volume=buy_vol,
+                sell_volume=sell_vol,
+                accumulated_volume=accumulated,
+                timestamp=ts_local.replace(tzinfo=_TZ_TAIPEI),
+                is_odd=False,
+            ))
+        return ticks
+
+    def _aggregate_from_ticks(
+        self,
+        stock_id: str,
+        target_date: date,
+        ticks: List[IntradayTick],
+    ) -> List[MinuteKBar]:
+        """
+        Bucket regular-lot ticks into 1-minute K bars.
+
+        Odd-lot ticks (`is_odd=True`) are skipped: their `volume` is in
+        shares not lots, mixing them would corrupt the volume baseline.
+        """
+        if not ticks:
+            return []
+
+        buckets: Dict[tuple, List[IntradayTick]] = {}
+        for tick in ticks:
+            if getattr(tick, "is_odd", False):
+                continue
+            if tick.volume <= 0 or tick.price <= 0:
+                continue
+            key = (tick.time.hour, tick.time.minute)
+            buckets.setdefault(key, []).append(tick)
+
+        bars: List[MinuteKBar] = []
+        for (hour, minute), group in sorted(buckets.items()):
+            group.sort(key=lambda t: (t.time, t.accumulated_volume))
+            prices = [t.price for t in group]
+            volume = sum(t.volume for t in group)
+            amount = sum(t.price * t.volume * 1000 for t in group)
+            close_px = prices[-1]
+            vwap = (amount / (volume * 1000)) if volume > 0 else close_px
+            ts = datetime(
+                target_date.year, target_date.month, target_date.day,
+                hour, minute, tzinfo=_TZ_TAIPEI,
+            )
+            bars.append(MinuteKBar(
+                stock_id=stock_id,
+                timestamp=ts,
+                open=prices[0],
+                high=max(prices),
+                low=min(prices),
+                close=close_px,
+                volume=volume,
+                amount=amount,
+                tick_count=len(group),
+                vwap=vwap,
+            ))
+        return bars
 
     def _handle_quote(self, exchange, quote):
         """Callback handler for Shioaji Quote updates."""
