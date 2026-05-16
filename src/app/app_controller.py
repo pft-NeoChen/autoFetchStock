@@ -444,6 +444,7 @@ class AppController:
             news_processor=self.news_processor,
             chips_storage=self.chips_storage,
             index_fetcher=self.index_fetcher,
+            spike_detection_store=self.spike_detection_store,
         )
 
         # Register all callbacks

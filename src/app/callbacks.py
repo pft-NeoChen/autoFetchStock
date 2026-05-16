@@ -33,6 +33,8 @@ from src.models import (
     AdvisorBullet,
     AdvisorDimension,
     StockEvent,
+    MinuteKBar,
+    SpikeSeverity,
 )
 from src.exceptions import (
     ConnectionTimeoutError,
@@ -78,6 +80,7 @@ class CallbackManager:
         news_processor=None,
         chips_storage=None,
         index_fetcher=None,
+        spike_detection_store=None,
     ):
         """
         Initialize callback manager.
@@ -106,6 +109,7 @@ class CallbackManager:
         self.news_processor = news_processor
         self.chips_storage = chips_storage
         self.index_fetcher = index_fetcher
+        self.spike_detection_store = spike_detection_store
         self._current_stock_id: Optional[str] = None
         self._current_stock_name: Optional[str] = None
         # Per-stock cache for WatchlistRow sparklines: load_daily_data
@@ -129,6 +133,7 @@ class CallbackManager:
         self._register_advisor_callbacks()
         self._register_events_tab_callbacks()
         self._register_alert_bar_callbacks()
+        self._register_volume_spike_callbacks()
         logger.info("All callbacks registered")
 
     def _register_right_rail_callbacks(self) -> None:
@@ -551,6 +556,36 @@ class CallbackManager:
         if age > 5:
             return "warn", f"資料延遲 {int(age)} 秒，等待下一筆"
         return None, ""
+
+    # ── Volume Spike Panel ─────────────────────────────────────────────────
+
+    def _register_volume_spike_callbacks(self) -> None:
+        """Render volume spike rows from the in-memory SpikeDetectionStore.
+
+        Triggered by the 60s dcc.Interval AND by stock changes so the
+        panel refreshes immediately when the user switches favorites.
+        """
+
+        @self.app.callback(
+            Output("volume-spike-list", "children"),
+            Input("volume-spike-interval", "n_intervals"),
+            Input("app-state-store", "data"),
+            prevent_initial_call=False,
+        )
+        def update_volume_spike_panel(_n, app_state):
+            try:
+                stock_id = (app_state or {}).get("current_stock")
+                if not stock_id:
+                    return [html.Div("請先選擇股票", className="no-data")]
+                if self.spike_detection_store is None:
+                    return [html.Div("尚無爆量", className="no-data")]
+                bars = self.spike_detection_store.get_recent(stock_id, n=20)
+                if not bars:
+                    return [html.Div("尚無爆量", className="no-data")]
+                return [_render_volume_spike_row(b) for b in bars]
+            except Exception as exc:
+                logger.error("update_volume_spike_panel failed: %s", exc)
+                return [html.Div("資料載入錯誤", className="no-data")]
 
     def _register_events_tab_callbacks(self) -> None:
         """Phase 6.4 — fill the per-stock event timeline tab."""
@@ -5136,3 +5171,86 @@ def _fmt_duration(delta) -> str:
     hours, remainder = divmod(seconds, 3600)
     minutes, _ = divmod(remainder, 60)
     return f"{hours}:{minutes:02d}"
+
+
+# ── Volume Spike Panel helpers ─────────────────────────────────────────────
+
+def _format_lot_volume(volume: int) -> str:
+    """Compact lot count: 2,341 → '2.3K', 234 → '234'."""
+    if volume >= 1000:
+        return f"{volume / 1000:.1f}K"
+    return f"{volume}"
+
+
+def _format_amount_twd(amount: float) -> str:
+    """143_200_000 → '143.2M', 4_300_000 → '4.3M', 250_000 → '250K'."""
+    if amount >= 100_000_000:
+        return f"{amount / 100_000_000:.2f}億"
+    if amount >= 1_000_000:
+        return f"{amount / 1_000_000:.1f}M"
+    if amount >= 1_000:
+        return f"{amount / 1_000:.0f}K"
+    return f"{amount:.0f}"
+
+
+def _kbar_direction_class(bar: MinuteKBar) -> Tuple[str, str]:
+    """Return (css_class, glyph) for the K-bar column."""
+    if bar.close > bar.open:
+        return "vs-kbar-up", "▲"
+    if bar.close < bar.open:
+        return "vs-kbar-down", "▼"
+    return "vs-kbar-flat", "─"
+
+
+def _build_spike_tooltip(bar: MinuteKBar) -> str:
+    """Multi-line text for hover tooltip (CSS white-space: pre-line)."""
+    open_close_pct = ((bar.close - bar.open) / bar.open * 100) if bar.open else 0.0
+    end_minute = bar.timestamp.replace(second=59)
+
+    severity_label = bar.spike_severity.display_name or "—"
+    ratio_text = f"{bar.volume_ratio:.1f}×" if bar.volume_ratio else "—×"
+    baseline_text = (
+        f"{bar.baseline_volume:.0f} 張"
+        if bar.baseline_volume is not None
+        else "—"
+    )
+    confidence_note = "  *baseline 不足" if bar.baseline_low_confidence else ""
+
+    sep = "─────────────────────"
+    return "\n".join([
+        f"{bar.timestamp.strftime('%H:%M:%S')} ~ {end_minute.strftime('%H:%M:%S')}",
+        sep,
+        f"開 {bar.open:.2f}  →  收 {bar.close:.2f}  ({open_close_pct:+.2f}%)",
+        f"高 {bar.high:.2f}     低 {bar.low:.2f}",
+        sep,
+        f"成交量    {bar.volume:,} 張",
+        f"成交額    {_format_amount_twd(bar.amount)}",
+        f"VWAP      {bar.vwap:.2f}",
+        f"筆數      {bar.tick_count} 筆" if bar.tick_count else "筆數      —",
+        sep,
+        f"基準量    {baseline_text}{confidence_note}",
+        f"倍數      {ratio_text}  {severity_label}".rstrip(),
+        sep,
+    ])
+
+
+def _render_volume_spike_row(bar: MinuteKBar) -> html.Div:
+    """Build one .volume-spike-row Div with hover tooltip."""
+    kbar_cls, kbar_glyph = _kbar_direction_class(bar)
+    severity_cls = f"vs-severity-{bar.spike_severity.value}"
+    ratio_text = f"{bar.volume_ratio:.1f}×" if bar.volume_ratio else "—×"
+    vol_text = f"{_format_lot_volume(bar.volume)} ({ratio_text})"
+    vol_class = severity_cls
+    if bar.baseline_low_confidence:
+        vol_class += " vs-low-confidence"
+
+    return html.Div(
+        className="volume-spike-row",
+        children=[
+            html.Span(bar.timestamp.strftime("%H:%M"), className="vs-col-time"),
+            html.Span(kbar_glyph, className=f"vs-col-kbar {kbar_cls}"),
+            html.Span(f"{bar.close:.2f}", className=f"vs-col-price {kbar_cls}"),
+            html.Span(vol_text, className=f"vs-col-vol {vol_class}"),
+            html.Div(_build_spike_tooltip(bar), className="vs-tooltip"),
+        ],
+    )
