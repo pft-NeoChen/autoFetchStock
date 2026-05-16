@@ -546,6 +546,7 @@ def _create_right_rail() -> html.Aside:
                         children=[
                             _create_best_five_prices(),
                             _create_big_orders_tape(),
+                            _create_volume_spike_panel(),
                         ],
                     ),
                     html.Div(
@@ -634,6 +635,48 @@ def _create_big_orders_tape() -> html.Div:
                 id="big-orders-list",
                 className="big-orders-list",
                 children=[html.Div("尚無大戶資料", className="no-data")],
+            ),
+        ],
+    )
+
+
+def _create_volume_spike_panel() -> html.Div:
+    """Volume Spike Detection (爆量 1 分 K) panel.
+
+    Sits below 大戶逐筆 in the chips right-rail tab. Header carries a
+    `≥2×` pill showing the entry threshold (SPIKE_THRESHOLD_LOW). Four
+    columns: 時間 / K / 價格 / 量(倍). Rows + tooltips are filled by
+    callback (Task 9) from SpikeDetectionStore.
+    """
+    return html.Div(
+        id="volume-spike-panel",
+        className="volume-spike-panel",
+        children=[
+            html.Div(
+                className="sidebar-section-title-row",
+                children=[
+                    html.H3("爆量 1 分 K", className="sidebar-title"),
+                    html.Span("≥2×", className="pill pill-neu sidebar-title-pill"),
+                ],
+            ),
+            html.Div(
+                className="volume-spike-header",
+                children=[
+                    html.Span("時間", className="vs-col-time"),
+                    html.Span("K", className="vs-col-kbar"),
+                    html.Span("價格", className="vs-col-price"),
+                    html.Span("量(倍)", className="vs-col-vol"),
+                ],
+            ),
+            html.Div(
+                id="volume-spike-list",
+                className="volume-spike-list",
+                children=[html.Div("尚無爆量", className="no-data")],
+            ),
+            dcc.Interval(
+                id="volume-spike-interval",
+                interval=60_000,  # refresh once per minute
+                n_intervals=0,
             ),
         ],
     )
@@ -1140,4 +1183,9 @@ COMPONENT_IDS = {
     "error_display": "error-message-display",
     "error_text": "error-text",
     "error_close": "error-close-button",
+
+    # Volume Spike Detection panel
+    "volume_spike_panel": "volume-spike-panel",
+    "volume_spike_list": "volume-spike-list",
+    "volume_spike_interval": "volume-spike-interval",
 }
