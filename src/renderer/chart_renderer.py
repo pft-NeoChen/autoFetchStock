@@ -408,10 +408,9 @@ class ChartRenderer:
         row: int,
         col: int,
     ) -> None:
-        """Place a `5.2×` text annotation above the high of each spike bar."""
+        """Mark spike bars with triangle + ratio text + rich hover tooltip."""
         x_values = df["date"] if "date" in df.columns else df.index
 
-        # Collect spikes that have a matching df row.
         candidates: List[tuple] = []
         for x_val in x_values:
             bar = self._lookup_spike(x_val, spike_lookup)
@@ -419,33 +418,98 @@ class ChartRenderer:
                 continue
             candidates.append((x_val, bar))
 
-        if (
-            len(candidates) > self._SPIKE_ANNOTATION_DROP_LOW_THRESHOLD
-        ):
+        if len(candidates) > self._SPIKE_ANNOTATION_DROP_LOW_THRESHOLD:
             candidates = [
                 c for c in candidates if c[1].spike_severity != SpikeSeverity.LOW
             ]
 
+        if not candidates:
+            return
+
+        groups: Dict[SpikeSeverity, List[tuple]] = {}
         for x_val, bar in candidates:
-            ratio_text = (
+            groups.setdefault(bar.spike_severity, []).append((x_val, bar))
+
+        for severity, items in groups.items():
+            xs = [x for x, _ in items]
+            ys = [bar.high * 1.008 for _, bar in items]
+            texts = [
                 f"{bar.volume_ratio:.1f}×" if bar.volume_ratio is not None else ""
-            )
-            fig.add_annotation(
-                x=x_val,
-                y=bar.high * 1.005,
-                text=ratio_text,
-                showarrow=True,
-                arrowhead=2,
-                arrowsize=0.8,
-                arrowwidth=1,
-                arrowcolor=self._spike_color(bar.spike_severity),
-                font=dict(
-                    color=self._spike_color(bar.spike_severity),
-                    size=10,
+                for _, bar in items
+            ]
+            hovers = [self._build_spike_hover_text(bar) for _, bar in items]
+            color = self._spike_color(severity)
+
+            fig.add_trace(
+                go.Scatter(
+                    x=xs,
+                    y=ys,
+                    mode="markers+text",
+                    marker=dict(
+                        symbol="triangle-down",
+                        size=12,
+                        color=color,
+                        line=dict(color="#ffffff", width=1),
+                    ),
+                    text=texts,
+                    textposition="top center",
+                    textfont=dict(color=color, size=11),
+                    cliponaxis=False,
+                    customdata=hovers,
+                    hovertemplate="%{customdata}<extra></extra>",
+                    name=f"爆量 {severity.display_name or severity.value}",
+                    showlegend=False,
                 ),
                 row=row,
                 col=col,
             )
+
+    @staticmethod
+    def _build_spike_hover_text(bar: MinuteKBar) -> str:
+        """Multi-line hover string for spike marker."""
+        ts = bar.timestamp
+        time_range = f"{ts.strftime('%H:%M')}:00 ~ {ts.strftime('%H:%M')}:59"
+
+        if bar.open:
+            pct = (bar.close - bar.open) / bar.open * 100.0
+            pct_str = f"({pct:+.2f}%)"
+        else:
+            pct_str = ""
+
+        amount_m = bar.amount / 1_000_000.0 if bar.amount else 0.0
+        vwap_str = f"{bar.vwap:.2f}" if bar.vwap else "-"
+        tick_str = f"{bar.tick_count} 筆" if bar.tick_count else "-"
+
+        baseline_str = (
+            f"{bar.baseline_volume:,.0f} 張"
+            if bar.baseline_volume is not None
+            else "-"
+        )
+        ratio_str = (
+            f"{bar.volume_ratio:.1f}×" if bar.volume_ratio is not None else "—×"
+        )
+        sev_label = (
+            bar.spike_severity.display_name
+            or bar.spike_severity.value.upper()
+        )
+        lc_mark = " (低信心)" if bar.baseline_low_confidence else ""
+
+        sep = "─" * 21
+        lines = [
+            f"<b>{time_range}</b>",
+            sep,
+            f"開 {bar.open:.2f}  →  收 {bar.close:.2f}  {pct_str}",
+            f"高 {bar.high:.2f}     低 {bar.low:.2f}",
+            sep,
+            f"成交量    {bar.volume:,} 張",
+            f"成交額    {amount_m:.1f}M",
+            f"VWAP      {vwap_str}",
+            f"筆數      {tick_str}",
+            sep,
+            f"基準量    {baseline_str}{lc_mark}",
+            f"倍數      {ratio_str}  {sev_label}",
+        ]
+        return "<br>".join(lines)
 
     def _render_volume_moving_averages(
         self,
