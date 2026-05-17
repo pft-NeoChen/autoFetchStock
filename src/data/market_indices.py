@@ -12,9 +12,9 @@ The STUB values double as the spec's frozen reference fixture
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
-from src.models import MarketIndexEntry
+from src.models import BreadthSummary, IndustryPulseEntry, MarketIndexEntry
 
 
 # STUB fallback — matches reference/04-layout-A.png + atoms.jsx exactly.
@@ -76,6 +76,46 @@ def fetch_market_strip(
         pass
 
     return [by_label.get(stub.label, stub) for stub in _STUB_ENTRIES]
+
+
+# ── Industry pulse + breadth composers ─────────────────────────────
+
+INDUSTRY_LABELS = ["半導體", "通信", "電零"]
+INDUSTRY_MARKET_ORDER = ["TSE", "OTC"]  # TSE first per spec
+
+
+def fetch_industry_pulse(
+    shioaji_fetcher=None,
+    index_fetcher=None,
+) -> List[IndustryPulseEntry]:
+    """Return industry pulse entries in display order: TSE 半導體/通信/電零,
+    then OTC 半導體/通信/電零. Missing entries are silently skipped — the
+    UI renders only what we have.
+    """
+    if index_fetcher is None or shioaji_fetcher is None:
+        return []
+    try:
+        raw = index_fetcher.fetch_industries(shioaji_fetcher)
+    except Exception:
+        return []
+    by_key: Dict[tuple, IndustryPulseEntry] = {(e.market, e.label): e for e in raw}
+    ordered: List[IndustryPulseEntry] = []
+    for market in INDUSTRY_MARKET_ORDER:
+        for label in INDUSTRY_LABELS:
+            entry = by_key.get((market, label))
+            if entry is not None:
+                ordered.append(entry)
+    return ordered
+
+
+def fetch_breadth_summary(index_fetcher=None) -> Dict[str, BreadthSummary]:
+    """Return {market: BreadthSummary} for TSE + OTC. Empty when no fetcher."""
+    if index_fetcher is None:
+        return {}
+    try:
+        return index_fetcher.fetch_breadth()
+    except Exception:
+        return {}
 
 
 def market_strip_tail(index_fetcher=None) -> str:

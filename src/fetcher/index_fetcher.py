@@ -22,7 +22,7 @@ import time
 from collections import deque
 from typing import Deque, Dict, List, Optional, Tuple
 
-from src.models import MarketIndexEntry
+from src.models import BreadthSummary, IndustryPulseEntry, MarketIndexEntry
 
 logger = logging.getLogger("autofetchstock.index_fetcher")
 
@@ -85,7 +85,21 @@ _LOCAL_INDEX_DEFS: List[Tuple[str, str, Optional[str], str]] = [
     ("台指近",   "Futures", None, "TXFR1"),
 ]
 
-# ── Foreign indices (yfinance) ─────────────────────────────────────
+# ── Industry sub-indices (Shioaji Indexs.TSE / Indexs.OTC) ─────────
+# (label, market, symbol). Sinopac subindex codes — verified against
+# api.Contracts.Indexs.{TSE,OTC} naming on prod env. If a code is wrong
+# the subscribe call simply no-ops; we log the available keys for ops.
+_INDUSTRY_DEFS: List[Tuple[str, str, str]] = [
+    ("半導體", "TSE", "027"),   # 半導體類指數
+    ("通信",   "TSE", "031"),   # 通信網路類指數
+    ("電零",   "TSE", "032"),   # 電子零組件類指數
+    ("半導體", "OTC", "162"),   # 櫃買半導體業類指數
+    ("通信",   "OTC", "165"),   # 櫃買通信網路業類指數
+    ("電零",   "OTC", "166"),   # 櫃買電子零組件業類指數
+]
+
+
+
 # (label, yfinance_symbol)
 _FOREIGN_INDEX_DEFS: List[Tuple[str, str]] = [
     ("美元", "TWD=X"),
@@ -129,6 +143,16 @@ class IndexFetcher:
         # futures TXFR1 resolves to TXFL5/TXFM5 for the current month). Map the
         # delivered code back to the def symbol so cache lookups stay stable.
         self._code_to_def: Dict[str, str] = {}
+
+        # Industry sub-index streaming. Keyed by (market, symbol).
+        self._industry_cache: Dict[Tuple[str, str], Tuple[IndustryPulseEntry, float]] = {}
+        self._industry_subscribed: bool = False
+        # Map delivered tick code → (label, market, symbol) for industry routing.
+        self._industry_code_map: Dict[str, Tuple[str, str, str]] = {}
+
+        # Breadth (TWSE + TPEx) HTTP poll cache.
+        self._breadth_cache: Dict[str, Tuple[BreadthSummary, float]] = {}
+        self._breadth_lock = threading.RLock()
 
     # ── Public ──────────────────────────────────────────────────────
 
@@ -289,6 +313,24 @@ class IndexFetcher:
         """
         if close <= 0:
             return
+
+        # Industry sub-index route — separate cache, separate model.
+        ind = self._industry_code_map.get(symbol)
+        if ind is not None:
+            ind_label, ind_market, ind_sym = ind
+            if change_rate is not None:
+                pct = change_rate
+            elif reference > 0:
+                pct = (close - reference) / reference * 100.0
+            else:
+                pct = 0.0
+            entry_i = IndustryPulseEntry(
+                label=ind_label, market=ind_market, symbol=ind_sym,
+                pct=pct, direction=_direction(pct),
+            )
+            self._industry_cache[(ind_market, ind_sym)] = (entry_i, time.monotonic())
+            return
+
         def_symbol = self._code_to_def.get(symbol, symbol)
         # Resolve label from defs (linear scan over ~5 entries is fine).
         label: Optional[str] = None
@@ -447,6 +489,155 @@ class IndexFetcher:
                 return None
         return None
 
+    # ── Industry sub-index streaming ────────────────────────────────
+
+    def subscribe_industries(self, shioaji_fetcher) -> None:
+        """Subscribe Shioaji ticks for TSE/OTC industry sub-indices.
+
+        Idempotent: noop after first successful run. Codes that fail to
+        resolve are skipped; we log the available keys under each market
+        so ops can adjust ``_INDUSTRY_DEFS`` if Sinopac renumbers.
+        """
+        if self._industry_subscribed:
+            return
+        api = getattr(shioaji_fetcher, "api", None)
+        if api is None:
+            return
+        try:
+            shioaji_fetcher.register_index_tick_handler(self._on_index_tick)
+        except Exception as exc:
+            logger.debug("register index tick handler (industry) failed: %s", exc)
+            return
+
+        seen_markets: set[str] = set()
+        ok = True
+        for label, market, sym in _INDUSTRY_DEFS:
+            try:
+                indexs = api.Contracts.Indexs
+                sub = getattr(indexs, market, None)
+                if sub is None:
+                    ok = False
+                    continue
+                try:
+                    contract = sub[sym]
+                except (KeyError, AttributeError):
+                    contract = None
+                if contract is None:
+                    if market not in seen_markets:
+                        try:
+                            keys = [getattr(c, "code", "?") for c in sub]
+                            logger.info("Indexs.%s available codes: %s", market, keys[:60])
+                        except Exception:
+                            pass
+                        seen_markets.add(market)
+                    ok = False
+                    continue
+                code = getattr(contract, "code", None) or sym
+                self._industry_code_map[code] = (label, market, sym)
+                self._industry_code_map[sym] = (label, market, sym)
+                shioaji_fetcher.subscribe_index_or_future(contract, "Indexs")
+                logger.info("IndexFetcher subscribe industry %s/%s code=%s", market, label, code)
+            except Exception as exc:
+                logger.debug("industry subscribe %s/%s failed: %s", market, sym, exc)
+                ok = False
+        if ok:
+            self._industry_subscribed = True
+
+    def fetch_industries(self, shioaji_fetcher) -> List[IndustryPulseEntry]:
+        """Return latest industry pulse entries (streaming-first, snapshot fallback)."""
+        if not shioaji_fetcher or not getattr(shioaji_fetcher, "is_connected", False):
+            return []
+        api = getattr(shioaji_fetcher, "api", None)
+        if api is None:
+            return []
+        self.subscribe_industries(shioaji_fetcher)
+
+        now = time.monotonic()
+        out: List[IndustryPulseEntry] = []
+        for label, market, sym in _INDUSTRY_DEFS:
+            key = (market, sym)
+            cached = self._industry_cache.get(key)
+            if cached and (now - cached[1]) < self.STREAM_CACHE_TTL:
+                out.append(cached[0])
+                continue
+            try:
+                indexs = api.Contracts.Indexs
+                sub = getattr(indexs, market, None)
+                if sub is None:
+                    continue
+                try:
+                    contract = sub[sym]
+                except (KeyError, AttributeError):
+                    continue
+                snaps = api.snapshots([contract])
+                if not snaps:
+                    continue
+                snap = snaps[0]
+                close = float(getattr(snap, "close", 0) or 0)
+                if close <= 0:
+                    continue
+                _change, pct = _snapshot_change(snap, contract, close)
+                entry = IndustryPulseEntry(
+                    label=label, market=market, symbol=sym,
+                    pct=pct, direction=_direction(pct),
+                )
+                out.append(entry)
+                self._industry_cache[key] = (entry, now)
+            except Exception as exc:
+                logger.debug("industry snapshot %s/%s/%s failed: %s", market, label, sym, exc)
+        return out
+
+    # ── Breadth (TWSE / TPEx HTTP poll) ─────────────────────────────
+
+    BREADTH_TTL = 20.0   # seconds — public market-stats endpoints update slowly
+
+    def fetch_breadth(self) -> Dict[str, BreadthSummary]:
+        """Poll TWSE + TPEx market-statistic endpoints for advance/decline
+        + limit-up/down counts. Cached for ``BREADTH_TTL`` seconds; on
+        failure returns the last good value (or empty)."""
+        now = time.monotonic()
+        out: Dict[str, BreadthSummary] = {}
+        for market in ("TSE", "OTC"):
+            with self._breadth_lock:
+                cached = self._breadth_cache.get(market)
+            if cached and (now - cached[1]) < self.BREADTH_TTL:
+                out[market] = cached[0]
+                continue
+            try:
+                fresh = self._fetch_breadth_one(market)
+            except Exception as exc:
+                logger.debug("breadth fetch %s failed: %s", market, exc)
+                fresh = None
+            if fresh is not None:
+                with self._breadth_lock:
+                    self._breadth_cache[market] = (fresh, now)
+                out[market] = fresh
+            elif cached is not None:
+                out[market] = cached[0]
+        return out
+
+    def _fetch_breadth_one(self, market: str) -> Optional[BreadthSummary]:
+        try:
+            import requests
+        except ImportError:
+            return None
+        if market == "TSE":
+            url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&type=MS"
+        else:
+            url = "https://www.tpex.org.tw/openapi/v1/tpex_volume"  # placeholder
+        try:
+            resp = requests.get(url, timeout=8.0)
+            if resp.status_code != 200:
+                return None
+            payload = resp.json()
+        except Exception as exc:
+            logger.debug("breadth http %s: %s", market, exc)
+            return None
+
+        if market == "TSE":
+            return _parse_twse_breadth(payload)
+        return _parse_tpex_breadth(payload)
+
     def _get_yfinance(self):
         if self._yf is not None:
             return self._yf
@@ -457,3 +648,76 @@ class IndexFetcher:
         except ImportError:
             logger.warning("yfinance not installed — foreign indices disabled")
             return None
+
+
+# ── Breadth parsers ────────────────────────────────────────────────
+
+def _parse_twse_breadth(payload: dict) -> Optional[BreadthSummary]:
+    """Extract advance/decline + limit counts from TWSE MI_INDEX response.
+
+    The endpoint returns several tables; we look for the one whose header
+    contains '漲跌證券數合計'. Each row is [類別, 漲家數, 上漲限制, 跌家數, 下跌限制, 持平, 未成交, 無比價]
+    or a close variant; counts under '整體市場' aggregate everything.
+    """
+    tables = payload.get("tables") or payload.get("data") or []
+    if not isinstance(tables, list):
+        return None
+    for tbl in tables:
+        title = (tbl.get("title") or "") if isinstance(tbl, dict) else ""
+        if "漲跌證券" in title:
+            rows = tbl.get("data") or tbl.get("rows") or []
+            # First data row holds 整體市場 aggregates.
+            for row in rows:
+                if not isinstance(row, list) or len(row) < 6:
+                    continue
+                try:
+                    adv = _digit(row[1])
+                    lim_up = _digit(row[2])
+                    dec = _digit(row[3])
+                    lim_down = _digit(row[4])
+                    unch = _digit(row[5])
+                    return BreadthSummary(
+                        market="TSE",
+                        advancers=adv, decliners=dec, unchanged=unch,
+                        limit_up=lim_up, limit_down=lim_down,
+                    )
+                except Exception:
+                    continue
+    return None
+
+
+def _parse_tpex_breadth(payload) -> Optional[BreadthSummary]:
+    """TPEx openapi returns per-stock rows; aggregate counts client-side.
+
+    Each row carries '漲跌(+/-)' or 'Change'; we sum positives/negatives.
+    Limit-up/down detection compares price against 漲跌停 if present.
+    """
+    if not isinstance(payload, list):
+        return None
+    adv = dec = unch = 0
+    for row in payload:
+        try:
+            chg = _to_float(row.get("Change") or row.get("漲跌"))
+        except AttributeError:
+            continue
+        if chg is None:
+            continue
+        if chg > 0:
+            adv += 1
+        elif chg < 0:
+            dec += 1
+        else:
+            unch += 1
+    if adv == dec == unch == 0:
+        return None
+    return BreadthSummary(market="OTC", advancers=adv, decliners=dec, unchanged=unch)
+
+
+def _digit(value) -> int:
+    if value is None:
+        return 0
+    s = str(value).replace(",", "").strip()
+    try:
+        return int(float(s))
+    except (TypeError, ValueError):
+        return 0

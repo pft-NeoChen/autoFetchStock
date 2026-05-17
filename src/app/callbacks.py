@@ -27,6 +27,8 @@ from src.models import (
     IntradayTick,
     RealtimeQuote,
     MarketIndexEntry,
+    IndustryPulseEntry,
+    BreadthSummary,
     ChipKpiCard,
     FundamentalsSnapshot,
     Advisor,
@@ -43,6 +45,8 @@ from src.exceptions import (
     ServiceUnavailableError,
 )
 from src.data.market_indices import (
+    fetch_breadth_summary,
+    fetch_industry_pulse,
     fetch_market_strip,
     split_strip_entries,
 )
@@ -2808,6 +2812,8 @@ class CallbackManager:
 
         @self.app.callback(
             Output("market-strip", "children"),
+            Output("market-strip-industry", "children"),
+            Output("market-strip-breadth", "children"),
             Output("market-strip-below-row1", "children"),
             Output("market-strip-below-row2", "children"),
             Input("market-strip-interval", "n_intervals"),
@@ -2819,8 +2825,15 @@ class CallbackManager:
                 index_fetcher=self.index_fetcher,
             )
             header, row1, row2 = split_strip_entries(entries)
+            industries = fetch_industry_pulse(
+                shioaji_fetcher=self.shioaji_fetcher,
+                index_fetcher=self.index_fetcher,
+            )
+            breadth = fetch_breadth_summary(index_fetcher=self.index_fetcher)
             return (
                 _render_market_strip(header, ""),
+                _render_industry_pulse(industries),
+                _render_breadth_row(breadth),
                 _render_strip_cards(row1),
                 _render_strip_cards(row2),
             )
@@ -5140,6 +5153,63 @@ def _render_strip_cards(entries: List[MarketIndexEntry]) -> List[Any]:
             )
         )
     return cards
+
+
+def _render_industry_pulse(entries: List[IndustryPulseEntry]) -> List[Any]:
+    """Industry pulse pills — [上市/上櫃] [名稱] (+/-%數).
+    Colored outline by direction (紅漲/綠跌, Taiwan convention)."""
+    if not entries:
+        return []
+    out: List[Any] = []
+    last_market: Optional[str] = None
+    for e in entries:
+        cls = _dir_class(e.direction)
+        sign = "+" if e.pct > 0 else ""
+        pct_txt = f"{sign}{e.pct:.2f}%"
+        market_tag = "上市" if e.market == "TSE" else "上櫃"
+        if last_market is not None and e.market != last_market:
+            out.append(html.Div(className="industry-pill-sep"))
+        last_market = e.market
+        out.append(
+            html.Div(
+                className=f"industry-pill {cls}",
+                children=[
+                    html.Span(market_tag, className="industry-pill-tag"),
+                    html.Span(e.label, className="industry-pill-label"),
+                    html.Span(pct_txt, className="industry-pill-pct"),
+                ],
+            )
+        )
+    return out
+
+
+def _render_breadth_row(breadth: dict) -> List[Any]:
+    """Breadth row — for each of TSE/OTC show 漲家數 / 跌家數 + 漲停 / 跌停."""
+    if not breadth:
+        return []
+    out: List[Any] = []
+    for market in ("TSE", "OTC"):
+        b = breadth.get(market)
+        if b is None:
+            continue
+        market_tag = "上市" if market == "TSE" else "上櫃"
+        out.append(
+            html.Div(
+                className="breadth-cell",
+                children=[
+                    html.Span(market_tag, className="breadth-tag"),
+                    html.Span("漲", className="breadth-k up"),
+                    html.Span(f"{b.advancers}", className="breadth-v up"),
+                    html.Span(f"(漲停{b.limit_up})", className="breadth-sub up"),
+                    html.Span("跌", className="breadth-k down"),
+                    html.Span(f"{b.decliners}", className="breadth-v down"),
+                    html.Span(f"(跌停{b.limit_down})", className="breadth-sub down"),
+                    html.Span("平", className="breadth-k flat"),
+                    html.Span(f"{b.unchanged}", className="breadth-v flat"),
+                ],
+            )
+        )
+    return out
 
 
 def _direction_for(delta: float) -> str:

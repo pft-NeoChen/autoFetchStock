@@ -344,6 +344,8 @@ def _create_below_chart_strip() -> html.Div:
         id="market-strip-below",
         className="market-strip-below",
         children=[
+            html.Div(id="market-strip-industry", className="market-strip-industry"),
+            html.Div(id="market-strip-breadth", className="market-strip-breadth"),
             html.Div(id="market-strip-below-row1", className="market-strip-row"),
             html.Div(id="market-strip-below-row2", className="market-strip-row"),
         ],

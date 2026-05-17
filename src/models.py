@@ -388,6 +388,27 @@ class MarketIndexEntry:
 
 
 @dataclass
+class IndustryPulseEntry:
+    """Single industry-subindex pill in the below-chart strip."""
+    label: str           # 顯示名，例 「半導體」
+    market: str          # 'TSE' | 'OTC'
+    symbol: str          # 子類股代號
+    pct: float           # 漲跌百分比（vs 前一交易日收盤）
+    direction: str = "flat"   # 'up' | 'down' | 'flat'
+
+
+@dataclass
+class BreadthSummary:
+    """Up/down breadth + limit-up/down counts for one market."""
+    market: str          # 'TSE' | 'OTC'
+    advancers: int = 0   # 上漲家數
+    decliners: int = 0   # 下跌家數
+    unchanged: int = 0   # 平盤家數
+    limit_up: int = 0    # 漲停家數
+    limit_down: int = 0  # 跌停家數
+
+
+@dataclass
 class ChipKpiCard:
     """Single mini KPI card in the bottom data row (籌碼面 KPI)."""
     key: str             # 'foreign' | 'trust' | 'dealer' | 'margin'

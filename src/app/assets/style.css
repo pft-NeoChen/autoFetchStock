@@ -2420,7 +2420,7 @@ html {
 .market-strip-below .strip-card-value {
     font-family: var(--font-num);
     font-variant-numeric: tabular-nums;
-    font-size: clamp(20px, 18cqw, 56px);
+    font-size: clamp(16px, 12cqw, 36px);
     font-weight: 700;
     line-height: 1.1;
     color: var(--txt-0);
@@ -2451,6 +2451,99 @@ html {
     opacity: 0.85;
     margin-left: 2px;
 }
+
+/* ── Industry pulse row (上市/上櫃 半導體・通信・電零) ───────────── */
+.market-strip-industry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    align-items: center;
+}
+
+.industry-pill-sep {
+    width: 1px;
+    align-self: stretch;
+    background: var(--line);
+    margin: 0 var(--sp-2);
+}
+
+.industry-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: var(--r-pill);
+    border: 1.5px solid var(--line);
+    background: var(--bg-3);
+    font-size: 13px;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+.industry-pill.up   { border-color: var(--up);   color: var(--up); }
+.industry-pill.down { border-color: var(--down); color: var(--down); }
+.industry-pill.flat { border-color: var(--line); color: var(--txt-1); }
+
+.industry-pill-tag {
+    font-size: 11px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--txt-2);
+    letter-spacing: 0.02em;
+}
+
+.industry-pill-label {
+    font-weight: 600;
+}
+
+.industry-pill-pct {
+    font-family: var(--font-num);
+    font-weight: 600;
+}
+
+/* ── Breadth row (漲家數 / 跌家數 / 漲跌停) ──────────────────────── */
+.market-strip-breadth {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-4);
+    align-items: center;
+    padding: 2px 0;
+    font-size: 13px;
+    line-height: 1.1;
+}
+
+.breadth-cell {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-variant-numeric: tabular-nums;
+}
+
+.breadth-tag {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--txt-2);
+    margin-right: 4px;
+}
+
+.breadth-k { color: var(--txt-2); font-size: 12px; }
+.breadth-k.up   { color: var(--up); }
+.breadth-k.down { color: var(--down); }
+
+.breadth-v { font-family: var(--font-num); font-weight: 700; }
+.breadth-v.up   { color: var(--up); }
+.breadth-v.down { color: var(--down); }
+.breadth-v.flat { color: var(--txt-1); }
+
+.breadth-sub {
+    font-size: 11px;
+    color: var(--txt-3);
+}
+.breadth-sub.up   { color: var(--up); opacity: 0.85; }
+.breadth-sub.down { color: var(--down); opacity: 0.85; }
 
 .session-badge {
     display: flex;
