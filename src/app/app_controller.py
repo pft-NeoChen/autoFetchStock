@@ -122,14 +122,18 @@ class AppController:
 
         # Volume Spike Detection: minute-kbar storage + warmup backfiller
         self.minute_kbar_storage = MinuteKBarStorage()
-        self.minute_kbar_warmup = MinuteKBarWarmup(
-            fetcher=self.shioaji_fetcher,
-            storage=self.minute_kbar_storage,
-        )
         self.volume_spike_detector = VolumeSpikeDetector(
             storage=self.minute_kbar_storage,
         )
         self.spike_detection_store = SpikeDetectionStore()
+        # Warmup also replays detect on the most recent trading day so
+        # the UI shows historical spikes even after-hours.
+        self.minute_kbar_warmup = MinuteKBarWarmup(
+            fetcher=self.shioaji_fetcher,
+            storage=self.minute_kbar_storage,
+            detector=self.volume_spike_detector,
+            detection_store=self.spike_detection_store,
+        )
         logger.debug(
             "MinuteKBarStorage + MinuteKBarWarmup + VolumeSpikeDetector + "
             "SpikeDetectionStore initialized"

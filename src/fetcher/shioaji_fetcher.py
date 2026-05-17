@@ -830,10 +830,18 @@ class ShioajiFetcher:
         if df.empty:
             return []
 
+        # Shioaji kbars `ts` is int64 nanoseconds whose literal HH:MM is
+        # already Taipei wall-clock (SDK encodes local time via
+        # utcfromtimestamp). Decode without tz conversion: parse as UTC
+        # then strip tz to get a naive Taipei datetime.
+        df["_ts_taipei"] = (
+            pd.to_datetime(df["ts"], unit="ns", utc=True).dt.tz_localize(None)
+        )
+
         bars: List[MinuteKBar] = []
         for _, row in df.iterrows():
-            ts_local = self._normalize_datetime(row["ts"])
-            if ts_local is None or ts_local.date() != target_date:
+            ts_local = row["_ts_taipei"].to_pydatetime()
+            if ts_local.date() != target_date:
                 continue
             volume = int(row.get("Volume", 0) or 0)
             amount = float(row.get("Amount", 0) or 0)

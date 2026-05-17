@@ -24,7 +24,9 @@ from src.models import StockMinuteKFile
 from src.storage.minute_kbar_storage import MinuteKBarStorage
 
 if TYPE_CHECKING:
+    from src.data.spike_store import SpikeDetectionStore
     from src.fetcher.shioaji_fetcher import ShioajiFetcher
+    from src.processor.volume_spike_detector import VolumeSpikeDetector
 
 logger = logging.getLogger("autofetchstock.fetcher.warmup")
 
@@ -40,9 +42,13 @@ class MinuteKBarWarmup:
         self,
         fetcher: "ShioajiFetcher",
         storage: MinuteKBarStorage,
+        detector: "Optional[VolumeSpikeDetector]" = None,
+        detection_store: "Optional[SpikeDetectionStore]" = None,
     ) -> None:
         self.fetcher = fetcher
         self.storage = storage
+        self.detector = detector
+        self.detection_store = detection_store
         self._rate_lock = threading.Lock()
         self._inflight: set[str] = set()
         self._inflight_lock = threading.Lock()
@@ -92,20 +98,54 @@ class MinuteKBarWarmup:
         self, stock_id: str, stock_name: str, today: Optional[date]
     ) -> None:
         try:
-            if not self.needs_warmup(stock_id, today):
-                logger.debug("[warmup] %s already covered, skipping", stock_id)
-                return
+            if self.needs_warmup(stock_id, today):
+                total = 0
+                for d in self._iter_recent_trading_days(SPIKE_BASELINE_DAYS, today):
+                    if self.storage.load(stock_id, d) is not None:
+                        continue
+                    saved = self._backfill_day_with_retry(stock_id, stock_name, d)
+                    total += saved
+                logger.info("[warmup] %s done: %d bars backfilled", stock_id, total)
+            else:
+                logger.debug("[warmup] %s already covered, skipping backfill", stock_id)
 
-            total = 0
-            for d in self._iter_recent_trading_days(SPIKE_BASELINE_DAYS, today):
-                if self.storage.load(stock_id, d) is not None:
-                    continue
-                saved = self._backfill_day_with_retry(stock_id, stock_name, d)
-                total += saved
-            logger.info("[warmup] %s done: %d bars backfilled", stock_id, total)
+            # Replay detect on the most recent trading day so the UI panel
+            # shows historical spikes even outside market hours (when
+            # VolumeSpikeJob is gated off). Safe to re-run: store dedups
+            # by timestamp.
+            self._replay_detect_most_recent_day(stock_id, today)
         finally:
             with self._inflight_lock:
                 self._inflight.discard(stock_id)
+
+    def _replay_detect_most_recent_day(
+        self, stock_id: str, today: Optional[date]
+    ) -> None:
+        if self.detector is None or self.detection_store is None:
+            return
+
+        for d in self._iter_recent_trading_days(SPIKE_BASELINE_DAYS, today):
+            file = self.storage.load(stock_id, d)
+            if file is None or not file.bars:
+                continue
+            spikes = 0
+            for bar in sorted(file.bars, key=lambda b: b.timestamp):
+                try:
+                    detected = self.detector.detect(bar)
+                except Exception as exc:
+                    logger.debug(
+                        "[warmup] replay detect %s @ %s failed: %s",
+                        stock_id, bar.timestamp, exc,
+                    )
+                    continue
+                if detected.is_volume_spike:
+                    self.detection_store.add_spike(stock_id, detected)
+                    spikes += 1
+            logger.info(
+                "[warmup] replay %s %s: %d spikes pushed",
+                stock_id, d, spikes,
+            )
+            return  # only most recent day with data
 
     def _backfill_day_with_retry(
         self, stock_id: str, stock_name: str, target_date: date
