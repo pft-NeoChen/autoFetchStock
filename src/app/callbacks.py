@@ -5204,8 +5204,6 @@ def _render_breadth_row(breadth: dict) -> List[Any]:
                     html.Span("跌", className="breadth-k down"),
                     html.Span(f"{b.decliners}", className="breadth-v down"),
                     html.Span(f"(跌停{b.limit_down})", className="breadth-sub down"),
-                    html.Span("平", className="breadth-k flat"),
-                    html.Span(f"{b.unchanged}", className="breadth-v flat"),
                 ],
             )
         )

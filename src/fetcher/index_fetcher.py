@@ -86,16 +86,18 @@ _LOCAL_INDEX_DEFS: List[Tuple[str, str, Optional[str], str]] = [
 ]
 
 # ── Industry sub-indices (Shioaji Indexs.TSE / Indexs.OTC) ─────────
-# (label, market, symbol). Sinopac subindex codes — verified against
-# api.Contracts.Indexs.{TSE,OTC} naming on prod env. If a code is wrong
-# the subscribe call simply no-ops; we log the available keys for ops.
-_INDUSTRY_DEFS: List[Tuple[str, str, str]] = [
-    ("半導體", "TSE", "027"),   # 半導體類指數
-    ("通信",   "TSE", "031"),   # 通信網路類指數
-    ("電零",   "TSE", "032"),   # 電子零組件類指數
-    ("半導體", "OTC", "162"),   # 櫃買半導體業類指數
-    ("通信",   "OTC", "165"),   # 櫃買通信網路業類指數
-    ("電零",   "OTC", "166"),   # 櫃買電子零組件業類指數
+# Targets are resolved at runtime by scanning each market's Indexs group
+# and matching ``contract.name`` against the keyword list. OTC subindex
+# codes don't match TSE numbering and can renumber between sessions, so
+# discovery beats hardcoded codes.
+#   (display_label, market, list_of_name_keywords_any_of)
+_INDUSTRY_TARGETS: List[Tuple[str, str, Tuple[str, ...]]] = [
+    ("半導體", "TSE", ("半導體",)),
+    ("通信",   "TSE", ("通信網路", "通信")),
+    ("電零",   "TSE", ("電子零組件",)),
+    ("半導體", "OTC", ("半導體",)),
+    ("通信",   "OTC", ("通信網路", "通信")),
+    ("電零",   "OTC", ("電子零組件",)),
 ]
 
 
@@ -491,12 +493,50 @@ class IndexFetcher:
 
     # ── Industry sub-index streaming ────────────────────────────────
 
+    def _discover_industry_contracts(self, api) -> List[Tuple[str, str, str, object]]:
+        """Resolve industry contracts by enumerating each market and matching
+        ``contract.name`` against the keyword list. Returns list of
+        (label, market, code, contract).
+        """
+        out: List[Tuple[str, str, str, object]] = []
+        seen: set[Tuple[str, str]] = set()  # (label, market) — pick first match
+        # Build per-market contract lists once.
+        market_contracts: Dict[str, List[object]] = {}
+        for market in ("TSE", "OTC"):
+            try:
+                sub = getattr(api.Contracts.Indexs, market, None)
+                if sub is None:
+                    continue
+                market_contracts[market] = list(sub)
+            except Exception as exc:
+                logger.debug("enumerate Indexs.%s failed: %s", market, exc)
+        for label, market, keywords in _INDUSTRY_TARGETS:
+            if (label, market) in seen:
+                continue
+            contracts = market_contracts.get(market, [])
+            for c in contracts:
+                name = getattr(c, "name", None) or ""
+                if not name:
+                    continue
+                if any(kw in name for kw in keywords):
+                    code = getattr(c, "code", None)
+                    if not code:
+                        continue
+                    out.append((label, market, code, c))
+                    seen.add((label, market))
+                    break
+            else:
+                logger.info(
+                    "industry: no contract matched %s/%s keywords=%s",
+                    market, label, keywords,
+                )
+        return out
+
     def subscribe_industries(self, shioaji_fetcher) -> None:
         """Subscribe Shioaji ticks for TSE/OTC industry sub-indices.
 
-        Idempotent: noop after first successful run. Codes that fail to
-        resolve are skipped; we log the available keys under each market
-        so ops can adjust ``_INDUSTRY_DEFS`` if Sinopac renumbers.
+        Idempotent: noop after first successful run. Resolves codes by
+        name-keyword discovery so Sinopac code renumbering doesn't break.
         """
         if self._industry_subscribed:
             return
@@ -509,39 +549,22 @@ class IndexFetcher:
             logger.debug("register index tick handler (industry) failed: %s", exc)
             return
 
-        seen_markets: set[str] = set()
-        ok = True
-        for label, market, sym in _INDUSTRY_DEFS:
+        discovered = self._discover_industry_contracts(api)
+        if not discovered:
+            return  # leave _industry_subscribed False so we retry next tick
+        for label, market, code, contract in discovered:
             try:
-                indexs = api.Contracts.Indexs
-                sub = getattr(indexs, market, None)
-                if sub is None:
-                    ok = False
-                    continue
-                try:
-                    contract = sub[sym]
-                except (KeyError, AttributeError):
-                    contract = None
-                if contract is None:
-                    if market not in seen_markets:
-                        try:
-                            keys = [getattr(c, "code", "?") for c in sub]
-                            logger.info("Indexs.%s available codes: %s", market, keys[:60])
-                        except Exception:
-                            pass
-                        seen_markets.add(market)
-                    ok = False
-                    continue
-                code = getattr(contract, "code", None) or sym
-                self._industry_code_map[code] = (label, market, sym)
-                self._industry_code_map[sym] = (label, market, sym)
+                self._industry_code_map[code] = (label, market, code)
                 shioaji_fetcher.subscribe_index_or_future(contract, "Indexs")
-                logger.info("IndexFetcher subscribe industry %s/%s code=%s", market, label, code)
+                logger.info(
+                    "IndexFetcher subscribe industry %s/%s code=%s name=%s",
+                    market, label, code, getattr(contract, "name", "?"),
+                )
             except Exception as exc:
-                logger.debug("industry subscribe %s/%s failed: %s", market, sym, exc)
-                ok = False
-        if ok:
-            self._industry_subscribed = True
+                logger.debug("industry subscribe %s/%s failed: %s", market, label, exc)
+        # Persist resolved (label, market, code) tuples for fetch_industries.
+        self._industry_resolved = [(lbl, mkt, code) for lbl, mkt, code, _c in discovered]
+        self._industry_subscribed = True
 
     def fetch_industries(self, shioaji_fetcher) -> List[IndustryPulseEntry]:
         """Return latest industry pulse entries (streaming-first, snapshot fallback)."""
@@ -552,9 +575,10 @@ class IndexFetcher:
             return []
         self.subscribe_industries(shioaji_fetcher)
 
+        resolved = getattr(self, "_industry_resolved", None) or []
         now = time.monotonic()
         out: List[IndustryPulseEntry] = []
-        for label, market, sym in _INDUSTRY_DEFS:
+        for label, market, sym in resolved:
             key = (market, sym)
             cached = self._industry_cache.get(key)
             if cached and (now - cached[1]) < self.STREAM_CACHE_TTL:
@@ -616,27 +640,55 @@ class IndexFetcher:
                 out[market] = cached[0]
         return out
 
+    _BREADTH_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+    }
+
     def _fetch_breadth_one(self, market: str) -> Optional[BreadthSummary]:
         try:
             import requests
         except ImportError:
             return None
         if market == "TSE":
-            url = "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=json&type=MS"
+            # Modern TWSE rwd JSON endpoint. Returns the MS-typed table set
+            # whose 漲跌證券數合計 block carries breadth + limit counts.
+            urls = [
+                "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json&type=MS",
+            ]
         else:
-            url = "https://www.tpex.org.tw/openapi/v1/tpex_volume"  # placeholder
-        try:
-            resp = requests.get(url, timeout=8.0)
-            if resp.status_code != 200:
-                return None
-            payload = resp.json()
-        except Exception as exc:
-            logger.debug("breadth http %s: %s", market, exc)
-            return None
+            # TPEx summary endpoint exposes 上櫃股票 counts directly. Keep the
+            # per-row quote endpoint as a fallback if the summary shape changes.
+            urls = [
+                "https://www.tpex.org.tw/web/stock/aftertrading/market_highlight/highlight_result.php?l=zh-tw&o=json",
+                "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes",
+            ]
+        for url in urls:
+            try:
+                resp = requests.get(url, timeout=8.0, headers=self._BREADTH_HEADERS)
+                if resp.status_code != 200:
+                    logger.debug("breadth http %s status=%s", market, resp.status_code)
+                    continue
+                ctype = (resp.headers.get("content-type") or "").lower()
+                if "json" not in ctype and not resp.text.lstrip().startswith(("{", "[")):
+                    logger.debug("breadth http %s non-json content-type=%s", market, ctype)
+                    continue
+                payload = resp.json()
+            except Exception as exc:
+                logger.debug("breadth http %s: %s", market, exc)
+                continue
 
-        if market == "TSE":
-            return _parse_twse_breadth(payload)
-        return _parse_tpex_breadth(payload)
+            if market == "TSE":
+                return _parse_twse_breadth(payload)
+            parsed = _parse_tpex_breadth(payload)
+            if parsed is not None:
+                return parsed
+        return None
 
     def _get_yfinance(self):
         if self._yf is not None:
@@ -653,64 +705,178 @@ class IndexFetcher:
 # ── Breadth parsers ────────────────────────────────────────────────
 
 def _parse_twse_breadth(payload: dict) -> Optional[BreadthSummary]:
-    """Extract advance/decline + limit counts from TWSE MI_INDEX response.
+    """Extract advance/decline + limit counts from TWSE rwd MI_INDEX response.
 
-    The endpoint returns several tables; we look for the one whose header
-    contains '漲跌證券數合計'. Each row is [類別, 漲家數, 上漲限制, 跌家數, 下跌限制, 持平, 未成交, 無比價]
-    or a close variant; counts under '整體市場' aggregate everything.
+    Actual shape (type=MS):
+      tables[N] = {
+        title: "漲跌證券數合計",
+        fields: ["類型", "整體市場", "股票"],
+        data: [
+          ["上漲(漲停)", "4,246(152)", "245(23)"],
+          ["下跌(跌停)", "8,579(412)", "770(12)"],
+          ["持平", "530", "56"],
+          ...
+        ]
+      }
+    We read the **股票** column (true equity breadth, excludes ETF/warrants).
+    Fall back to 整體市場 when 股票 column missing.
     """
-    tables = payload.get("tables") or payload.get("data") or []
+    if not isinstance(payload, dict):
+        return None
+    tables = payload.get("tables") or []
     if not isinstance(tables, list):
         return None
+
     for tbl in tables:
-        title = (tbl.get("title") or "") if isinstance(tbl, dict) else ""
-        if "漲跌證券" in title:
-            rows = tbl.get("data") or tbl.get("rows") or []
-            # First data row holds 整體市場 aggregates.
-            for row in rows:
-                if not isinstance(row, list) or len(row) < 6:
-                    continue
-                try:
-                    adv = _digit(row[1])
-                    lim_up = _digit(row[2])
-                    dec = _digit(row[3])
-                    lim_down = _digit(row[4])
-                    unch = _digit(row[5])
-                    return BreadthSummary(
-                        market="TSE",
-                        advancers=adv, decliners=dec, unchanged=unch,
-                        limit_up=lim_up, limit_down=lim_down,
-                    )
-                except Exception:
-                    continue
+        if not isinstance(tbl, dict):
+            continue
+        title = tbl.get("title") or ""
+        if "漲跌證券" not in title and "漲跌家數" not in title:
+            continue
+        fields = tbl.get("fields") or []
+        rows = tbl.get("data") or []
+        if not (isinstance(fields, list) and isinstance(rows, list) and rows):
+            continue
+        # Pick 股票 column index; fall back to 整體市場.
+        col_idx = None
+        for i, f in enumerate(fields):
+            if isinstance(f, str) and "股票" in f:
+                col_idx = i
+                break
+        if col_idx is None:
+            for i, f in enumerate(fields):
+                if isinstance(f, str) and "整體市場" in f:
+                    col_idx = i
+                    break
+        if col_idx is None or col_idx < 1:
+            col_idx = 1
+
+        adv = dec = unch = lim_up = lim_down = 0
+        for row in rows:
+            if not isinstance(row, list) or len(row) <= col_idx:
+                continue
+            name = str(row[0])
+            val = str(row[col_idx])
+            if "上漲" in name:
+                adv, lim_up = _split_paren_pair(val)
+            elif "下跌" in name:
+                dec, lim_down = _split_paren_pair(val)
+            elif "持平" in name or "平盤" in name:
+                unch = _digit(val)
+        if adv == 0 and dec == 0 and unch == 0:
+            continue
+        return BreadthSummary(
+            market="TSE",
+            advancers=adv, decliners=dec, unchanged=unch,
+            limit_up=lim_up, limit_down=lim_down,
+        )
     return None
 
 
-def _parse_tpex_breadth(payload) -> Optional[BreadthSummary]:
-    """TPEx openapi returns per-stock rows; aggregate counts client-side.
+def _split_paren_pair(text: str) -> Tuple[int, int]:
+    """Parse '500(2)' style values into (outer, inner)."""
+    text = (text or "").strip()
+    if "(" in text and ")" in text:
+        outer, _, rest = text.partition("(")
+        inner = rest.split(")", 1)[0]
+        return _digit(outer), _digit(inner)
+    return _digit(text), 0
 
-    Each row carries '漲跌(+/-)' or 'Change'; we sum positives/negatives.
-    Limit-up/down detection compares price against 漲跌停 if present.
+
+def _parse_tpex_breadth(payload) -> Optional[BreadthSummary]:
+    """Extract TPEx advance/decline + limit counts.
+
+    Preferred endpoint shape:
+      tables[0] = {
+        title: "上櫃股票當日彙總資訊",
+        fields: [..., "上漲家數", "漲停家數", "下跌家數", "跌停家數", "平盤家數", ...],
+        data: [["887", ..., "231", "23", "596", "19", "51", "9"]]
+      }
+
+    Fallback endpoint returns per-security quote rows; aggregate Change.
     """
+    summary = _parse_tpex_market_highlight(payload)
+    if summary is not None:
+        return summary
+    return _parse_tpex_quote_breadth(payload)
+
+
+def _parse_tpex_market_highlight(payload) -> Optional[BreadthSummary]:
+    if not isinstance(payload, dict):
+        return None
+    tables = payload.get("tables") or []
+    if not isinstance(tables, list):
+        return None
+
+    for tbl in tables:
+        if not isinstance(tbl, dict):
+            continue
+        fields = tbl.get("fields") or []
+        rows = tbl.get("data") or []
+        if not (isinstance(fields, list) and isinstance(rows, list) and rows):
+            continue
+        row = rows[0]
+        if not isinstance(row, list):
+            continue
+        idx = {str(name): i for i, name in enumerate(fields)}
+        required = ("上漲家數", "漲停家數", "下跌家數", "跌停家數", "平盤家數")
+        if not all(name in idx and idx[name] < len(row) for name in required):
+            continue
+        return BreadthSummary(
+            market="OTC",
+            advancers=_digit(row[idx["上漲家數"]]),
+            decliners=_digit(row[idx["下跌家數"]]),
+            unchanged=_digit(row[idx["平盤家數"]]),
+            limit_up=_digit(row[idx["漲停家數"]]),
+            limit_down=_digit(row[idx["跌停家數"]]),
+        )
+    return None
+
+
+def _parse_tpex_quote_breadth(payload) -> Optional[BreadthSummary]:
+    """TPEx quote fallback: aggregate per-row Change values client-side."""
     if not isinstance(payload, list):
         return None
     adv = dec = unch = 0
+    lim_up = lim_down = 0
     for row in payload:
-        try:
-            chg = _to_float(row.get("Change") or row.get("漲跌"))
-        except AttributeError:
+        if not isinstance(row, dict):
             continue
+        chg_raw = (
+            row.get("Change")
+            or row.get("change")
+            or row.get("漲跌")
+            or row.get("ChangePrice")
+        )
+        chg = _to_float(chg_raw)
         if chg is None:
             continue
+        close = _to_float(row.get("Close") or row.get("close"))
+        # Approx pct from Change/prev_close where prev_close = Close - Change.
+        # TPEx openapi doesn't expose today's limit prices (NextLimitUp is for
+        # the NEXT session). ±9.5% threshold covers the canonical ±10% band;
+        # the small handful of widened-band stocks gets miscounted but the
+        # macro signal stays right.
+        pct_intraday = None
+        if close is not None and (close - chg) > 0:
+            pct_intraday = chg / (close - chg) * 100.0
         if chg > 0:
             adv += 1
+            if pct_intraday is not None and pct_intraday >= 9.5:
+                lim_up += 1
         elif chg < 0:
             dec += 1
+            if pct_intraday is not None and pct_intraday <= -9.5:
+                lim_down += 1
         else:
             unch += 1
     if adv == dec == unch == 0:
         return None
-    return BreadthSummary(market="OTC", advancers=adv, decliners=dec, unchanged=unch)
+    return BreadthSummary(
+        market="OTC",
+        advancers=adv, decliners=dec, unchanged=unch,
+        limit_up=lim_up, limit_down=lim_down,
+    )
 
 
 def _digit(value) -> int:

@@ -2536,7 +2536,6 @@ html {
 .breadth-v { font-family: var(--font-num); font-weight: 700; }
 .breadth-v.up   { color: var(--up); }
 .breadth-v.down { color: var(--down); }
-.breadth-v.flat { color: var(--txt-1); }
 
 .breadth-sub {
     font-size: 11px;
