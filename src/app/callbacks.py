@@ -5365,13 +5365,45 @@ def _format_amount_twd(amount: float) -> str:
     return f"{amount:.0f}"
 
 
-def _kbar_direction_class(bar: MinuteKBar) -> Tuple[str, str]:
-    """Return (css_class, glyph) for the K-bar column."""
+def _kbar_direction_class(bar: MinuteKBar) -> str:
+    """Return direction class for the mini K-bar column."""
     if bar.close > bar.open:
-        return "vs-kbar-up", "▲"
+        return "vs-kbar-up"
     if bar.close < bar.open:
-        return "vs-kbar-down", "▼"
-    return "vs-kbar-flat", "─"
+        return "vs-kbar-down"
+    return "vs-kbar-flat"
+
+
+def _kbar_aria_label(bar: MinuteKBar) -> str:
+    if bar.close > bar.open:
+        direction = "紅 K"
+    elif bar.close < bar.open:
+        direction = "綠 K"
+    else:
+        direction = "平盤 K"
+    return (
+        f"{direction} 開 {bar.open:.2f} 高 {bar.high:.2f} "
+        f"低 {bar.low:.2f} 收 {bar.close:.2f}"
+    )
+
+
+def _kbar_inline_style(bar: MinuteKBar) -> Dict[str, str]:
+    """Position the mini candle body by OHLC proportions."""
+    price_range = bar.high - bar.low
+    if price_range <= 0:
+        return {"--vs-body-top": "8px", "--vs-body-height": "2px"}
+
+    body_high = max(bar.open, bar.close)
+    body_low = min(bar.open, bar.close)
+    body_top_pct = (bar.high - body_high) / price_range
+    body_height_pct = (body_high - body_low) / price_range
+
+    top_px = 2 + body_top_pct * 14
+    height_px = max(2, body_height_pct * 14)
+    return {
+        "--vs-body-top": f"{top_px:.1f}px",
+        "--vs-body-height": f"{height_px:.1f}px",
+    }
 
 
 def _build_spike_tooltip(bar: MinuteKBar) -> str:
@@ -5424,7 +5456,7 @@ def _build_spike_notification_payload(stock_id: str, bar: MinuteKBar) -> Dict[st
 
 def _render_volume_spike_row(bar: MinuteKBar) -> html.Div:
     """Build one .volume-spike-row Div with hover tooltip."""
-    kbar_cls, kbar_glyph = _kbar_direction_class(bar)
+    kbar_cls = _kbar_direction_class(bar)
     severity_cls = f"vs-severity-{bar.spike_severity.value}"
     ratio_text = f"{bar.volume_ratio:.1f}×" if bar.volume_ratio else "—×"
     vol_text = f"{_format_lot_volume(bar.volume)} ({ratio_text})"
@@ -5436,7 +5468,15 @@ def _render_volume_spike_row(bar: MinuteKBar) -> html.Div:
         className="volume-spike-row",
         children=[
             html.Span(bar.timestamp.strftime("%H:%M"), className="vs-col-time"),
-            html.Span(kbar_glyph, className=f"vs-col-kbar {kbar_cls}"),
+            html.Span(
+                className=f"vs-col-kbar vs-kbar-candle {kbar_cls}",
+                style=_kbar_inline_style(bar),
+                **{"aria-label": _kbar_aria_label(bar), "role": "img"},
+                children=[
+                    html.Span(className="vs-kbar-wick"),
+                    html.Span(className="vs-kbar-body"),
+                ],
+            ),
             html.Span(f"{bar.close:.2f}", className=f"vs-col-price {kbar_cls}"),
             html.Span(vol_text, className=f"vs-col-vol {vol_class}"),
             html.Div(_build_spike_tooltip(bar), className="vs-tooltip"),

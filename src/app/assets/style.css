@@ -2080,8 +2080,8 @@ html {
 .volume-spike-list {
     flex: 1;
     min-height: 0;
-    max-height: 280px;
-    overflow-y: auto;
+    max-height: none;
+    overflow: visible;
     display: flex;
     flex-direction: column;
     gap: 0;
@@ -2097,9 +2097,13 @@ html {
     cursor: help;
 }
 .volume-spike-row .vs-col-time   { text-align: left;  color: var(--txt-1); }
-.volume-spike-row .vs-col-kbar   { text-align: center; font-weight: 700; }
+.volume-spike-row .vs-col-kbar   { text-align: center; }
 .volume-spike-row .vs-col-price  { text-align: right; font-weight: 600; }
 .volume-spike-row .vs-col-vol    { text-align: right; font-weight: 600; }
+.volume-spike-row:hover {
+    z-index: 30;
+    background: rgba(255, 255, 255, 0.03);
+}
 
 /* Severity colors (volume column) */
 .vs-severity-low     { color: #FFEB3B; }
@@ -2114,6 +2118,43 @@ html {
 .vs-kbar-down { color: #26A69A; }
 .vs-kbar-flat { color: var(--txt-2); }
 
+.vs-kbar-candle {
+    position: relative;
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    justify-self: center;
+    align-self: center;
+}
+.vs-kbar-wick {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    left: 50%;
+    width: 1px;
+    transform: translateX(-50%);
+    background: currentColor;
+    opacity: 0.95;
+}
+.vs-kbar-body {
+    position: absolute;
+    top: var(--vs-body-top, 4px);
+    left: 50%;
+    width: 9px;
+    height: var(--vs-body-height, 10px);
+    min-height: 2px;
+    transform: translateX(-50%);
+    background: currentColor;
+    border: 1px solid currentColor;
+    border-radius: 1px;
+}
+.vs-kbar-flat .vs-kbar-body {
+    top: 8px;
+    width: 11px;
+    height: 2px;
+    border: 0;
+}
+
 /* Low-confidence baseline marker (法 A fallback). */
 .vs-low-confidence::after {
     content: " *";
@@ -2125,15 +2166,16 @@ html {
 .vs-tooltip {
     display: none;
     position: absolute;
-    right: calc(100% + 8px);
-    top: 0;
+    left: 6px;
+    right: 6px;
+    top: calc(100% + 4px);
     background: #2A2A2A;
     color: var(--txt-0);
     border: 1px solid var(--line-2);
     border-radius: 4px;
     padding: 8px 12px;
-    z-index: 100;
-    min-width: 220px;
+    z-index: 200;
+    min-width: 0;
     white-space: pre-line;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px;
