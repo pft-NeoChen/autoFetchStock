@@ -54,7 +54,7 @@ from src.data.advisor import build_advisor
 from src.data.events import build_stock_event_timeline
 from src.data.chips_kpi import build_chips_kpi
 from src.data.fundamentals import get_fundamentals
-from src.data.sectors import get_sector
+from src.data.sectors import get_sector, get_tags
 from src.data.spark import render_spark
 from src.app.intraday_guard import quote_timestamp_matches_trade_date
 
@@ -138,6 +138,7 @@ class CallbackManager:
         self._register_events_tab_callbacks()
         self._register_alert_bar_callbacks()
         self._register_volume_spike_callbacks()
+        self._register_stock_stats_callbacks()
         logger.info("All callbacks registered")
 
     def _register_right_rail_callbacks(self) -> None:
@@ -1479,10 +1480,14 @@ class CallbackManager:
                     else:
                         kline_figure = self.renderer.render_empty_chart("同步資料中...")
 
+                tag_pills = [
+                    html.Span(t, className="pill pill-industry stock-tag-pill")
+                    for t in get_tags(stock_id)
+                ]
                 return (
                     quote.stock_name,  # stock name
                     stock_id,  # stock id (no parentheses; sector pill follows)
-                    get_sector(stock_id) or "",  # sector pill
+                    tag_pills,  # multi-tag strip
                     f"{quote.current_price:,.2f}",  # price
                     f"stock-price num {direction_class}",  # price class
                     change_text,  # change
@@ -2109,6 +2114,73 @@ class CallbackManager:
             """Handle error message close button."""
             return {"display": "none"}
 
+    def _register_stock_stats_callbacks(self) -> None:
+        """Phase 7 — wire the StockHeader 7-stat strip.
+
+        Drives off the existing 1Hz `auto-update-interval` plus app-state
+        changes. Reads the last RealtimeQuote (non-blocking) so the call
+        is cheap when Shioaji has pushed a tick, and falls back to the
+        cached fundamentals snapshot for PE. 外資持股 has no data source
+        yet — left as "--" so the cell stays visible without lying about
+        a value.
+        """
+
+        @self.app.callback(
+            Output("stock-stat-open",    "children"),
+            Output("stock-stat-high",    "children"),
+            Output("stock-stat-low",     "children"),
+            Output("stock-stat-prev",    "children"),
+            Output("stock-stat-pe",      "children"),
+            Output("stock-stat-foreign", "children"),
+            Input("auto-update-interval", "n_intervals"),
+            Input("app-state-store", "data"),
+            prevent_initial_call=False,
+        )
+        def update_stock_stats(_n_intervals: int, app_state: Optional[dict]):
+            placeholder = ("--", "--", "--", "--", "--", "--")
+            stock_id = (app_state or {}).get("current_stock") if app_state else None
+            if not stock_id:
+                return placeholder
+
+            try:
+                quote = self.fetcher.fetch_realtime_quote(stock_id, blocking=False)
+            except Exception as exc:
+                logger.debug(f"update_stock_stats quote fetch failed: {exc}")
+                quote = None
+
+            def _fmt_price(v: Optional[float]) -> str:
+                if v is None or v == 0:
+                    return "--"
+                return f"{v:,.2f}"
+
+            open_txt = _fmt_price(quote.open_price)     if quote else "--"
+            high_txt = _fmt_price(quote.high_price)     if quote else "--"
+            low_txt  = _fmt_price(quote.low_price)      if quote else "--"
+            prev_txt = _fmt_price(quote.previous_close) if quote else "--"
+
+            pe_txt = "--"
+            try:
+                snap = get_fundamentals(stock_id)
+                if snap and snap.pe:
+                    pe_txt = f"{snap.pe:.2f}"
+            except Exception as exc:
+                logger.debug(f"update_stock_stats fundamentals failed: {exc}")
+
+            # 外資 = 外資買賣超 (T86 三大法人) via ChipsStorage. Header
+            # cell mirrors the 籌碼面 panel's "外資" card value_text so
+            # the user sees the same number in both places.
+            foreign_txt = "--"
+            try:
+                cards = build_chips_kpi(stock_id, self.chips_storage)
+                for c in cards:
+                    if c.key == "foreign":
+                        foreign_txt = c.value_text or "--"
+                        break
+            except Exception as exc:
+                logger.debug(f"update_stock_stats chips failed: {exc}")
+
+            return open_txt, high_txt, low_txt, prev_txt, pe_txt, foreign_txt
+
     def _get_direction_class(self, direction: PriceDirection) -> str:
         """Get CSS class for price direction."""
         if direction == PriceDirection.UP:
@@ -2606,12 +2678,27 @@ class CallbackManager:
             if not headlines:
                 return "--", {"display": "none"}
 
+            # Relayout — render each headline with a category chip whose
+            # variant class drives the color (國際/科技/財經/台股 …).
+            cat_class_map = {
+                "國際": "news-cat-intl",
+                "科技": "news-cat-tech",
+                "財經": "news-cat-finance",
+                "台股": "news-cat-twse",
+            }
             items: List[Any] = []
-            for i, h in enumerate(headlines[:5]):
-                if i > 0:
-                    items.append(html.Span("·", className="news-ticker-sep"))
-                items.append(html.Span(h["category"], className="news-ticker-cat num"))
-                items.append(html.Span(h["title"], className="news-ticker-headline"))
+            for i, h in enumerate(headlines[:8]):
+                cat = h.get("category") or ""
+                chip_cls = "news-ticker-chip " + cat_class_map.get(cat, "news-cat-default")
+                items.append(
+                    html.Span(
+                        children=[
+                            html.Span(cat, className=chip_cls),
+                            html.Span(h["title"], className="news-ticker-headline"),
+                        ],
+                        className="news-ticker-item",
+                    )
+                )
             return items, {"display": "flex"}
 
         # ── Phase 1 今日重點卡片（/news 頁） ──────────────────────────────────
@@ -5167,30 +5254,40 @@ def _render_strip_cards(entries: List[MarketIndexEntry]) -> List[Any]:
 
 
 def _render_industry_pulse(entries: List[IndustryPulseEntry]) -> List[Any]:
-    """Industry pulse pills — [上市/上櫃] [名稱] (+/-%數).
-    Colored outline by direction (紅漲/綠跌, Taiwan convention)."""
+    """Render the BreadthCard sector matrix as a 2-row × 4-col grid.
+
+    Row order is fixed (上市 then 上櫃), sectors are fixed
+    (半導體 / 通信 / 電零). First cell of each row is a label cell so
+    the CSS grid (`60px repeat(3, 1fr)`) lines up. Missing entries
+    fall through as muted placeholders so the grid never collapses.
+    """
     if not entries:
         return []
+
+    market_order = [("TSE", "上市"), ("OTC", "上櫃")]
+    sector_order = ["半導體", "通信", "電零"]
+    lookup = {(e.market, e.label): e for e in entries}
+
     out: List[Any] = []
-    last_market: Optional[str] = None
-    for e in entries:
-        cls = _dir_class(e.direction)
-        sign = "+" if e.pct > 0 else ""
-        pct_txt = f"{sign}{e.pct:.2f}%"
-        market_tag = "上市" if e.market == "TSE" else "上櫃"
-        if last_market is not None and e.market != last_market:
-            out.append(html.Div(className="industry-pill-sep"))
-        last_market = e.market
-        out.append(
-            html.Div(
-                className=f"industry-pill {cls}",
-                children=[
-                    html.Span(market_tag, className="industry-pill-tag"),
-                    html.Span(e.label, className="industry-pill-label"),
-                    html.Span(pct_txt, className="industry-pill-pct"),
-                ],
+    for market_key, market_label in market_order:
+        out.append(html.Div(market_label, className="industry-row-label"))
+        for sector in sector_order:
+            e = lookup.get((market_key, sector))
+            if e is None:
+                out.append(html.Div("—", className="industry-cell industry-cell-empty"))
+                continue
+            cls = _dir_class(e.direction)
+            sign = "+" if e.pct > 0 else ""
+            out.append(
+                html.Div(
+                    className=f"industry-cell {cls}",
+                    children=[
+                        html.Span(market_label, className="industry-cell-tag"),
+                        html.Span(e.label, className="industry-cell-label"),
+                        html.Span(f"{sign}{e.pct:.2f}%", className=f"industry-cell-pct num {cls}"),
+                    ],
+                )
             )
-        )
     return out
 
 
@@ -5250,13 +5347,18 @@ def _render_market_strip(
                         _fmt_index_value(e.value),
                         className=f"num market-strip-value {cls}",
                     ),
-                    html.Span(
-                        _fmt_signed(e.change),
-                        className=f"num market-strip-chg {cls}",
-                    ),
-                    html.Span(
-                        f"({_fmt_signed(e.pct)}%)",
-                        className=f"num market-strip-pct {cls}",
+                    html.Div(
+                        className=f"market-strip-delta {cls}",
+                        children=[
+                            html.Span(
+                                _fmt_signed(e.change),
+                                className=f"num market-strip-chg {cls}",
+                            ),
+                            html.Span(
+                                f"({_fmt_signed(e.pct)}%)",
+                                className=f"num market-strip-pct {cls}",
+                            ),
+                        ],
                     ),
                 ],
             )

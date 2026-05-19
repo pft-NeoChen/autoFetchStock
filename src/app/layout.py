@@ -87,18 +87,26 @@ def create_main_page_layout() -> html.Div:
                 style={"display": "none"},
             ),
 
-            # Main content area — Phase 4.5 layout-B grid
-            # (180 / 1fr / 300) × (72 / 1fr), no bottom data row.
+            # Relayout MarketRail (Phase 7) — 6 indices + macro pills.
+            # Mounted only on the dashboard page; /news and /advisor
+            # don't need the per-stock context strip.
+            _create_market_rail(),
+
+            # Main content area — Phase 7 relayout grid
+            # 240 / 1fr / 360, center column stacks StockHeader +
+            # ChartCard + BreadthCard vertically.
             html.Div(
-                className="content-wrapper",
+                className="content-wrapper content-wrapper-relayout",
                 children=[
-                    # grid-area: left
                     _create_favorites_sidebar(),
-                    # grid-area: top-center
-                    _create_stock_info_section(),
-                    # grid-area: mid-center
-                    _create_tabs_section(),
-                    # grid-area: right
+                    html.Div(
+                        className="center-column",
+                        children=[
+                            _create_stock_info_section(),
+                            _create_tabs_section(),
+                            _create_breadth_card(),
+                        ],
+                    ),
                     _create_right_rail(),
                 ]
             ),
@@ -333,25 +341,6 @@ def _create_market_strip() -> html.Div:
     )
 
 
-def _create_below_chart_strip() -> html.Div:
-    """Two-row MarketStrip mounted below the chart tabs.
-
-    Row 1 follows the TWSE session (加權 / 櫃買 / 台指近 / 台指近全).
-    Row 2 holds the foreign references the user added (S&P 500 / 納斯達克 / 費半).
-    Both rows are filled by ``update_market_strip``.
-    """
-    return html.Div(
-        id="market-strip-below",
-        className="market-strip-below",
-        children=[
-            html.Div(id="market-strip-industry", className="market-strip-industry"),
-            html.Div(id="market-strip-breadth", className="market-strip-breadth"),
-            html.Div(id="market-strip-below-row1", className="market-strip-row"),
-            html.Div(id="market-strip-below-row2", className="market-strip-row"),
-        ],
-    )
-
-
 def _create_news_ticker() -> html.Div:
     """Phase 3.5 — bottom global news ribbon (24px).
 
@@ -360,40 +349,48 @@ def _create_news_ticker() -> html.Div:
     """
     return html.Div(
         id="news-ticker-bar",
-        className="news-ticker-bar",
+        className="news-ticker-bar news-ticker-bar-relayout",
         style={"display": "none"},  # hidden until news data is available
         children=[
-            html.Span("NEWS", className="pill pill-up news-ticker-pill"),
             html.Div(
-                id="news-ticker-content",
-                className="news-ticker-content",
-                children="--",
+                className="news-ticker-label",
+                children=[
+                    html.Span("", className="news-ticker-led"),
+                    html.Span("NEWS", className="news-ticker-label-text"),
+                ],
+            ),
+            html.Div(
+                className="news-ticker-viewport",
+                children=[
+                    html.Div(
+                        id="news-ticker-content",
+                        className="news-ticker-content news-ticker-marquee",
+                        children="--",
+                    ),
+                ],
             ),
         ],
     )
 
 
 def _create_header() -> html.Header:
-    """Two-row app header (matches reference/04-layout-A.png).
+    """Relayout AppBar — single 52px row.
 
-    Row 1 (top, search row): brand watermark | nav links | search box.
-    Row 2 (thin band below): MarketStrip indices | session+clock.
-
-    `autoFetchStock` is a non-clickable watermark on the top row;
-    navigation links sit beside it. The index ribbon lives on the
-    second row directly below.
+    Layout: brand dot + nav links · search (⌘K) · session/clock pill.
+    MarketStrip (macro + main indices) lives in a separate MarketRail row
+    below the header, mounted only on the dashboard page.
     """
     return html.Header(
         id="app-header",
-        className="app-header",
+        className="app-header app-header-relayout",
         children=[
-            # ── Row 1: brand watermark + nav + search ────────────────────
             html.Div(
-                className="app-header-top",
+                className="app-header-row",
                 children=[
                     html.Div(
                         className="header-nav",
                         children=[
+                            html.Span("", className="brand-dot"),
                             html.Span("autoFetchStock", className="brand-name"),
                             dcc.Link("即時看板", href="/", className="header-nav-link"),
                             dcc.Link("市場新聞", href="/news", className="header-nav-link"),
@@ -409,9 +406,10 @@ def _create_header() -> html.Header:
                                     dcc.Input(
                                         id="stock-search-input",
                                         type="text",
-                                        placeholder="輸入股票代號或名稱...",
+                                        placeholder="搜尋股票代號或名稱…",
                                         className="search-input",
                                     ),
+                                    html.Span("⌘K", className="search-kbd"),
                                     html.Button(
                                         "搜尋",
                                         id="stock-search-button",
@@ -426,17 +424,38 @@ def _create_header() -> html.Header:
                             ),
                         ],
                     ),
-                ],
-            ),
-            # ── Row 2: MarketStrip + session/clock ───────────────────────
-            html.Div(
-                className="app-header-bottom",
-                children=[
-                    _create_market_strip(),
                     _build_session_badge(),
                 ],
             ),
         ]
+    )
+
+
+def _create_market_rail() -> html.Div:
+    """Relayout MarketRail — 6 main indices grid + 5 macro pills.
+
+    Hosts the existing market-strip-* IDs the update_market_strip
+    callback writes into:
+      • main indices: market-strip-below-row1, market-strip-below-row2
+      • macro pills:  market-strip
+    Industry pulse + breadth move out to the BreadthCard below the chart.
+    """
+    return html.Div(
+        id="market-rail",
+        className="market-rail",
+        children=[
+            html.Div(
+                className="market-rail-indices",
+                children=[
+                    html.Div(id="market-strip-below-row1", className="market-strip-row"),
+                    html.Div(id="market-strip-below-row2", className="market-strip-row"),
+                ],
+            ),
+            html.Div(
+                className="market-rail-macro",
+                children=[_create_market_strip()],
+            ),
+        ],
     )
 
 
@@ -797,8 +816,11 @@ def _create_stock_info_section() -> html.Div:
     """
     return html.Div(
         id="stock-info-section",
-        className="stock-info-section",
+        className="stock-info-section card stock-header-card",
         children=[
+            html.Div(
+                className="stock-headline",
+                children=[
             # ── LEFT: identity ───────────────────────────────────────────
             html.Div(
                 className="stock-headline-left",
@@ -819,14 +841,14 @@ def _create_stock_info_section() -> html.Div:
                         className="stock-id num",
                         children="",
                     ),
-                    # Sector pill — populated by `update_stock_display`
-                    # via `src.data.sectors.get_sector()`. Empty children
-                    # hides the pill via the `:empty` CSS rule when the
-                    # current stock is outside the curated sector map.
+                    # Stock-header tag strip — populated by on_search_submit
+                    # with a list of industry pills (e.g. PCB + ABF 載板).
+                    # The container keeps the legacy `stock-sector-display`
+                    # id so existing callbacks continue writing into it.
                     html.Span(
                         id="stock-sector-display",
-                        className="pill pill-neu stock-sector-pill",
-                        children="",
+                        className="stock-tags-row",
+                        children=[],
                     ),
                     # Phase 3b — inline signal pill, follows the sector
                     # pill (or stock id when sector is empty). Renderered
@@ -853,20 +875,41 @@ def _create_stock_info_section() -> html.Div:
                         className="stock-change num",
                         children="",
                     ),
-                    # 累積成交量 — moved up from removed status bar.
-                    html.Span(
-                        className="stock-volume-pill",
-                        children=[
-                            html.Span("成交量", className="stock-volume-label"),
-                            html.Span(
-                                id="stock-volume-display",
-                                className="num stock-volume-value",
-                                children="--",
-                            ),
-                        ],
-                    ),
                 ],
             ),
+                ],
+            ),
+            # 7-col stats strip (relayout). Open/high/low/prev/volume
+            # reuse the data the existing update_stock_display callback
+            # already computes from RealtimeQuote; PE / 外資 stay as "--"
+            # placeholders until the fundamentals + chip data sources are
+            # wired into this card (next phase).
+            html.Div(
+                className="stock-stats",
+                children=[
+                    _stat_cell("開盤",     "stock-stat-open"),
+                    _stat_cell("最高",     "stock-stat-high"),
+                    _stat_cell("最低",     "stock-stat-low"),
+                    _stat_cell("昨收",     "stock-stat-prev"),
+                    # 成交量 reuses the legacy `stock-volume-display` id so
+                    # existing callbacks (search-submit + auto-update) keep
+                    # writing into it without modification.
+                    _stat_cell("成交量",   "stock-volume-display"),
+                    _stat_cell("本益比",   "stock-stat-pe"),
+                    _stat_cell("外資買賣超 (張)", "stock-stat-foreign"),
+                ],
+            ),
+        ],
+    )
+
+
+def _stat_cell(label: str, value_id: str) -> html.Div:
+    """Single cell inside the stock header 7-col stats strip."""
+    return html.Div(
+        className="stat-cell",
+        children=[
+            html.Span(label, className="stat-label"),
+            html.Span("--", id=value_id, className="stat-value num"),
         ],
     )
 
@@ -884,12 +927,47 @@ def _create_bottom_data_row() -> html.Div:
     )
 
 
+def _create_chart_toolbar() -> html.Div:
+    """Relayout — 5-icon toolbar attached to the chart card tab row.
+
+    Buttons are visual-only placeholders for now (截圖 / 搜尋 / 平移 /
+    縮放 / 全螢幕). Hooking them up to ChartRenderer / Plotly modeBar
+    is part of the polish pass and is intentionally deferred.
+    """
+    icons = [
+        ("chart-tool-snapshot", "📷", "截圖"),
+        ("chart-tool-search",   "🔍", "搜尋"),
+        ("chart-tool-pan",      "✥",  "平移"),
+        ("chart-tool-zoom",     "⊕",  "縮放"),
+        ("chart-tool-fs",       "⛶",  "全螢幕"),
+    ]
+    return html.Div(
+        className="chart-toolbar",
+        children=[
+            html.Button(
+                glyph,
+                id=btn_id,
+                className="chart-tool-btn",
+                title=title,
+                n_clicks=0,
+            )
+            for btn_id, glyph, title in icons
+        ],
+    )
+
+
 def _create_tabs_section() -> html.Div:
     """Create main chart tabs section (Intraday / K-line / Events)."""
     return html.Div(
         id="tabs-section",
-        className="tabs-section",
+        className="tabs-section card chart-card",
         children=[
+            html.Div(
+                className="chart-card-head",
+                children=[
+                    _create_chart_toolbar(),
+                ],
+            ),
             dcc.Tabs(
                 id="main-tabs",
                 value="intraday",
@@ -921,9 +999,38 @@ def _create_tabs_section() -> html.Div:
                     ),
                 ]
             ),
-            # Two-row MarketStrip mounted directly under the chart.
-            _create_below_chart_strip(),
         ]
+    )
+
+
+def _create_breadth_card() -> html.Div:
+    """Relayout BreadthCard — 漲跌家數 + 2x3 sector matrix.
+
+    Hosts the existing market-strip-breadth (上市/上櫃 漲跌家數) and
+    market-strip-industry (sector matrix) IDs the update_market_strip
+    callback writes into. Industry payload is now a 2x3 matrix
+    (上市/上櫃 × 半導體/通信/電零) — the callback layer reuses the
+    same IndustryPulseEntry list and the CSS lays it out as a grid.
+    """
+    return html.Div(
+        id="breadth-card",
+        className="breadth-card card",
+        children=[
+            html.Div(
+                className="card-head",
+                children=[
+                    html.H3("市場概況 · 類股表現", className="card-title"),
+                ],
+            ),
+            html.Div(
+                id="market-strip-breadth",
+                className="market-strip-breadth breadth-card-breadth",
+            ),
+            html.Div(
+                id="market-strip-industry",
+                className="market-strip-industry breadth-card-sectors",
+            ),
+        ],
     )
 
 

@@ -121,6 +121,55 @@
     --font-lg:  20px;
     --font-xl:  28px;
     --font-xxl: 36px;
+
+    /* ============================================================
+     * Relayout tokens (Phase 7 — Dashboard Relayout)
+     * Source: design_handoff_dashboard_relayout/README.md §6
+     * Taiwan semantic preserved (up=漲=red, down=跌=teal). The hex
+     * values come from the mock palette; the existing legacy --up /
+     * --down stay untouched so old rules keep working.
+     * ============================================================ */
+
+    /* Surfaces (cool dark navy) */
+    --rl-bg:        #0a0d12;
+    --rl-bg-2:      #0f1218;
+    --rl-surface:   #131820;
+    --rl-surface-2: #181e28;
+
+    /* Lines */
+    --rl-line:      #1f2632;
+    --rl-line-2:    #2a3340;
+
+    /* Text */
+    --rl-ink:    #e6ebf2;
+    --rl-ink-2:  #aab3c0;
+    --rl-ink-3:  #6e7886;
+    --rl-ink-4:  #4a5260;
+
+    /* Taiwan-semantic price colors aligned to mock palette */
+    --rl-up:       #ef4f5e;   /* 漲 red */
+    --rl-up-2:     #b83a47;
+    --rl-up-bg:    rgba(239, 79, 94, 0.10);
+    --rl-up-line:  rgba(239, 79, 94, 0.25);
+    --rl-down:     #10b8a4;   /* 跌 teal */
+    --rl-down-2:   #0a8a7a;
+    --rl-down-bg:  rgba(16, 184, 164, 0.10);
+    --rl-down-line:rgba(16, 184, 164, 0.25);
+    --rl-flat:     #98a0ad;
+
+    /* Accents */
+    --rl-accent:   #5b8def;   /* selected / active / volume line */
+    --rl-accent-2: #8a6cf0;   /* AI 紫 */
+    --rl-warn:     #d9a441;   /* 盤後 LED / 買賣力道線 */
+
+    /* Radii */
+    --rl-radius:    8px;
+    --rl-radius-sm: 5px;
+
+    /* AppBar / MarketRail heights */
+    --rl-appbar-h:  52px;
+    --rl-rail-h:    84px;
+    --rl-ticker-h:  36px;
 }
 
 /* ─── Numeric utility ─── */
@@ -4981,4 +5030,811 @@ textarea:focus-visible,
     background: rgba(239, 83, 80, 0.10);
     color: #EF9A9A;
     border-color: rgba(239, 83, 80, 0.35);
+}
+
+/* ============================================================
+ * Dashboard Relayout (Phase 7)
+ * Source spec: design_handoff_dashboard_relayout/README.md
+ * All selectors in this section are additive — they override or
+ * specialise existing rules via the `*-relayout` / `card` / new IDs
+ * introduced for the relayout pass.
+ * ============================================================ */
+
+body {
+    background: var(--rl-bg);
+    padding-bottom: var(--rl-ticker-h);
+}
+
+/* ---- AppBar (52px) ---------------------------------------- */
+.app-header-relayout {
+    height: var(--rl-appbar-h);
+    background: var(--rl-bg-2);
+    border-bottom: 1px solid var(--rl-line);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+}
+.app-header-relayout .app-header-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    height: 100%;
+}
+.app-header-relayout .header-nav {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+.app-header-relayout .brand-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: linear-gradient(135deg, var(--rl-accent), var(--rl-accent-2));
+    display: inline-block;
+}
+.app-header-relayout .brand-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--rl-ink);
+    margin-right: 8px;
+}
+.app-header-relayout .header-nav-link {
+    padding: 6px 12px;
+    border-radius: 6px;
+    color: var(--rl-ink-2);
+    text-decoration: none;
+    font-size: 13px;
+    transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.app-header-relayout .header-nav-link:hover {
+    background: var(--rl-surface-2);
+    color: var(--rl-ink);
+}
+.app-header-relayout .header-nav-link.active,
+.app-header-relayout .header-nav-link[aria-current="page"] {
+    background: var(--rl-surface-2);
+    color: var(--rl-ink);
+}
+.app-header-relayout .header-nav-ai {
+    color: var(--rl-accent-2);
+}
+.app-header-relayout .header-search {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+}
+.app-header-relayout .search-container {
+    position: relative;
+    width: 280px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    background: var(--rl-bg);
+    border: 1px solid var(--rl-line);
+    border-radius: 6px;
+    padding: 0 8px;
+}
+.app-header-relayout .search-container:focus-within {
+    border-color: var(--rl-accent);
+}
+.app-header-relayout .search-input {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    outline: none;
+    color: var(--rl-ink);
+    font-size: 13px;
+}
+.app-header-relayout .search-kbd {
+    font-family: var(--font-num);
+    font-size: 10.5px;
+    color: var(--rl-ink-3);
+    border: 1px solid var(--rl-line-2);
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-right: 6px;
+}
+.app-header-relayout .search-button {
+    display: none;  /* search triggered via keyboard / autocomplete */
+}
+
+/* ---- MarketRail (~84px) ----------------------------------- */
+.market-rail {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0;
+    background: var(--rl-bg-2);
+    border-bottom: 1px solid var(--rl-line);
+    margin: 0;
+    padding: 0;
+}
+.market-rail-indices,
+.market-rail-macro {
+    background: var(--rl-bg-2);
+}
+.market-rail-macro {
+    border-left: 1px solid var(--rl-line);
+    padding: 8px 12px;
+}
+.market-rail-indices {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.market-rail-indices .market-strip-row {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 1px;
+    background: var(--rl-line);
+}
+.market-rail-indices .market-strip-row > * {
+    background: var(--rl-bg-2);
+    padding: 6px 10px;
+}
+.market-rail-macro {
+    min-width: 480px;
+    border-left: 1px solid var(--rl-line);
+}
+.market-rail-macro .market-strip {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 92px;
+    gap: 12px;
+}
+
+/* ---- Main content grid (240 / 1fr / 360) ------------------ */
+.content-wrapper-relayout {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr) 360px;
+    grid-template-rows: 1fr;
+    gap: 12px;
+    padding: 12px;
+    align-items: start;
+}
+.content-wrapper-relayout .favorites-sidebar {
+    position: sticky;
+    top: calc(var(--rl-appbar-h) + 12px);
+    align-self: start;
+}
+.content-wrapper-relayout .center-column {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+/* ---- Shared card chrome ----------------------------------- */
+.card {
+    background: var(--rl-surface);
+    border: 1px solid var(--rl-line);
+    border-radius: var(--rl-radius);
+}
+.card-head {
+    padding: 10px 14px 8px;
+    border-bottom: 1px solid var(--rl-line);
+}
+.card-title {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--rl-ink-2);
+}
+
+/* ---- StockHeader card ------------------------------------- */
+.stock-header-card {
+    padding: 0;
+    overflow: hidden;
+}
+.stock-header-card .stock-headline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 22px;
+    padding: 14px 18px;
+}
+.stock-header-card .stock-name {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--rl-ink);
+}
+.stock-header-card .stock-id {
+    font-size: 14px;
+    color: var(--rl-ink-3);
+    margin-left: 8px;
+}
+.stock-header-card .stock-price {
+    font-size: 34px;
+    font-weight: 700;
+    line-height: 1;
+}
+.stock-header-card .stock-change {
+    font-size: 16px;
+    margin-left: 10px;
+}
+.stock-header-card .stock-stats {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    background: var(--rl-bg-2);
+    border-top: 1px solid var(--rl-line);
+}
+.stock-header-card .stat-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 12px;
+    border-right: 1px solid var(--rl-line);
+}
+.stock-header-card .stat-cell:last-child { border-right: 0; }
+.stock-header-card .stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--rl-ink-3);
+}
+.stock-header-card .stat-value {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--rl-ink);
+}
+
+/* ---- ChartCard -------------------------------------------- */
+.chart-card {
+    padding: 0;
+    overflow: hidden;
+}
+.chart-card .chart-card-head {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--rl-line);
+    background: var(--rl-bg-2);
+}
+.chart-toolbar {
+    display: flex;
+    gap: 4px;
+}
+.chart-tool-btn {
+    width: 28px;
+    height: 28px;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    color: var(--rl-ink-2);
+    cursor: pointer;
+    font-size: 13px;
+}
+.chart-tool-btn:hover {
+    background: var(--rl-surface-2);
+    color: var(--rl-ink);
+}
+.chart-card .main-tabs {
+    border-bottom: 1px solid var(--rl-line);
+    padding: 0 8px;
+}
+.chart-card .tab-selected {
+    border-bottom: 2px solid var(--rl-accent) !important;
+    color: var(--rl-ink) !important;
+}
+
+/* ---- BreadthCard ------------------------------------------ */
+.breadth-card {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.breadth-card-breadth {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--rl-line);
+    padding: 0;
+}
+.breadth-card-breadth > * {
+    background: var(--rl-surface);
+    padding: 10px 14px;
+}
+.breadth-card-sectors {
+    display: grid;
+    grid-template-columns: 60px repeat(3, 1fr);
+    gap: 6px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--rl-line);
+}
+.breadth-card-sectors .industry-cell {
+    background: var(--rl-surface-2);
+    border: 1px solid var(--rl-line);
+    border-radius: var(--rl-radius-sm);
+    padding: 6px 8px;
+}
+.breadth-card-sectors .industry-cell.up    { border-color: var(--rl-up-line); }
+.breadth-card-sectors .industry-cell.down  { border-color: var(--rl-down-line); }
+
+/* ---- NewsTicker (36px) ------------------------------------ */
+.news-ticker-bar-relayout {
+    height: var(--rl-ticker-h);
+    background: var(--rl-bg-2);
+    border-top: 1px solid var(--rl-line);
+    display: flex;
+    align-items: stretch;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+}
+.news-ticker-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
+    background: var(--rl-up-bg);
+    border-right: 1px solid var(--rl-line);
+    color: var(--rl-up);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+}
+.news-ticker-led {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--rl-up);
+    box-shadow: 0 0 6px var(--rl-up);
+    animation: news-led-blink 1.6s ease-in-out infinite;
+}
+@keyframes news-led-blink {
+    0%, 60%, 100% { opacity: 1; }
+    30%           { opacity: 0.25; }
+}
+.news-ticker-viewport {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+.news-ticker-marquee {
+    display: flex;
+    gap: 28px;
+    white-space: nowrap;
+    align-items: center;
+    height: 100%;
+    padding: 0 16px;
+    animation: ticker-scroll 60s linear infinite;
+}
+.news-ticker-marquee:hover { animation-play-state: paused; }
+@keyframes ticker-scroll {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+.news-ticker-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--rl-ink);
+}
+.news-ticker-chip {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+    color: var(--rl-ink);
+    background: var(--rl-surface-2);
+    border: 1px solid var(--rl-line-2);
+}
+.news-cat-intl     { color: #f0b27a; border-color: rgba(240,178,122,0.4); }
+.news-cat-tech     { color: var(--rl-accent); border-color: rgba(91,141,239,0.4); }
+.news-cat-finance  { color: var(--rl-warn); border-color: rgba(217,164,65,0.4); }
+.news-cat-twse     { color: var(--rl-up); border-color: var(--rl-up-line); }
+.news-cat-default  { color: var(--rl-ink-2); }
+
+/* ---- Right rail polish ------------------------------------ */
+.content-wrapper-relayout .right-rail {
+    background: var(--rl-surface);
+    border: 1px solid var(--rl-line);
+    border-radius: var(--rl-radius);
+    overflow: hidden;
+}
+.content-wrapper-relayout .right-rail-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    background: var(--rl-bg-2);
+    border-bottom: 1px solid var(--rl-line);
+}
+.content-wrapper-relayout .right-rail-tab {
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: var(--rl-ink-2);
+    padding: 8px 0;
+    font-size: 13px;
+    cursor: pointer;
+}
+.content-wrapper-relayout .right-rail-tab.active {
+    color: var(--rl-ink);
+    border-bottom-color: var(--rl-accent);
+}
+
+/* ---- Watchlist selection (relayout) ----------------------- */
+.content-wrapper-relayout .favorites-list .favorite-row {
+    position: relative;
+    transition: background var(--t-fast) var(--ease);
+}
+.content-wrapper-relayout .favorites-list .favorite-row:hover {
+    background: var(--rl-surface-2);
+}
+.content-wrapper-relayout .favorites-list .favorite-row.selected {
+    background: linear-gradient(90deg, rgba(91,141,239,0.12), transparent 80%);
+    box-shadow: inset 2px 0 0 var(--rl-accent);
+}
+
+/* ============================================================
+ * Relayout overrides (Phase 7 — fixups)
+ * Existing rules from earlier phases use simple class selectors,
+ * so we bump specificity here with `.app-header-relayout` /
+ * `.content-wrapper-relayout` / `.card.stock-header-card` etc. and
+ * `!important` on the truly stubborn ones (height: 72px on
+ * .stock-info-section, .market-strip flex/overflow).
+ * ============================================================ */
+
+/* ---- AppBar search: 280px input, left after nav; session pushed right */
+.app-header-relayout .header-search {
+    width: 280px;
+    flex: 0 0 280px;
+    margin: 0;
+}
+.app-header-relayout .session-badge {
+    margin-left: auto;
+}
+.app-header-relayout .header-search .search-container {
+    display: flex;
+    align-items: center;
+    width: 280px !important;
+    max-width: 280px !important;
+    height: 34px;
+    background: var(--rl-bg);
+    border: 1px solid var(--rl-line);
+    border-radius: 6px;
+    padding: 0 8px;
+    gap: 6px;
+}
+.app-header-relayout .header-search .search-input {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    height: 100% !important;
+    background: transparent !important;
+    border: 0 !important;
+    padding: 0 !important;
+    color: var(--rl-ink) !important;
+    font-size: 13px;
+}
+.app-header-relayout .header-search .search-input::placeholder { color: var(--rl-ink-3); }
+.app-header-relayout .header-search .search-button { display: none !important; }
+.app-header-relayout .match-list {
+    background: var(--rl-surface);
+    border: 1px solid var(--rl-line);
+}
+
+/* ---- MarketRail macro: 5-col grid, kill the legacy 28px row */
+.market-rail-macro .market-strip {
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(96px, 1fr));
+    gap: 12px;
+    height: auto !important;
+    background: transparent !important;
+    border: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    white-space: normal !important;
+    align-items: center;
+}
+.market-rail-macro .market-strip-item {
+    display: flex !important;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 4px 8px !important;
+    border-right: 0 !important;
+    background: var(--rl-surface);
+    border: 1px solid var(--rl-line);
+    border-radius: var(--rl-radius-sm);
+    min-width: 0;
+}
+.market-rail-macro .market-strip-label {
+    font-size: 10px !important;
+    font-weight: 500 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--rl-ink-3) !important;
+    line-height: 1.2 !important;
+}
+.market-rail-macro .market-strip-value {
+    font-family: var(--font-num) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: var(--rl-ink) !important;
+    line-height: 1.2 !important;
+}
+.market-rail-macro .market-strip-delta {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: baseline;
+    gap: 4px;
+    line-height: 1.2 !important;
+}
+.market-rail-macro .market-strip-chg,
+.market-rail-macro .market-strip-pct {
+    font-family: var(--font-num) !important;
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    color: var(--rl-ink-2);
+}
+.market-rail-macro .market-strip-value.up,
+.market-rail-macro .market-strip-chg.up,
+.market-rail-macro .market-strip-pct.up   { color: var(--rl-up) !important; }
+.market-rail-macro .market-strip-value.down,
+.market-rail-macro .market-strip-chg.down,
+.market-rail-macro .market-strip-pct.down { color: var(--rl-down) !important; }
+.market-rail-macro .market-strip-spacer,
+.market-rail-macro .market-strip-tail { display: none !important; }
+
+/* ---- MarketRail indices: collapse two callback rows into a single
+ *      6-7 col rail. `display: contents` on the row wrapper lifts the
+ *      strip-card children into the indices grid directly. */
+.market-rail-indices {
+    display: grid !important;
+    grid-auto-flow: column !important;
+    grid-auto-columns: minmax(0, 1fr) !important;
+    grid-template-columns: none !important;
+    gap: 1px;
+    background: var(--rl-line);
+    padding: 0 !important;
+}
+.market-rail-indices .market-strip-row {
+    display: contents !important;
+}
+.market-rail-indices .market-strip-row > *,
+.market-rail-indices .strip-card {
+    background: var(--rl-bg-2) !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    padding: 10px 16px !important;
+    min-width: 0;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2px !important;
+    container-type: normal !important;
+    overflow: hidden;
+}
+.market-rail-indices .strip-card-label {
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    color: var(--rl-ink-3) !important;
+    letter-spacing: 0.04em;
+    line-height: 1.2 !important;
+}
+.market-rail-indices .strip-card-value {
+    font-family: var(--font-num) !important;
+    font-size: 22px !important;
+    font-weight: 600 !important;
+    line-height: 1.15 !important;
+    color: var(--rl-ink) !important;
+}
+.market-rail-indices .strip-card-value.up   { color: var(--rl-up)   !important; }
+.market-rail-indices .strip-card-value.down { color: var(--rl-down) !important; }
+.market-rail-indices .strip-card-value.flat { color: var(--rl-ink)  !important; }
+.market-rail-indices .strip-card-sub {
+    font-family: var(--font-num) !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    line-height: 1.2 !important;
+    color: var(--rl-ink-2) !important;
+    margin-top: 0 !important;
+}
+.market-rail-indices .strip-card-sub.up   { color: var(--rl-up)   !important; }
+.market-rail-indices .strip-card-sub.down { color: var(--rl-down) !important; }
+
+/* ---- StockHeader: break out of the legacy 72px flex row ---- */
+.stock-info-section.stock-header-card {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    overflow: hidden !important;
+    background: var(--rl-surface) !important;
+    border: 1px solid var(--rl-line) !important;
+    border-radius: var(--rl-radius) !important;
+    flex-shrink: 0 !important;
+    width: 100% !important;
+}
+.stock-info-section.stock-header-card .stock-headline {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    flex-wrap: nowrap !important;
+    gap: 18px;
+    padding: 14px 18px !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-bottom: 1px solid var(--rl-line) !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+}
+.stock-info-section.stock-header-card .stock-headline-left {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px;
+    flex: 0 0 auto;
+}
+.stock-info-section.stock-header-card .stock-headline-right {
+    display: flex !important;
+    align-items: baseline !important;
+    gap: 10px;
+    margin-left: auto !important;
+    flex: 0 0 auto;
+}
+/* 成交量 pill moves into the 7-col stats strip (avoid duplication). */
+.stock-info-section.stock-header-card .stock-volume-pill { display: none !important; }
+.stock-info-section.stock-header-card .stock-stats {
+    margin: 0 !important;
+    border-top: 0 !important;
+}
+
+/* ---- BreadthCard: 2x4 sector matrix (label + 3 sectors per row) */
+#market-strip-industry.breadth-card-sectors {
+    display: grid !important;
+    grid-template-columns: 64px repeat(3, minmax(0, 1fr)) !important;
+    grid-auto-rows: auto;
+    gap: 6px !important;
+    flex-wrap: nowrap !important;
+    align-items: stretch;
+}
+#market-strip-industry.breadth-card-sectors .industry-row-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--rl-surface);
+    border: 1px solid var(--rl-line);
+    border-radius: var(--rl-radius-sm);
+    color: var(--rl-ink-2);
+    font-size: 11px;
+    font-weight: 600;
+}
+#market-strip-industry.breadth-card-sectors .industry-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--rl-surface-2);
+    border: 1px solid var(--rl-line);
+    border-radius: var(--rl-radius-sm);
+    font-size: 12px;
+    min-width: 0;
+}
+#market-strip-industry.breadth-card-sectors .industry-cell.up   { border-color: var(--rl-up-line); }
+#market-strip-industry.breadth-card-sectors .industry-cell.down { border-color: var(--rl-down-line); }
+#market-strip-industry.breadth-card-sectors .industry-cell-tag {
+    font-size: 10px;
+    color: var(--rl-ink-3);
+    padding: 1px 5px;
+    background: var(--rl-bg-2);
+    border-radius: 3px;
+}
+#market-strip-industry.breadth-card-sectors .industry-cell-label {
+    color: var(--rl-ink);
+    font-weight: 500;
+}
+#market-strip-industry.breadth-card-sectors .industry-cell-pct {
+    margin-left: auto;
+    font-family: var(--font-num);
+    font-size: 12px;
+}
+#market-strip-industry.breadth-card-sectors .industry-cell-pct.up   { color: var(--rl-up); }
+#market-strip-industry.breadth-card-sectors .industry-cell-pct.down { color: var(--rl-down); }
+#market-strip-industry.breadth-card-sectors .industry-cell-empty {
+    background: var(--rl-bg-2);
+    color: var(--rl-ink-4);
+    justify-content: center;
+}
+
+/* ---- Favorites sidebar: kill top gap from sticky positioning */
+.content-wrapper-relayout .favorites-sidebar {
+    position: static;
+    background: var(--rl-surface);
+    border: 1px solid var(--rl-line);
+    border-radius: var(--rl-radius);
+    padding: 8px;
+    height: auto;
+    max-height: 100%;
+    overflow-y: auto;
+}
+.content-wrapper-relayout .favorite-signal-strip { display: none !important; }
+
+/* ---- Right rail: bound height so chips panel scrolls -------- */
+.content-wrapper-relayout {
+    height: calc(100vh - var(--rl-appbar-h) - var(--rl-rail-h) - var(--rl-ticker-h) - 24px);
+    min-height: 600px;
+    align-items: stretch;
+}
+.content-wrapper-relayout .right-rail {
+    height: 100%;
+    min-height: 0;
+}
+.content-wrapper-relayout .center-column {
+    height: 100%;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+/* ---- Page background ---------------------------------------- */
+#stock-page,
+#main-container { background: var(--rl-bg); }
+
+/* ---- Stock header multi-tag strip --------------------------- */
+.stock-tags-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+}
+.stock-tags-row:empty { display: none; }
+.pill.pill-industry.stock-tag-pill {
+    background: rgba(91, 141, 239, 0.12);
+    color: var(--rl-accent);
+    border: 1px solid rgba(91, 141, 239, 0.35);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0;
+    font-weight: 500;
+}
+
+/* ---- Right rail chips panel: 1:1 split between big-orders & spike */
+.content-wrapper-relayout #right-rail-panel-chips.right-rail-panel-active {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+}
+.content-wrapper-relayout .right-rail .big-orders-tape {
+    flex: 1 1 0 !important;
+    min-height: 160px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.content-wrapper-relayout .right-rail .big-orders-list {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+}
+.content-wrapper-relayout .right-rail .volume-spike-panel {
+    flex: 1 1 0;
+    min-height: 160px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.content-wrapper-relayout .right-rail .volume-spike-list {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+}
+.content-wrapper-relayout .right-rail .best5-mini {
+    flex: 0 0 auto;
 }

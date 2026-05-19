@@ -588,6 +588,28 @@ class ShioajiFetcher:
         except Exception as exc:
             logger.debug(f"_handle_fop_tick failed: {exc}")
 
+    def get_category(self, stock_id: str) -> Optional[str]:
+        """Return the Shioaji Contract category code for a stock.
+
+        TWSE category codes are 4-digit / 2-digit strings (e.g. "24" for
+        半導體業). The caller maps the code to a Chinese label. Returns
+        ``None`` when Shioaji is offline or the contract lookup fails so
+        the sector resolver can fall back to its other sources.
+        """
+        if not self.is_connected:
+            return None
+        try:
+            contract = self.api.Contracts.Stocks[stock_id]
+            if not contract:
+                return None
+            code = getattr(contract, "category", None)
+            if not code:
+                return None
+            return str(code).strip()
+        except Exception as exc:
+            logger.debug(f"get_category({stock_id}) failed: {exc}")
+            return None
+
     def is_subscribed(self, stock_id: str) -> bool:
         """Check if stock is currently subscribed."""
         with self._subscription_lock:
