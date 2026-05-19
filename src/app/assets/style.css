@@ -5282,6 +5282,9 @@ body {
     font-weight: 500;
     color: var(--rl-ink);
 }
+.stock-header-card .stat-value.up   { color: var(--rl-up)   !important; }
+.stock-header-card .stat-value.down { color: var(--rl-down) !important; }
+.stock-header-card .stat-value.flat { color: var(--rl-ink)  !important; }
 
 /* ---- ChartCard -------------------------------------------- */
 .chart-card {

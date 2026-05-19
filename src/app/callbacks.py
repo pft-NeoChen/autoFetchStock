@@ -2127,17 +2127,31 @@ class CallbackManager:
 
         @self.app.callback(
             Output("stock-stat-open",    "children"),
+            Output("stock-stat-open",    "className"),
             Output("stock-stat-high",    "children"),
+            Output("stock-stat-high",    "className"),
             Output("stock-stat-low",     "children"),
+            Output("stock-stat-low",     "className"),
             Output("stock-stat-prev",    "children"),
             Output("stock-stat-pe",      "children"),
+            Output("stock-volume-display", "className", allow_duplicate=True),
             Output("stock-stat-foreign", "children"),
+            Output("stock-stat-foreign", "className"),
             Input("auto-update-interval", "n_intervals"),
             Input("app-state-store", "data"),
-            prevent_initial_call=False,
+            prevent_initial_call="initial_duplicate",
         )
         def update_stock_stats(_n_intervals: int, app_state: Optional[dict]):
-            placeholder = ("--", "--", "--", "--", "--", "--")
+            base_cls = "stat-value num"
+            placeholder = (
+                "--", base_cls,
+                "--", base_cls,
+                "--", base_cls,
+                "--",
+                "--",
+                base_cls,
+                "--", base_cls,
+            )
             stock_id = (app_state or {}).get("current_stock") if app_state else None
             if not stock_id:
                 return placeholder
@@ -2153,10 +2167,30 @@ class CallbackManager:
                     return "--"
                 return f"{v:,.2f}"
 
+            def _dir(diff: float) -> str:
+                if diff > 0:
+                    return "up"
+                if diff < 0:
+                    return "down"
+                return "flat"
+
             open_txt = _fmt_price(quote.open_price)     if quote else "--"
             high_txt = _fmt_price(quote.high_price)     if quote else "--"
             low_txt  = _fmt_price(quote.low_price)      if quote else "--"
             prev_txt = _fmt_price(quote.previous_close) if quote else "--"
+
+            prev_close = (quote.previous_close or 0) if quote else 0
+            # 開盤 vs 昨收 → 跳空方向 (gap up/down)
+            if quote and quote.open_price and prev_close:
+                open_cls = f"{base_cls} {_dir(quote.open_price - prev_close)}"
+            else:
+                open_cls = base_cls
+            # 最高 / 最低 / 成交量 → 跟當日漲跌方向 (change_amount) 同向
+            day_dir = _dir(quote.change_amount) if quote else "flat"
+            high_cls = f"{base_cls} {day_dir}" if quote else base_cls
+            low_cls  = f"{base_cls} {day_dir}" if quote else base_cls
+            vol_cls = f"num stock-volume-value stat-value {day_dir}" if quote \
+                else "num stock-volume-value stat-value"
 
             pe_txt = "--"
             try:
@@ -2167,19 +2201,30 @@ class CallbackManager:
                 logger.debug(f"update_stock_stats fundamentals failed: {exc}")
 
             # 外資 = 外資買賣超 (T86 三大法人) via ChipsStorage. Header
-            # cell mirrors the 籌碼面 panel's "外資" card value_text so
-            # the user sees the same number in both places.
+            # cell mirrors the 籌碼面 panel's "外資" card value_text + direction
+            # so the user sees the same number/colour in both places.
             foreign_txt = "--"
+            foreign_dir = "flat"
             try:
                 cards = build_chips_kpi(stock_id, self.chips_storage)
                 for c in cards:
                     if c.key == "foreign":
                         foreign_txt = c.value_text or "--"
+                        foreign_dir = c.direction or "flat"
                         break
             except Exception as exc:
                 logger.debug(f"update_stock_stats chips failed: {exc}")
+            foreign_cls = f"{base_cls} {foreign_dir}"
 
-            return open_txt, high_txt, low_txt, prev_txt, pe_txt, foreign_txt
+            return (
+                open_txt, open_cls,
+                high_txt, high_cls,
+                low_txt,  low_cls,
+                prev_txt,
+                pe_txt,
+                vol_cls,
+                foreign_txt, foreign_cls,
+            )
 
     def _get_direction_class(self, direction: PriceDirection) -> str:
         """Get CSS class for price direction."""
