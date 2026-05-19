@@ -683,7 +683,13 @@ def _create_volume_spike_panel() -> html.Div:
             ),
             dcc.Interval(
                 id="volume-spike-interval",
-                interval=60_000,  # refresh once per minute
+                # 5s refresh — VolumeSpikeJob writes to the in-memory
+                # SpikeDetectionStore at second=5 of each minute (broker
+                # bar publish + detect). With a 60s interval the panel
+                # could lag up to ~55s before showing the new spike. 5s
+                # bounds the worst-case display delay; rendering is cheap
+                # (deque read + DOM rebuild).
+                interval=5_000,
                 n_intervals=0,
             ),
         ],
