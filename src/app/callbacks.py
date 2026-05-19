@@ -594,7 +594,15 @@ class CallbackManager:
                 bars = self.spike_detection_store.get_recent(stock_id, n=20)
                 if not bars:
                     return [html.Div("尚無爆量", className="no-data")]
-                return [_render_volume_spike_row(b) for b in bars]
+                rows = []
+                last_date = None
+                for b in bars:
+                    bar_date = b.timestamp.date()
+                    if bar_date != last_date:
+                        rows.append(_render_spike_date_divider(bar_date))
+                        last_date = bar_date
+                    rows.append(_render_volume_spike_row(b))
+                return rows
             except Exception as exc:
                 logger.error("update_volume_spike_panel failed: %s", exc)
                 return [html.Div("資料載入錯誤", className="no-data")]
@@ -1963,8 +1971,11 @@ class CallbackManager:
                         bid_volumes = bidask["bid_volume"]
                         ask_prices = bidask["ask_price"]
                         ask_volumes = bidask["ask_volume"]
-                        ask_side_total = bidask.get("ask_side_total_vol", 0)
-                        bid_side_total = bidask.get("bid_side_total_vol", 0)
+                        # 合計 sums visible 5 levels — Shioaji
+                        # *_side_total_vol unreliable in sim and sometimes
+                        # zero in prod bidask events.
+                        bid_side_total = sum(int(v or 0) for v in bid_volumes)
+                        ask_side_total = sum(int(v or 0) for v in ask_volumes)
 
                         # Build five-level rows — Phase 3.5: each cell carries
                         # an inline linear-gradient soft-fill proportional to
@@ -5452,6 +5463,15 @@ def _build_spike_notification_payload(stock_id: str, bar: MinuteKBar) -> Dict[st
     )
     tag = f"{stock_id}_{bar.timestamp.isoformat()}"
     return {"title": title, "body": body, "tag": tag}
+
+
+_WEEKDAY_ZH = ["一", "二", "三", "四", "五", "六", "日"]
+
+
+def _render_spike_date_divider(d) -> html.Div:
+    """Day divider inserted between spike rows of different dates."""
+    label = f"{d.month}/{d.day} ({_WEEKDAY_ZH[d.weekday()]})"
+    return html.Div(label, className="volume-spike-date-divider")
 
 
 def _render_volume_spike_row(bar: MinuteKBar) -> html.Div:
