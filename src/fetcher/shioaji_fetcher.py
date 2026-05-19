@@ -124,15 +124,13 @@ class ShioajiFetcher:
     def _normalize_datetime(value: Any) -> Optional[datetime]:
         """Normalize Shioaji timestamp fields to Asia/Taipei naive datetimes.
 
-        Shioaji SDK 1.3.2 yields timestamps in three flavours:
-        * `datetime` with `tzinfo` set — already correct; just convert.
-        * `datetime` naive — SDK internally uses `utcfromtimestamp(ns/1e9)`
-          which strips tz, so the literal HH:MM is UTC. Re-attach UTC and
-          convert to Asia/Taipei.
-        * `int` / `float` epoch (s or ns) — same UTC re-interpretation.
-
-        All branches funnel through `zoneinfo.ZoneInfo("Asia/Taipei")` so
-        results are stable regardless of system TZ (Docker UTC vs host TPE).
+        Shioaji SDK 1.3.2 encodes wall-clock Taipei time directly:
+        * `datetime` with `tzinfo` set — convert to Taipei wall-clock.
+        * `datetime` naive — literal HH:MM is already Taipei wall-clock
+          (SDK uses `utcfromtimestamp` on a Taipei-encoded epoch). Return
+          as-is. Treating it as UTC and adding 8h double-shifts to +8h.
+        * `int` / `float` epoch (s or ns) — decoded via UTC then tz-stripped
+          yields the same Taipei wall-clock (see kbar `ts` fix in e0c315a).
         """
         if value is None:
             return None
@@ -146,21 +144,13 @@ class ShioajiFetcher:
                 parsed = value.astimezone(_TZ_TAIPEI).replace(tzinfo=None)
             else:
                 source = "datetime_naive"
-                parsed = (
-                    value.replace(tzinfo=_TZ_UTC)
-                    .astimezone(_TZ_TAIPEI)
-                    .replace(tzinfo=None)
-                )
+                parsed = value
         elif isinstance(value, (int, float)):
             if value > 0:
                 source = "epoch"
                 seconds = value / 1_000_000_000 if value > 10_000_000_000 else value
                 try:
-                    parsed = (
-                        datetime.fromtimestamp(seconds, tz=_TZ_UTC)
-                        .astimezone(_TZ_TAIPEI)
-                        .replace(tzinfo=None)
-                    )
+                    parsed = datetime.fromtimestamp(seconds, tz=_TZ_UTC).replace(tzinfo=None)
                 except (OSError, OverflowError, ValueError):
                     pass
         elif isinstance(value, str) and value:
@@ -170,11 +160,7 @@ class ShioajiFetcher:
                 if parsed_str.tzinfo is not None:
                     parsed = parsed_str.astimezone(_TZ_TAIPEI).replace(tzinfo=None)
                 else:
-                    parsed = (
-                        parsed_str.replace(tzinfo=_TZ_UTC)
-                        .astimezone(_TZ_TAIPEI)
-                        .replace(tzinfo=None)
-                    )
+                    parsed = parsed_str
             except ValueError:
                 pass
 

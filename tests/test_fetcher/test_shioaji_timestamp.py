@@ -33,50 +33,26 @@ class TestNormalizeDatetime:
         assert ShioajiFetcher._normalize_datetime(0) is None
 
     # ------- naive datetime path (most common: tick.datetime) -------
+    # Shioaji 1.3.2 emits naive datetime where literal HH:MM is already
+    # Taipei wall-clock (SDK uses utcfromtimestamp on Taipei-encoded
+    # epoch). Must NOT add 8h — that double-shifts opening 09:00 → 17:00.
 
-    def test_naive_datetime_treated_as_utc(self):
-        # SDK emits UTC-naive 06:30; correct Taipei wall-clock is 14:30.
-        raw = datetime(2026, 4, 23, 6, 30, 0)
+    def test_naive_datetime_is_taipei_wall_clock(self):
+        raw = datetime(2026, 4, 23, 9, 0, 0)
         result = ShioajiFetcher._normalize_datetime(raw)
-        assert result == datetime(2026, 4, 23, 14, 30, 0)
+        assert result == datetime(2026, 4, 23, 9, 0, 0)
         assert result.tzinfo is None
 
-    def test_naive_datetime_07_59_utc(self):
-        raw = datetime(2026, 4, 23, 7, 59, 0)
+    def test_naive_datetime_market_close(self):
+        raw = datetime(2026, 4, 23, 13, 30, 0)
         assert ShioajiFetcher._normalize_datetime(raw) == datetime(
-            2026, 4, 23, 15, 59, 0
-        )
-
-    def test_naive_datetime_08_00_utc(self):
-        raw = datetime(2026, 4, 23, 8, 0, 0)
-        assert ShioajiFetcher._normalize_datetime(raw) == datetime(
-            2026, 4, 23, 16, 0, 0
-        )
-
-    def test_naive_datetime_14_59_utc(self):
-        raw = datetime(2026, 4, 23, 14, 59, 0)
-        assert ShioajiFetcher._normalize_datetime(raw) == datetime(
-            2026, 4, 23, 22, 59, 0
-        )
-
-    def test_naive_datetime_15_00_utc(self):
-        raw = datetime(2026, 4, 23, 15, 0, 0)
-        assert ShioajiFetcher._normalize_datetime(raw) == datetime(
-            2026, 4, 23, 23, 0, 0
+            2026, 4, 23, 13, 30, 0
         )
 
     def test_naive_datetime_pre_open_window(self):
-        # 00:30 UTC → 08:30 Taipei (早盤試撮). Old heuristic incorrectly
-        # added 8h here too — verify it does NOT now double-shift.
-        raw = datetime(2026, 4, 23, 0, 30, 0)
+        raw = datetime(2026, 4, 23, 8, 30, 0)
         assert ShioajiFetcher._normalize_datetime(raw) == datetime(
             2026, 4, 23, 8, 30, 0
-        )
-
-    def test_naive_datetime_midnight_utc(self):
-        raw = datetime(2026, 4, 23, 0, 0, 0)
-        assert ShioajiFetcher._normalize_datetime(raw) == datetime(
-            2026, 4, 23, 8, 0, 0
         )
 
     # ------- aware datetime path -------
@@ -94,24 +70,26 @@ class TestNormalizeDatetime:
         )
 
     # ------- epoch path -------
+    # Shioaji encodes Taipei wall-clock into the epoch (utcfromtimestamp
+    # decode yields the same literal HH:MM), so a ns whose UTC decode is
+    # 09:00 corresponds to Taipei 09:00.
 
     def test_epoch_seconds(self):
-        raw_dt = _utc(2026, 4, 23, 6, 30, 0)
+        raw_dt = _utc(2026, 4, 23, 9, 0, 0)
         assert ShioajiFetcher._normalize_datetime(raw_dt.timestamp()) == datetime(
-            2026, 4, 23, 14, 30, 0
+            2026, 4, 23, 9, 0, 0
         )
 
     def test_epoch_nanoseconds(self):
-        raw_dt = _utc(2026, 4, 23, 6, 30, 0)
+        raw_dt = _utc(2026, 4, 23, 9, 0, 0)
         ns = int(raw_dt.timestamp() * 1_000_000_000)
         assert ShioajiFetcher._normalize_datetime(ns) == datetime(
-            2026, 4, 23, 14, 30, 0
+            2026, 4, 23, 9, 0, 0
         )
 
     def test_epoch_boundary_post_close(self):
-        # 14:30 Taipei = 06:30 UTC; common Shioaji snapshot.ts.
-        ns = int(_utc(2026, 4, 23, 6, 30, 0).timestamp() * 1_000_000_000)
-        assert ShioajiFetcher._normalize_datetime(ns).hour == 14
+        ns = int(_utc(2026, 4, 23, 13, 30, 0).timestamp() * 1_000_000_000)
+        assert ShioajiFetcher._normalize_datetime(ns).hour == 13
 
     # ------- string path -------
 
@@ -122,9 +100,9 @@ class TestNormalizeDatetime:
         )
 
     def test_iso_string_naive(self):
-        raw = "2026-04-23T06:30:00"
+        raw = "2026-04-23T09:00:00"
         assert ShioajiFetcher._normalize_datetime(raw) == datetime(
-            2026, 4, 23, 14, 30, 0
+            2026, 4, 23, 9, 0, 0
         )
 
     def test_iso_string_offset(self):
@@ -140,7 +118,7 @@ class TestNormalizeDatetime:
 
     def test_counter_increments(self):
         before = get_tz_stats()["total"]
-        ShioajiFetcher._normalize_datetime(datetime(2026, 4, 23, 6, 30, 0))
+        ShioajiFetcher._normalize_datetime(datetime(2026, 4, 23, 9, 0, 0))
         ShioajiFetcher._normalize_datetime(0)  # none path, not counted
         ShioajiFetcher._normalize_datetime("2026-04-23T06:30:00Z")
         after = get_tz_stats()
