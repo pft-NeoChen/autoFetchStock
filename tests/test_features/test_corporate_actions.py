@@ -62,7 +62,7 @@ def test_cash_dividend_backward_adjusts_prior_rows_only() -> None:
 
     assert out.loc[pd.Timestamp("2026-05-20"), "adj_close"] == pytest.approx(93.6)
     assert out.loc[pd.Timestamp("2026-05-21"), "adj_close"] == pytest.approx(52.0)
-    assert out.loc[pd.Timestamp("2026-05-21"), "is_corporate_action_day"] is True
+    assert bool(out.loc[pd.Timestamp("2026-05-21"), "is_corporate_action_day"]) is True
 
 
 def test_stock_split_one_to_two_halves_prior_ohlc() -> None:
@@ -123,5 +123,5 @@ def test_event_with_missing_adjustment_data_only_sets_event_flag() -> None:
     out = apply_backward_adjustment(_ohlc_df(), [event])
 
     pd.testing.assert_series_equal(out["adj_close"], out["close"], check_names=False)
-    assert out.loc[pd.Timestamp("2026-05-21"), "is_corporate_action_day"] is True
+    assert bool(out.loc[pd.Timestamp("2026-05-21"), "is_corporate_action_day"]) is True
     assert out["corporate_action_factor"].tolist() == [1.0, 1.0, 1.0, 1.0, 1.0]
