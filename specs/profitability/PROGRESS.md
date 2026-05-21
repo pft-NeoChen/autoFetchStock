@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-22 |
-| 上次 session | TASK-D01 + TASK-U01 完成（RED → GREEN → DONE）；用戶選擇暫不補抓歷史日線，繼續往下做 |
+| 上次 session | TASK-F02 完成（RED → GREEN → REFACTOR → DONE）；Feature Availability 規則表已建立 |
 | 當前 phase | Phase 0 |
 | 當前 task | — |
-| 下一個建議 task | **TASK-F02**（Feature Availability 規則表，無依賴）或 **TASK-F01**（Corporate Actions） |
+| 下一個建議 task | **TASK-F01**（Corporate Actions / Adjusted OHLC，解鎖 TASK-F03 前置依賴） |
 | 全域 blocked | ⚠️ 39 檔股票全數**未達 2 年日線**（最長 ~9 個月，2025-09~2026-05）。Phase 3 回測啟動前須補抓歷史日線。 |
-| Pytest 狀態 | tests/test_scripts/ 4/4 GREEN；既有 shioaji/market_strip 5 fails 為 pre-existing，與本工作流無關 |
-| 檔案位置 | `specs/profitability/`（V1 + V2 + PLAN + PROGRESS + README）+ `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
-| Repo 是否乾淨 | main：RED 9a38595 + GREEN a903983，未 push |
+| Pytest 狀態 | profitability 相關 27/27 GREEN；完整 pytest 250 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
+| 檔案位置 | `specs/profitability/` + `src/features/availability.py` + `src/universe/filter.py` + `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
+| Repo 是否乾淨 | main：TASK-F02 RED/GREEN/REFACTOR/DONE 已完成；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
 
 ---
 
@@ -25,7 +25,7 @@
 
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
-| 0 — Universe + Feature Store | 11 | 2 | 0 | 9 | 0 |
+| 0 — Universe + Feature Store | 11 | 3 | 0 | 8 | 0 |
 | 1 — IC 分析 | 2 | 0 | 0 | 2 | 0 |
 | 2 — SignalEngine | 3 | 0 | 0 | 3 | 0 |
 | 3 — Backtester | 6 | 0 | 0 | 6 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **38** | **2** | **0** | **36** | **0** |
+| **總計** | **38** | **3** | **0** | **35** | **0** |
 
 ---
 
@@ -66,6 +66,7 @@
 - 2026-05-22 | bootstrap | 建立 IMPLEMENTATION_PLAN.md / PROGRESS.md / README.md / 套用 V2 八項微調 / 全部文件搬至 `specs/profitability/` / commit + push 至 main
 - 2026-05-22 | TASK-D01 | RED 9a38595 + GREEN a903983：scripts/audit_local_data.py + 4 unit tests GREEN + analysis/local_data_audit.md 產出（39 檔，0 檔達 2 年日線）。下一 session 建議：先決定補抓歷史日線，再做 TASK-U01。
 - 2026-05-22 | TASK-U01 | RED 9076abb + GREEN 2a1b641：src/universe/filter.py + 12 unit tests GREEN。V2 §0.2 全規則實作。下一 session 接 TASK-F02 (availability) 或 TASK-F01 (corp actions)。
+- 2026-05-22 | TASK-F02 | RED 1ee538c + GREEN 9256671 + REFACTOR ba23a7a：src/features/availability.py + 11 unit tests GREEN；依 V2 §0.5 將法人/融資融券預設為下一交易日 08:30 可用，並校正 IMPLEMENTATION_PLAN。下一 session 接 TASK-F01。
 
 ---
 
@@ -149,16 +150,22 @@
 
 - **Name**: Feature Availability 規則表
 - **Source**: V2 §0.5
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: —
-- **Files (planned)**:
-  - `src/features/availability.py`
-  - `tests/test_features/test_availability.py`
-- **Acceptance**: 涵蓋 daily_ohlc / minute_kbar / chips / margin / monthly_revenue / news / advisor
-- **Tests (RED list)**: 各 feature 一個 case + 未知 feature 例外
-- **DoD**: 全測試 GREEN
+- **Files**:
+  - `src/features/__init__.py` ✅
+  - `src/features/availability.py` ✅
+  - `tests/test_features/__init__.py` ✅
+  - `tests/test_features/test_availability.py` ✅（11 tests）
+- **Acceptance**: 涵蓋 daily_ohlc / minute_kbar / chips / margin / monthly_revenue / news / advisor ✅
+- **Tests (RED list)**: 11 項 全 GREEN
+  - daily close available_at / minute bar completion / chips T+1 pre-open / margin T+1 pre-open / weekend skip / monthly revenue announcement / news processed_at lag / news published_at / advisor generated_at / unknown feature exception / registry coverage
+- **DoD**: `tests/test_features tests/test_universe tests/test_scripts` 27/27 GREEN ✅
 - **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-22 1ee538c | RED：11 failing tests（import error，feature module 尚未存在） | 接 GREEN
+  - 2026-05-22 9256671 | GREEN：availability_of + AVAILABILITY_RULES + UnknownFeatureError；daily/minute/chips/margin/monthly_revenue/news/advisor 規則通過 | 接 REFACTOR
+  - 2026-05-22 ba23a7a | REFACTOR：公開 src.features API；27/27 related tests GREEN | 接 TASK-F01
 
 ### TASK-F03
 

@@ -334,9 +334,11 @@ src/
   - 規則寫成 `dict[feature_name, callable]`，可擴充
 - **Tests**:
   - 日線：T 日 13:30 後可用
-  - 三大法人：T 日 14:00 後（盤後公布）
-  - 融資融券：T+1 開盤前
+  - 分鐘 K：bar 完成後才可用
+  - 三大法人：T+1 開盤前（依 V2 §0.5 預設最早 T+1 可用）
+  - 融資融券：T+1 開盤前（依 V2 §0.5 預設最早 T+1 可用）
   - 月營收：以正式公告 timestamp
+  - 新聞 / advisor：以 published_at / processed_at / generated_at
   - 預設規則：未知 feature 拋例外
 - **DoD**: 全測試 GREEN
 
