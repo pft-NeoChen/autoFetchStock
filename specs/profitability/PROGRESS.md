@@ -10,10 +10,10 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-22 |
-| 上次 session | TASK-D01 完整跑完 RED → GREEN → DONE（資料盤點報告） |
+| 上次 session | TASK-D01 + TASK-U01 完成（RED → GREEN → DONE）；用戶選擇暫不補抓歷史日線，繼續往下做 |
 | 當前 phase | Phase 0 |
 | 當前 task | — |
-| 下一個建議 task | **TASK-U01**（Universe Filter）；但見下方「資料量警示」 |
+| 下一個建議 task | **TASK-F02**（Feature Availability 規則表，無依賴）或 **TASK-F01**（Corporate Actions） |
 | 全域 blocked | ⚠️ 39 檔股票全數**未達 2 年日線**（最長 ~9 個月，2025-09~2026-05）。Phase 3 回測啟動前須補抓歷史日線。 |
 | Pytest 狀態 | tests/test_scripts/ 4/4 GREEN；既有 shioaji/market_strip 5 fails 為 pre-existing，與本工作流無關 |
 | 檔案位置 | `specs/profitability/`（V1 + V2 + PLAN + PROGRESS + README）+ `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
@@ -25,7 +25,7 @@
 
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
-| 0 — Universe + Feature Store | 11 | 1 | 0 | 10 | 0 |
+| 0 — Universe + Feature Store | 11 | 2 | 0 | 9 | 0 |
 | 1 — IC 分析 | 2 | 0 | 0 | 2 | 0 |
 | 2 — SignalEngine | 3 | 0 | 0 | 3 | 0 |
 | 3 — Backtester | 6 | 0 | 0 | 6 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **38** | **1** | **0** | **37** | **0** |
+| **總計** | **38** | **2** | **0** | **36** | **0** |
 
 ---
 
@@ -65,6 +65,7 @@
 
 - 2026-05-22 | bootstrap | 建立 IMPLEMENTATION_PLAN.md / PROGRESS.md / README.md / 套用 V2 八項微調 / 全部文件搬至 `specs/profitability/` / commit + push 至 main
 - 2026-05-22 | TASK-D01 | RED 9a38595 + GREEN a903983：scripts/audit_local_data.py + 4 unit tests GREEN + analysis/local_data_audit.md 產出（39 檔，0 檔達 2 年日線）。下一 session 建議：先決定補抓歷史日線，再做 TASK-U01。
+- 2026-05-22 | TASK-U01 | RED 9076abb + GREEN 2a1b641：src/universe/filter.py + 12 unit tests GREEN。V2 §0.2 全規則實作。下一 session 接 TASK-F02 (availability) 或 TASK-F01 (corp actions)。
 
 ---
 
@@ -113,17 +114,21 @@
 
 - **Name**: Universe Filter
 - **Source**: V2 §0.2
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-D01
-- **Files (planned)**:
-  - `src/universe/__init__.py`
-  - `src/universe/filter.py`
-  - `tests/test_universe/test_filter.py`
-- **Acceptance**: 見 `IMPLEMENTATION_PLAN.md` §5
-- **Tests (RED list)**: ≥ 8 項（流動性 / 上市天數 / 價格 / F股 / ETN / 警示 / 處置 / 空輸入 / pure function）
-- **DoD**: 全測試 GREEN + commit
+- **Status**: `DONE`
+- **Depends**: TASK-D01 ✅
+- **Files**:
+  - `src/universe/__init__.py` ✅
+  - `src/universe/filter.py` ✅
+  - `tests/test_universe/__init__.py` ✅
+  - `tests/test_universe/test_filter.py` ✅（12 tests）
+- **Acceptance**: V2 §0.2 全規則實作（流動性 / listing bars / 價格 / F股 / ETN / 警示 / 處置 / 全額交割 / warrant）✅
+- **Tests (RED list)**: 12 項 全 GREEN
+  - liquidity below / at threshold / listing_days / price / F-stock / ETN / warning / disposition / full_delivery / empty input / idempotent / point-in-time
+- **DoD**: 12/12 GREEN + commits 9076abb + 2a1b641
 - **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-22 9076abb | RED：12 failing tests + placeholder | 接 GREEN
+  - 2026-05-22 2a1b641 | GREEN：filter_universe + StockMeta dataclass | 接 TASK-F01/F02
 
 ### TASK-F01
 

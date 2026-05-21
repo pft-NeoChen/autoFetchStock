@@ -74,11 +74,11 @@ specs/
 
 > 本段每次大里程碑時手動同步。**真實狀態以 `PROGRESS.md` Quick Status 表為準。**
 
-- **Phase**: Phase 0（TASK-D01 DONE，1/38）
+- **Phase**: Phase 0（TASK-D01 + U01 DONE，2/38）
 - **Spec 狀態**: V2 已含 8 項微調建議（已套用）
-- **下一 task**: `TASK-U01`（Universe Filter）；但見 Blocked
-- **Blocked**: ⚠️ 39 檔股票最長日線僅 ~9 個月，未達 V2 §0.1 的 ≥ 2 年要求。Phase 3 回測啟動前須補抓歷史日線。下一 session 用戶需決定：(a) 新增「TASK-D01b：補抓歷史日線」task，或 (b) 暫接受並繼續做 TASK-U01（Phase 0~2 不直接依賴 2 年資料）
-- **Pytest**: tests/test_scripts/ 4/4 GREEN；既有 shioaji + market_strip 5 fails 為 pre-existing，與本工作流無關
+- **下一 task**: `TASK-F02`（Feature Availability，無依賴）或 `TASK-F01`（Corporate Actions）
+- **Blocked**: ⚠️ 39 檔股票最長日線僅 ~9 個月。已決定先繼續往下做（Phase 0~2 不依賴 2 年資料），Phase 3 回測啟動前須補抓歷史日線
+- **Pytest**: tests/test_scripts/ 4/4 + tests/test_universe/ 12/12 GREEN；既有 shioaji + market_strip 5 fails 為 pre-existing
 
 若實際狀態與此段不符 → 以 PROGRESS 為準，並順手更新本段。
 
