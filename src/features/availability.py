@@ -17,6 +17,13 @@ DEFAULT_MINUTE_BAR_MINUTES = 1
 
 AvailabilityRule = Callable[..., datetime]
 
+__all__ = [
+    "AVAILABILITY_RULES",
+    "AvailabilityRule",
+    "UnknownFeatureError",
+    "availability_of",
+]
+
 
 class UnknownFeatureError(ValueError):
     """Raised when no availability rule exists for a feature source."""
