@@ -6,6 +6,7 @@ and manages the Dash application lifecycle.
 """
 
 import logging
+import time
 from typing import Optional
 
 from dash import Dash
@@ -69,12 +70,23 @@ class AppController:
         
         # Volume cache for real-time accumulation {stock_id: total_volume}
         self._volume_cache = {}
-        
+
         # Buffer for batching tick writes to reduce I/O
         import threading
+        from collections import deque
         self._tick_buffer = {}
         self._buffer_lock = threading.Lock()
         self._stop_event = threading.Event()
+
+        # Shioaji-limit alert queue. Pushed by ShioajiFetcher (traffic),
+        # subscribe guard, ticks budget, etc. Drained by the Dash polling
+        # callback (limit-alert-poll-interval) into limit-alert-store.
+        # Dedup by `tag` within `_alert_dedup_window_s` so the same
+        # repeating condition doesn't spam the UI.
+        self._limit_alert_queue: deque = deque(maxlen=32)
+        self._limit_alert_lock = threading.Lock()
+        self._limit_alert_last_tag_ts: dict = {}
+        self._alert_dedup_window_s = 300.0
 
         # Initialize components
         self._init_components()
@@ -91,6 +103,34 @@ class AppController:
 
         logger.info("AppController initialized successfully")
 
+    def push_limit_alert(self, payload: dict) -> None:
+        """Push a limit-alert payload onto the UI queue (thread-safe, deduped).
+
+        payload schema: {level: 'warn'|'error'|'info', title: str, body: str,
+                         ts: float, tag: str (optional, for dedup)}
+        """
+        if not isinstance(payload, dict):
+            return
+        tag = payload.get("tag") or payload.get("title", "")
+        now = time.time()
+        with self._limit_alert_lock:
+            last_ts = self._limit_alert_last_tag_ts.get(tag, 0.0)
+            if now - last_ts < self._alert_dedup_window_s:
+                return
+            self._limit_alert_last_tag_ts[tag] = now
+            self._limit_alert_queue.append(payload)
+        logger.info(
+            "Limit alert queued: [%s] %s",
+            payload.get("level", "?"), payload.get("title", ""),
+        )
+
+    def pop_limit_alert(self) -> Optional[dict]:
+        """Pop oldest queued alert (FIFO). None if queue empty."""
+        with self._limit_alert_lock:
+            if not self._limit_alert_queue:
+                return None
+            return self._limit_alert_queue.popleft()
+
     def init_volume_cache(self, stock_id: str, initial_volume: int) -> None:
         """Initialize or reset volume cache for a stock."""
         self._volume_cache[stock_id] = initial_volume
@@ -104,6 +144,9 @@ class AppController:
 
         # Shioaji fetcher
         self.shioaji_fetcher = ShioajiFetcher(config=self.config)
+        # Wire limit-alert sink before login so traffic/subscribe guards
+        # can surface to the UI as soon as streaming begins.
+        self.shioaji_fetcher.set_limit_alert_pusher(self.push_limit_alert)
         if self.shioaji_fetcher.login():
             logger.info("ShioajiFetcher logged in and ready")
             self.shioaji_fetcher.set_callbacks(
@@ -179,6 +222,7 @@ class AppController:
                 fav.get("id") for fav in (self.storage.load_favorites() or [])
                 if fav.get("id")
             ],
+            limit_alert_pusher=self.push_limit_alert,
         )
         self.scheduler.add_volume_spike_job(self.volume_spike_job)
         logger.debug("VolumeSpikeJob registered with Scheduler")
@@ -449,6 +493,7 @@ class AppController:
             chips_storage=self.chips_storage,
             index_fetcher=self.index_fetcher,
             spike_detection_store=self.spike_detection_store,
+            app_controller=self,
         )
 
         # Register all callbacks

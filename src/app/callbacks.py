@@ -85,6 +85,7 @@ class CallbackManager:
         chips_storage=None,
         index_fetcher=None,
         spike_detection_store=None,
+        app_controller=None,
     ):
         """
         Initialize callback manager.
@@ -114,6 +115,10 @@ class CallbackManager:
         self.chips_storage = chips_storage
         self.index_fetcher = index_fetcher
         self.spike_detection_store = spike_detection_store
+        # AppController back-reference for cross-thread alert queue access.
+        # CallbackManager doesn't normally need the controller, but the
+        # limit-alert popup polls a queue that lives there.
+        self.app_controller = app_controller
         self._current_stock_id: Optional[str] = None
         self._current_stock_name: Optional[str] = None
         # Per-stock cache for WatchlistRow sparklines: load_daily_data
@@ -139,7 +144,84 @@ class CallbackManager:
         self._register_alert_bar_callbacks()
         self._register_volume_spike_callbacks()
         self._register_stock_stats_callbacks()
+        self._register_limit_alert_callbacks()
         logger.info("All callbacks registered")
+
+    def _register_limit_alert_callbacks(self) -> None:
+        """Modal popup for Shioaji limit alerts (traffic / subscription / ticks)."""
+
+        @self.app.callback(
+            Output("limit-alert-store", "data"),
+            Input("limit-alert-poll-interval", "n_intervals"),
+            State("limit-alert-store", "data"),
+            prevent_initial_call=False,
+        )
+        def poll_limit_alert(_n, current):
+            # Already displaying one — wait until user dismisses.
+            if current:
+                return current
+            if not self.app_controller:
+                return None
+            try:
+                payload = self.app_controller.pop_limit_alert()
+            except Exception as exc:
+                logger.debug("pop_limit_alert failed: %s", exc)
+                return None
+            return payload
+
+        @self.app.callback(
+            Output("limit-alert-modal", "className"),
+            Output("limit-alert-title", "children"),
+            Output("limit-alert-body", "children"),
+            Output("limit-alert-dot", "className"),
+            Input("limit-alert-store", "data"),
+        )
+        def render_limit_alert(payload):
+            if not payload:
+                return "limit-alert-modal hidden", "", "", "limit-alert-dot"
+            level = payload.get("level", "warn")
+            return (
+                f"limit-alert-modal visible level-{level}",
+                payload.get("title", "Shioaji 提醒"),
+                payload.get("body", ""),
+                f"limit-alert-dot level-{level}",
+            )
+
+        @self.app.callback(
+            Output("limit-alert-store", "data", allow_duplicate=True),
+            Output("limit-alert-dismissed-ts", "data"),
+            Input("limit-alert-dismiss", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def dismiss_limit_alert(n_clicks):
+            if not n_clicks:
+                raise PreventUpdate
+            return None, time.time()
+
+        @self.app.callback(
+            Output("header-traffic-status", "children"),
+            Output("header-traffic-status", "className"),
+            Input("limit-alert-poll-interval", "n_intervals"),
+        )
+        def update_traffic_status(_n):
+            if not self.shioaji_fetcher:
+                return "-- / -- MB", "header-traffic-status disabled"
+            try:
+                bytes_today = self.shioaji_fetcher.get_bytes_today()
+                limit_mb = self.shioaji_fetcher.get_daily_traffic_limit_mb()
+            except Exception:
+                return "-- / -- MB", "header-traffic-status disabled"
+            mb = bytes_today / 1024 / 1024
+            ratio = mb / limit_mb if limit_mb > 0 else 0.0
+            level = "ok"
+            if ratio >= 0.95:
+                level = "error"
+            elif ratio >= 0.80:
+                level = "warn"
+            return (
+                f"{mb:.1f} / {limit_mb} MB",
+                f"header-traffic-status level-{level}",
+            )
 
     def _register_right_rail_callbacks(self) -> None:
         """Register Phase 4.5 right-rail tab switching callbacks."""

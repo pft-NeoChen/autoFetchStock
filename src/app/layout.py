@@ -314,7 +314,53 @@ def _create_hidden_components() -> html.Div:
             # that into a Notification(). Initial null = no-op.
             dcc.Store(id="spike-notification-store", data=None),
 
+            # Shioaji limit-alert payload (traffic / subscription / ticks budget).
+            # Written by AppController's _push_limit_alert; rendered as a modal
+            # popup below. Shape: {level, title, body, ts}.
+            dcc.Store(id="limit-alert-store", data=None),
+            dcc.Store(id="limit-alert-dismissed-ts", data=0),
+            dcc.Interval(
+                id="limit-alert-poll-interval",
+                interval=2_000,  # 2s — pull latest alert from server-side queue
+                n_intervals=0,
+                disabled=False,
+            ),
+            _create_limit_alert_modal(),
+
         ]
+    )
+
+
+def _create_limit_alert_modal() -> html.Div:
+    """Modal popup for Shioaji API limit / traffic alerts."""
+    return html.Div(
+        id="limit-alert-modal",
+        className="limit-alert-modal hidden",
+        children=[
+            html.Div(className="limit-alert-backdrop"),
+            html.Div(
+                className="limit-alert-card",
+                children=[
+                    html.Div(
+                        className="limit-alert-header",
+                        children=[
+                            html.Span("●", id="limit-alert-dot",
+                                      className="limit-alert-dot"),
+                            html.Span(id="limit-alert-title",
+                                      className="limit-alert-title"),
+                        ],
+                    ),
+                    html.Div(id="limit-alert-body",
+                             className="limit-alert-body"),
+                    html.Button(
+                        "我知道了",
+                        id="limit-alert-dismiss",
+                        className="limit-alert-dismiss",
+                        n_clicks=0,
+                    ),
+                ],
+            ),
+        ],
     )
 
 
@@ -493,6 +539,14 @@ def _build_session_badge() -> html.Div:
                 id="market-countdown",
                 className="num countdown-text",
                 children="--",
+            ),
+            # Shioaji daily-traffic gauge. Greyed when low, amber at >=80%,
+            # red at >=95%. Updated by limit-alert-poll-interval callback.
+            html.Span(
+                id="header-traffic-status",
+                className="header-traffic-status",
+                title="Shioaji 今日累計流量（估算）",
+                children="-- / -- MB",
             ),
         ],
     )
@@ -1310,4 +1364,16 @@ COMPONENT_IDS = {
     "volume_spike_list": "volume-spike-list",
     "volume_spike_interval": "volume-spike-interval",
     "spike_notification_store": "spike-notification-store",
+
+    # Shioaji limit-alert popup
+    "limit_alert_store": "limit-alert-store",
+    "limit_alert_modal": "limit-alert-modal",
+    "limit_alert_title": "limit-alert-title",
+    "limit_alert_body": "limit-alert-body",
+    "limit_alert_dismiss": "limit-alert-dismiss",
+    "limit_alert_poll_interval": "limit-alert-poll-interval",
+    "limit_alert_dismissed_ts": "limit-alert-dismissed-ts",
+
+    # Header traffic gauge
+    "header_traffic_status": "header-traffic-status",
 }

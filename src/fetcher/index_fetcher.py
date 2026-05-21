@@ -128,6 +128,14 @@ class IndexFetcher:
     # symbols or after a session drop.
     STREAM_CACHE_TTL = 30.0
 
+    # Cold-start stagger: cap how many cold `snapshots()` calls we issue per
+    # ribbon refresh tick (1s). 8 local indices + ~14 industries = 22 symbols
+    # would burst past Shioaji's 50-per-5s quote-API limit if a busy moment
+    # collides with `_scheduled_fetch` snapshots. Streaming ticks usually
+    # warm the cache within 2~3s, so we trade a few seconds of cold-cell
+    # values for headroom under the rate limit.
+    COLD_BURST_MAX_PER_TICK: int = 4
+
     def __init__(self) -> None:
         self._foreign_cache: List[MarketIndexEntry] = []
         self._foreign_at: float = 0.0
@@ -171,6 +179,7 @@ class IndexFetcher:
 
         now = time.monotonic()
         out: List[MarketIndexEntry] = []
+        cold_calls_this_tick = 0
         for label, kind, market, sym in _LOCAL_INDEX_DEFS:
             # Fast path: streaming cache hit + fresh.
             with self._stream_lock:
@@ -178,6 +187,16 @@ class IndexFetcher:
             if cached and (now - cached[1]) < self.STREAM_CACHE_TTL:
                 out.append(cached[0])
                 continue
+
+            # Cap cold snapshot bursts per tick. Stale cache entries fall
+            # through to be served next tick; brand-new cells get skipped
+            # until the budget releases (stream ticks usually warm them
+            # within 2~3s anyway).
+            if cold_calls_this_tick >= self.COLD_BURST_MAX_PER_TICK:
+                if cached:
+                    out.append(cached[0])  # serve stale rather than gap
+                continue
+            cold_calls_this_tick += 1
 
             # Cold path: snapshot REST.
             try:
@@ -578,12 +597,18 @@ class IndexFetcher:
         resolved = getattr(self, "_industry_resolved", None) or []
         now = time.monotonic()
         out: List[IndustryPulseEntry] = []
+        cold_calls_this_tick = 0
         for label, market, sym in resolved:
             key = (market, sym)
             cached = self._industry_cache.get(key)
             if cached and (now - cached[1]) < self.STREAM_CACHE_TTL:
                 out.append(cached[0])
                 continue
+            if cold_calls_this_tick >= self.COLD_BURST_MAX_PER_TICK:
+                if cached:
+                    out.append(cached[0])
+                continue
+            cold_calls_this_tick += 1
             try:
                 indexs = api.Contracts.Indexs
                 sub = getattr(indexs, market, None)

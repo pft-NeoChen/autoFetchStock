@@ -89,6 +89,22 @@ class ShioajiFetcher:
     _instance = None
     _lock = threading.Lock()
 
+    # Rough Shioaji v1 wire-size estimates per callback type (bytes).
+    # Used by _account_bytes to track daily traffic against the broker's
+    # 500MB / 2GB / 10GB cap (https://sinotrade.github.io/zh/tutor/limit/).
+    _BYTES_EST_QUOTE_STK = 280
+    _BYTES_EST_TICK_STK = 180
+    _BYTES_EST_BIDASK_STK = 240
+    _BYTES_EST_TICK_FOP = 150
+
+    # Total subscription budget for the Tick+BidAsk+Quote channels. Shioaji
+    # cap is 200; we leave headroom for IndexFetcher (≈25) plus margin.
+    _SUBSCRIPTION_HARD_CAP = 200
+    _SUBSCRIPTION_INDEX_RESERVE = 25
+    # Preemptive warning fires once when subscription usage crosses this
+    # fraction of the hard cap (user-visible popup, tag-deduped 5 min).
+    _SUBSCRIPTION_WARN_RATIO = 0.80
+
     def __new__(cls, *args, **kwargs):
         with cls._lock:
             if cls._instance is None:
@@ -116,7 +132,21 @@ class ShioajiFetcher:
         self._index_subscribed: set[str] = set()
         self._index_reference: Dict[str, float] = {}
         self._index_tick_handler: Optional[Callable[[str, float, float, Optional[float], Optional[float], Optional[float]], None]] = None
-        
+
+        # Daily-traffic accounting (estimate). Reset at local-date rollover.
+        self._bytes_today: int = 0
+        self._bytes_day: date = date.today()
+        self._bytes_lock = threading.Lock()
+        self._daily_traffic_limit_mb: int = int(
+            os.environ.get("SHIOAJI_DAILY_TRAFFIC_MB", "500")
+        )
+        # Threshold → fired-today flag. Reset on day rollover.
+        self._traffic_alert_thresholds: Dict[float, bool] = {0.8: False, 0.95: False}
+
+        # Cross-component limit-alert sink. AppController wires this to the
+        # UI store after init. Signature: pusher({level, title, body, ts}).
+        self._limit_alert_pusher: Optional[Callable[[dict], None]] = None
+
         self._initialized = True
         logger.info(f"ShioajiFetcher initialized (Simulation: {self.config.shioaji_simulation})")
 
@@ -351,6 +381,35 @@ class ShioajiFetcher:
                 logger.debug(f"Stock {stock_id} already subscribed to Shioaji")
                 return True
 
+        # Subscription-cap guard. New stock costs 2 units (Tick + BidAsk);
+        # we surface a popup before the broker would silently truncate
+        # later subscriptions or close the channel.
+        if not self.can_add_subscription(additional=2):
+            in_use = self._subscription_units_in_use()
+            logger.warning(
+                "Subscription cap reached: %d units in use, cannot add %s",
+                in_use, stock_id,
+            )
+            if self._limit_alert_pusher:
+                try:
+                    self._limit_alert_pusher({
+                        "level": "warn",
+                        "title": "Shioaji 訂閱數已達上限",
+                        "body": (
+                            f"目前已使用 {in_use} 個訂閱單位（券商上限 "
+                            f"{self._SUBSCRIPTION_HARD_CAP}）。\n"
+                            f"無法為 {stock_id} 建立新訂閱。\n"
+                            "請從我的最愛移除不常看的個股後再試。"
+                        ),
+                        "tag": "subscription_cap",
+                        "ts": time.time(),
+                    })
+                except Exception as exc:
+                    logger.debug(f"limit-alert pusher failed: {exc}")
+            with self._subscription_lock:
+                self._subscription_failures.setdefault(stock_id, set()).add("tick")
+            return False
+
         try:
             contract = self.api.Contracts.Stocks[stock_id]
             if not contract:
@@ -383,6 +442,31 @@ class ShioajiFetcher:
             logger.info(
                 f"Subscribed to Shioaji streaming for {stock_id} ({contract.name})"
             )
+
+            # Preemptive warn when usage crosses the warn ratio. Tag-deduped
+            # in the queue so this fires at most once per 5-minute window
+            # regardless of how many subscribes pile on.
+            try:
+                in_use = self._subscription_units_in_use()
+                if (
+                    in_use >= self._SUBSCRIPTION_HARD_CAP * self._SUBSCRIPTION_WARN_RATIO
+                    and self._limit_alert_pusher
+                ):
+                    self._limit_alert_pusher({
+                        "level": "warn",
+                        "title": "Shioaji 訂閱數逼近上限",
+                        "body": (
+                            f"目前已使用約 {in_use} / {self._SUBSCRIPTION_HARD_CAP} 個訂閱單位。\n"
+                            "再新增約 "
+                            f"{max(0, (self._SUBSCRIPTION_HARD_CAP - in_use) // 2)} 檔個股就會達上限。\n"
+                            "建議盡早整理我的最愛，移除不常追蹤的個股。"
+                        ),
+                        "tag": "subscription_high",
+                        "ts": time.time(),
+                    })
+            except Exception as exc:
+                logger.debug(f"preemptive subscribe warn failed: {exc}")
+
             return True
         except Exception as e:
             logger.error(f"Error subscribing to {stock_id}: {str(e)}")
@@ -568,6 +652,7 @@ class ShioajiFetcher:
 
     def _handle_fop_tick(self, exchange, tick):
         """FOP tick callback — route to index/future stream cache."""
+        self._account_bytes(self._BYTES_EST_TICK_FOP)
         try:
             code = getattr(tick, "code", None)
             if not code or self._index_tick_handler is None:
@@ -609,6 +694,75 @@ class ShioajiFetcher:
         except Exception as exc:
             logger.debug(f"get_category({stock_id}) failed: {exc}")
             return None
+
+    # ── Daily-traffic accounting ────────────────────────────────────
+
+    def set_limit_alert_pusher(self, fn: Optional[Callable[[dict], None]]) -> None:
+        """Register a sink for limit-alert payloads (traffic / subscription)."""
+        self._limit_alert_pusher = fn
+
+    def get_bytes_today(self) -> int:
+        """Return today's estimated received bytes from streaming callbacks."""
+        with self._bytes_lock:
+            if date.today() != self._bytes_day:
+                return 0
+            return self._bytes_today
+
+    def get_daily_traffic_limit_mb(self) -> int:
+        return self._daily_traffic_limit_mb
+
+    def _account_bytes(self, est_bytes: int) -> None:
+        """Accumulate estimated incoming bytes and trip alerts at 80%/95%."""
+        thresholds_fired: List[float] = []
+        bytes_now = 0
+        with self._bytes_lock:
+            today = date.today()
+            if today != self._bytes_day:
+                self._bytes_day = today
+                self._bytes_today = 0
+                self._traffic_alert_thresholds = {0.8: False, 0.95: False}
+            self._bytes_today += est_bytes
+            bytes_now = self._bytes_today
+            limit_bytes = self._daily_traffic_limit_mb * 1024 * 1024
+            for ratio in list(self._traffic_alert_thresholds.keys()):
+                if (
+                    not self._traffic_alert_thresholds[ratio]
+                    and bytes_now >= limit_bytes * ratio
+                ):
+                    self._traffic_alert_thresholds[ratio] = True
+                    thresholds_fired.append(ratio)
+
+        if thresholds_fired and self._limit_alert_pusher:
+            mb = bytes_now / 1024 / 1024
+            for ratio in thresholds_fired:
+                level = "error" if ratio >= 0.95 else "warn"
+                try:
+                    self._limit_alert_pusher({
+                        "level": level,
+                        "title": f"Shioaji 今日流量已達 {int(ratio * 100)}%",
+                        "body": (
+                            f"目前累計約 {mb:.1f} MB / {self._daily_traffic_limit_mb} MB。"
+                            "達 100% 時券商會暫停 1 分鐘行情服務，連續超限恐封鎖當日 IP+ID。"
+                        ),
+                        "ts": time.time(),
+                    })
+                except Exception as exc:
+                    logger.debug(f"limit-alert pusher failed: {exc}")
+
+    def _subscription_units_in_use(self) -> int:
+        """Count Tick+BidAsk+Quote units currently subscribed."""
+        with self._subscription_lock:
+            base = len(self._subscriptions) * 2  # Tick + BidAsk per stock
+            extra_quote = len(self._quote_subscribed)
+            index_count = len(self._index_subscribed)
+        # Index subscriptions cost 1 unit each. Reserve is the headroom we
+        # carve out even if not yet subscribed, so the guard stays stable
+        # across IndexFetcher's lazy bring-up.
+        return base + extra_quote + max(index_count, self._SUBSCRIPTION_INDEX_RESERVE)
+
+    def can_add_subscription(self, additional: int = 2) -> bool:
+        """True if N more subscription units fit under the broker cap."""
+        return self._subscription_units_in_use() + additional <= self._SUBSCRIPTION_HARD_CAP
 
     def is_subscribed(self, stock_id: str) -> bool:
         """Check if stock is currently subscribed."""
@@ -778,6 +932,7 @@ class ShioajiFetcher:
         target_date: date,
         start_time: Optional[dtime] = None,
         end_time: Optional[dtime] = None,
+        allow_ticks_fallback: bool = True,
     ) -> List[MinuteKBar]:
         """
         Fetch 1-minute K bars for a single trading day.
@@ -787,6 +942,13 @@ class ShioajiFetcher:
 
         Bars outside the trading session [09:00, 13:30] (or the
         explicit start_time/end_time window) are filtered out.
+
+        ``allow_ticks_fallback`` lets callers (notably VolumeSpikeJob)
+        gate the fallback behind a global rate budget — Shioaji's
+        ``api.ticks`` cap is only 10 per 5s and a sequential sweep over
+        many favorites can burst past it during a transient kbars
+        outage. When False, the function returns whatever kbars
+        produced (possibly empty) without attempting ticks.
         """
         if not self.is_connected:
             logger.warning("fetch_minute_kbars called while disconnected")
@@ -804,7 +966,7 @@ class ShioajiFetcher:
                 stock_id, target_date, exc,
             )
 
-        if not bars:
+        if not bars and allow_ticks_fallback:
             try:
                 ticks = self._fetch_ticks_for_date(stock_id, target_date)
                 if ticks:
@@ -978,6 +1140,7 @@ class ShioajiFetcher:
 
     def _handle_quote(self, exchange, quote):
         """Callback handler for Shioaji Quote updates."""
+        self._account_bytes(self._BYTES_EST_QUOTE_STK)
         try:
             stock_id = quote.code
 
@@ -1081,6 +1244,7 @@ class ShioajiFetcher:
 
     def _handle_bidask(self, exchange, bidask):
         """Callback handler for Shioaji BidAsk updates."""
+        self._account_bytes(self._BYTES_EST_BIDASK_STK)
         try:
             stock_id = bidask.code
             bid_prices = [float(p) for p in getattr(bidask, "bid_price", []) or []]
@@ -1172,6 +1336,7 @@ class ShioajiFetcher:
 
     def _handle_tick(self, exchange, tick):
         """Callback handler for Shioaji Tick updates."""
+        self._account_bytes(self._BYTES_EST_TICK_STK)
         # logger.info(f"Raw Tick: code={tick.code}, type={tick.tick_type}, vol={tick.volume}, odd={tick.intraday_odd}")
 
         # MarketStrip — Indexs (TSE 001 / OTC 101) tick events ride the stk
