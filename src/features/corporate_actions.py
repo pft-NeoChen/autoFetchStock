@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -15,6 +16,13 @@ ADJUSTED_COLUMNS = {
     "low": "adj_low",
     "close": "adj_close",
 }
+
+__all__ = [
+    "ADJUSTED_COLUMNS",
+    "OHLC_COLUMNS",
+    "CorporateActionEvent",
+    "apply_backward_adjustment",
+]
 
 
 @dataclass(frozen=True)
@@ -114,7 +122,7 @@ def _ensure_ohlc_columns(df: pd.DataFrame) -> None:
 
 def apply_backward_adjustment(
     ohlc_df: pd.DataFrame,
-    events: list[CorporateActionEvent | dict[str, Any]],
+    events: Iterable[CorporateActionEvent | dict[str, Any]],
 ) -> pd.DataFrame:
     """Return a copy with adjusted OHLC columns and corporate action flags."""
     _ensure_ohlc_columns(ohlc_df)
