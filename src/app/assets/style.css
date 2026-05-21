@@ -540,14 +540,14 @@ html {
 .bidask-ratio-bar {
     position: relative;
     height: 20px;
-    background-color: var(--color-up);
+    background-color: var(--color-down);
     border-radius: 4px;
     overflow: hidden;
 }
 
 .bidask-ratio-inner {
     height: 100%;
-    background-color: var(--color-down);
+    background-color: var(--color-up);
     transition: width 0.3s ease;
 }
 
@@ -617,14 +617,12 @@ html {
 .five-bid-price {
     width: 25%;
     text-align: right;
-    color: var(--color-up);
     padding-right: 4px;
 }
 
 .five-ask-price {
     width: 25%;
     text-align: left;
-    color: var(--color-down);
     padding-left: 4px;
 }
 

@@ -1994,6 +1994,7 @@ class CallbackManager:
                             av = ask_volumes[i] if i < len(ask_volumes) else 0
                             if bv > max_v: max_v = bv
                             if av > max_v: max_v = av
+                        ref_close = quote.previous_close if (quote and quote.previous_close) else 0.0
                         for i in range(levels):
                             bv = bid_volumes[i] if i < len(bid_volumes) else 0
                             av = ask_volumes[i] if i < len(ask_volumes) else 0
@@ -2007,6 +2008,18 @@ class CallbackManager:
                                 f"linear-gradient(to right, var(--down-soft) "
                                 f"{ask_pct:.1f}%, transparent {ask_pct:.1f}%)"
                             )
+                            
+                            bp = bid_prices[i] if i < len(bid_prices) else 0.0
+                            ap = ask_prices[i] if i < len(ask_prices) else 0.0
+                            
+                            bp_cls = "flat"
+                            if ref_close > 0 and bp > 0:
+                                bp_cls = "up" if bp > ref_close else "down" if bp < ref_close else "flat"
+                                
+                            ap_cls = "flat"
+                            if ref_close > 0 and ap > 0:
+                                ap_cls = "up" if ap > ref_close else "down" if ap < ref_close else "flat"
+
                             rows.append(
                                 html.Div(
                                     className="five-price-row",
@@ -2017,8 +2030,8 @@ class CallbackManager:
                                             children=[
                                                 html.Span(f"{bv:,}", className="num five-bid-vol"),
                                                 html.Span(
-                                                    f"{bid_prices[i]:.2f}",
-                                                    className="num five-bid-price up",
+                                                    f"{bp:.2f}" if bp > 0 else "--",
+                                                    className=f"num five-bid-price {bp_cls}",
                                                 ),
                                             ],
                                         ),
@@ -2027,8 +2040,8 @@ class CallbackManager:
                                             style={"background": ask_bg},
                                             children=[
                                                 html.Span(
-                                                    f"{ask_prices[i]:.2f}",
-                                                    className="num five-ask-price down",
+                                                    f"{ap:.2f}" if ap > 0 else "--",
+                                                    className=f"num five-ask-price {ap_cls}",
                                                 ),
                                                 html.Span(f"{av:,}", className="num five-ask-vol"),
                                             ],
@@ -2040,7 +2053,7 @@ class CallbackManager:
 
                         # Bid/Ask ratio bar
                         total = ask_side_total + bid_side_total
-                        ratio_pct = (ask_side_total / total * 100) if total > 0 else 50
+                        ratio_pct = (bid_side_total / total * 100) if total > 0 else 50
                         bidask_ratio_style = {"width": f"{ratio_pct:.1f}%"}
                         ask_total_text = f"{ask_side_total:,}"
                         bid_total_text = f"{bid_side_total:,}"
