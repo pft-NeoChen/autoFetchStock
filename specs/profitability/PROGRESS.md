@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-22 |
-| 上次 session | bootstrap（建立計畫與進度檔 + 套用 V2 八項微調 + 資料夾分類） |
-| 當前 phase | Phase 0（未開工） |
+| 上次 session | TASK-D01 完整跑完 RED → GREEN → DONE（資料盤點報告） |
+| 當前 phase | Phase 0 |
 | 當前 task | — |
-| 下一個建議 task | **TASK-D01**（資料盤點） |
-| 全域 blocked | 無 |
-| Pytest 狀態 | 不適用（尚未新增 task 測試） |
-| 檔案位置 | `specs/profitability/`（V1 + V2 + PLAN + PROGRESS + README） |
-| Repo 是否乾淨 | bootstrap commit 已完成 |
+| 下一個建議 task | **TASK-U01**（Universe Filter）；但見下方「資料量警示」 |
+| 全域 blocked | ⚠️ 39 檔股票全數**未達 2 年日線**（最長 ~9 個月，2025-09~2026-05）。Phase 3 回測啟動前須補抓歷史日線。 |
+| Pytest 狀態 | tests/test_scripts/ 4/4 GREEN；既有 shioaji/market_strip 5 fails 為 pre-existing，與本工作流無關 |
+| 檔案位置 | `specs/profitability/`（V1 + V2 + PLAN + PROGRESS + README）+ `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
+| Repo 是否乾淨 | main：RED 9a38595 + GREEN a903983，未 push |
 
 ---
 
@@ -25,7 +25,7 @@
 
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
-| 0 — Universe + Feature Store | 11 | 0 | 0 | 11 | 0 |
+| 0 — Universe + Feature Store | 11 | 1 | 0 | 10 | 0 |
 | 1 — IC 分析 | 2 | 0 | 0 | 2 | 0 |
 | 2 — SignalEngine | 3 | 0 | 0 | 3 | 0 |
 | 3 — Backtester | 6 | 0 | 0 | 6 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **38** | **0** | **0** | **38** | **0** |
+| **總計** | **38** | **1** | **0** | **37** | **0** |
 
 ---
 
@@ -64,6 +64,7 @@
 > 每次 session 結束時 append 一行。格式：`YYYY-MM-DD | session-tag | 摘要`。
 
 - 2026-05-22 | bootstrap | 建立 IMPLEMENTATION_PLAN.md / PROGRESS.md / README.md / 套用 V2 八項微調 / 全部文件搬至 `specs/profitability/` / commit + push 至 main
+- 2026-05-22 | TASK-D01 | RED 9a38595 + GREEN a903983：scripts/audit_local_data.py + 4 unit tests GREEN + analysis/local_data_audit.md 產出（39 檔，0 檔達 2 年日線）。下一 session 建議：先決定補抓歷史日線，再做 TASK-U01。
 
 ---
 
@@ -80,25 +81,33 @@
 
 - **Name**: 資料盤點報告（local coverage scan）
 - **Source**: V2 §0.1, §1
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: —
-- **Files (planned)**:
-  - `scripts/audit_local_data.py`
-  - `analysis/local_data_audit.md`
-  - `tests/test_scripts/test_audit_local_data.py`
+- **Files**:
+  - `scripts/audit_local_data.py` ✅
+  - `analysis/local_data_audit.md` ✅
+  - `tests/test_scripts/test_audit_local_data.py` ✅
+  - `tests/test_scripts/__init__.py` ✅
 - **Acceptance**:
-  - 報告含每檔股票 first_date / last_date / record_count（daily / intraday / minute_kbar 分開）
-  - 標明「可回測候選」（≥ 2 年日線）
+  - 報告含每檔股票 first_date / last_date / record_count（daily / intraday / minute_kbar 分開）✅
+  - 標明「可回測候選」（日線 span ≥ 730 天）✅
 - **Tests (RED list)**:
-  - `test_audit_returns_per_stock_coverage`
-  - `test_audit_flags_incomplete_stocks`
-  - `test_audit_separates_daily_and_minute`
+  - `test_audit_returns_per_stock_coverage` ✅
+  - `test_audit_flags_incomplete_stocks` ✅
+  - `test_audit_separates_daily_and_minute` ✅
+  - `test_render_markdown_report_includes_sections`（bonus）✅
 - **DoD**:
-  - 腳本可獨立跑出 markdown 報告
-  - PROGRESS 候選股票數欄位填入
+  - 腳本可獨立跑出 markdown 報告 ✅
+  - PROGRESS 候選股票數欄位：**39 檔股票掃出，0 檔達 2 年日線門檻** ⚠️
+- **Key Findings**:
+  - 39 檔股票有資料；最長日線約 9 個月（2025-09 ~ 2026-05）
+  - intraday 覆蓋多數 ≥ 1 個月；minute_kbar 僅近 1~2 週
+  - **Phase 3 回測前必須先補抓歷史日線**（至少 2 年，建議 3~5 年）
+  - 此發現不改 V2 spec，但要寫入後續 task：新增「TASK-D01b：補抓歷史日線」？由用戶於下一 session 確認
 - **Last updated**: 2026-05-22
 - **Session log**:
-  - _尚無_
+  - 2026-05-22 9a38595 | RED：寫 4 個失敗測試（3 acceptance + 1 markdown smoke） | 接 GREEN
+  - 2026-05-22 a903983 | GREEN：實作 audit_local_data + render_markdown_report + CLI；跑真實資料 39 stocks，0 backtest-ready | 等用戶決定是否新增補抓歷史日線 task，否則接 TASK-U01
 
 ### TASK-U01
 
