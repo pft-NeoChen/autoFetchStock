@@ -74,11 +74,11 @@ specs/
 
 > 本段每次大里程碑時手動同步。**真實狀態以 `PROGRESS.md` Quick Status 表為準。**
 
-- **Phase**: Phase 0（TASK-D01 + U01 + F02 DONE，3/38）
+- **Phase**: Phase 0（TASK-D01 + U01 + F02 + F01 DONE，4/38）
 - **Spec 狀態**: V2 已含 8 項微調建議（已套用）
-- **下一 task**: `TASK-F01`（Corporate Actions / Adjusted OHLC）
+- **下一 task**: `TASK-F03`（Feature Store schema + manifest）
 - **Blocked**: ⚠️ 39 檔股票最長日線僅 ~9 個月。已決定先繼續往下做（Phase 0~2 不依賴 2 年資料），Phase 3 回測啟動前須補抓歷史日線
-- **Pytest**: profitability 相關 27/27 GREEN；完整 pytest 250 passed / 5 failed（既有 shioaji + market_strip 5 fails，pre-existing）
+- **Pytest**: profitability 相關 33/33 GREEN；完整 pytest 256 passed / 5 failed（既有 shioaji + market_strip 5 fails，pre-existing）
 
 若實際狀態與此段不符 → 以 PROGRESS 為準，並順手更新本段。
 
