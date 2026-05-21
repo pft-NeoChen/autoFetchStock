@@ -5839,3 +5839,113 @@ body {
 .content-wrapper-relayout .right-rail .best5-mini {
     flex: 0 0 auto;
 }
+
+/* ── Shioaji limit-alert modal ────────────────────────────────────── */
+.limit-alert-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.18s ease-out;
+}
+.limit-alert-modal.hidden {
+    display: none !important;
+}
+.limit-alert-modal.visible {
+    pointer-events: auto;
+    opacity: 1;
+}
+.limit-alert-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+}
+.limit-alert-card {
+    position: relative;
+    background: #232830;
+    border: 1px solid #3a4150;
+    border-radius: 8px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+    padding: 22px 28px 18px;
+    min-width: 360px;
+    max-width: 520px;
+    color: #E0E4EA;
+}
+.limit-alert-modal.level-error .limit-alert-card {
+    border-color: #EF5350;
+}
+.limit-alert-modal.level-warn .limit-alert-card {
+    border-color: #FFB74D;
+}
+.limit-alert-modal.level-info .limit-alert-card {
+    border-color: #4FC3F7;
+}
+.limit-alert-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.limit-alert-dot {
+    font-size: 14px;
+    line-height: 1;
+    color: #888;
+}
+.limit-alert-dot.level-error { color: #EF5350; }
+.limit-alert-dot.level-warn { color: #FFB74D; }
+.limit-alert-dot.level-info { color: #4FC3F7; }
+.limit-alert-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #FFFFFF;
+}
+.limit-alert-body {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #C0C5CE;
+    margin-bottom: 16px;
+    white-space: pre-wrap;
+}
+.limit-alert-dismiss {
+    display: block;
+    margin-left: auto;
+    background: #3a4150;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 4px;
+    padding: 7px 18px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s ease-out;
+}
+.limit-alert-dismiss:hover {
+    background: #4a5260;
+}
+
+/* ── Header daily-traffic gauge ────────────────────────────────────── */
+.header-traffic-status {
+    font-size: 11px;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    color: #8A92A0;
+    font-variant-numeric: tabular-nums;
+    margin-left: 8px;
+}
+.header-traffic-status.level-ok { color: #8A92A0; }
+.header-traffic-status.level-warn {
+    color: #FFB74D;
+    background: rgba(255, 183, 77, 0.12);
+}
+.header-traffic-status.level-error {
+    color: #EF5350;
+    background: rgba(239, 83, 80, 0.15);
+}
+.header-traffic-status.disabled {
+    color: #4a5260;
+}
