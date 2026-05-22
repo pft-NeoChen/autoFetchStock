@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | Phase 3 D03c (gating logic + 實跑端對端 report) — 33 tests GREEN + V1 backtest 實跑（0 trades / FAIL，已知 chip data 缺口） |
-| 當前 phase | **Phase 3 完成 ✅** + V1 報告產出（caveat：非正式 V2 §6.1 判決,為結案 smoke artifact） |
+| 上次 session | Phase 4 R01 RiskManager — 10 tests GREEN；相關 suite 45/45 GREEN；完整 pytest 受本機 scipy 缺件影響 collection 中斷 |
+| 當前 phase | **Phase 4 進行中**（R01 DONE，下一步 R02 PositionSizer） |
 | 當前 task | — |
-| 下一個建議 task | **Phase 4** (TASK-R01 RiskManager / TASK-R02 PositionSizer) **或** 先補 chip/news data backfill 再做 V1 正式判決 |
+| 下一個建議 task | **TASK-R02 PositionSizer**（vol-target / ATR-based）**或** 先補 chip/news data backfill 再做 V1 正式判決 |
 | 全域 blocked | 無 |
-| Pytest 狀態 | profitability 相關 268/268 GREEN（+33 D03c）；backtest+journal+signals+features+universe+scripts 全綠 |
-| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report}.md` |
-| Repo 是否乾淨 | main：Phase 2 完成；多個 commit 待 push |
+| Pytest 狀態 | R01 10/10 GREEN；相關 `tests/test_portfolio tests/test_signals/test_engine.py tests/test_backtest/test_engine.py tests/test_journal/test_performance.py` 45/45 GREEN；完整 pytest 因本機缺 `scipy` 中斷 |
+| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/risk_manager.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
+| Repo 是否乾淨 | main：R01 已 commit；仍有 pre-existing README/analysis/.claude/.antigravitycli 未提交內容 |
 
 ---
 
@@ -29,14 +29,14 @@
 | 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
 | 3 — Backtester | 8 | 8 | 0 | 0 | 1 |
-| 4 — Risk + Sizing | 2 | 0 | 0 | 2 | 0 |
+| 4 — Risk + Sizing | 2 | 1 | 0 | 1 | 0 |
 | 5 — Journal + Perf | 3 | 0 | 0 | 3 | 0 |
 | 6 — Portfolio | 2 | 0 | 0 | 2 | 0 |
 | 7 — UI | 1 | 0 | 0 | 1 | 0 |
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **41** | **25** | **0** | **15** | **1** |
+| **總計** | **41** | **26** | **0** | **14** | **1** |
 
 ---
 
@@ -115,6 +115,7 @@
     3. regime classifier 標記 OOS 期間 bull/bear/range（供 regime_coverage 評估）
     4. IS pass 計算 oos_is_ratio
   - 下一 session 建議：進 Phase 4（TASK-R01 RiskManager / TASK-R02 PositionSizer），實跑判決待資料補齊後再回來重跑
+- 2026-05-23 | TASK-R01 | 88e5c5e (RED) + 26fbdc7 (GREEN)：`src/portfolio/risk_manager.py` + `src/portfolio/__init__.py` + 10 unit tests。實作單筆風險、最大持股數、單股 15% allocation cap、每日 -2% loss gate、連虧 3 次半倉、連虧 5 次暫停 1 交易日；相關 suite 45/45 GREEN。完整 pytest 受本機 Python 缺 `scipy` 影響無法 collection。下一 session 接 TASK-R02。
 
 ---
 
@@ -667,16 +668,25 @@
 
 - **Name**: RiskManager
 - **Source**: V2 §4.2
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: TASK-S02
-- **Files (planned)**:
-  - `src/portfolio/risk_manager.py`
-  - `tests/test_portfolio/test_risk_manager.py`
-- **Acceptance**: 單筆 / 每日 / 連虧冷卻
-- **Tests (RED list)**: ≥ 8 項
-- **DoD**: GREEN
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Files**:
+  - `src/portfolio/__init__.py` ✅
+  - `src/portfolio/risk_manager.py` ✅
+  - `tests/test_portfolio/__init__.py` ✅
+  - `tests/test_portfolio/test_risk_manager.py` ✅（10 tests）
+- **Acceptance**: 單筆 / 每日 / 連虧冷卻 ✅；另含最大持股數與單股 allocation cap ✅
+- **Tests (RED list)**: 10 項 全 GREEN
+  - 單筆風險允許 / 擋單 / reduce_to_fit ✅
+  - 最大持股數（新股擋、既有股不重算）✅
+  - 單股資金占比 15% 擋單 ✅
+  - 每日虧損 -2% 擋當日剩餘訊號 ✅
+  - 連虧 3 次 half-size、連虧 5 次 cooldown、獲利重置 ✅
+- **DoD**: R01 10/10 GREEN；相關 suite 45/45 GREEN；完整 pytest 受本機缺 `scipy` 影響 collection 中斷
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 88e5c5e | RED：新增 10 個 RiskManager 測試，因 `src.portfolio` 尚未存在而 fail | 接 GREEN
+  - 2026-05-23 26fbdc7 | GREEN：實作 RiskConfig/RiskState/RiskDecision/PositionSnapshot/RiskManager；R01 10/10 GREEN，相關 suite 45/45 GREEN | 接 TASK-R02
 
 ### TASK-R02
 

@@ -74,13 +74,14 @@ specs/
 
 > 本段每次大里程碑時手動同步。**真實狀態以 `PROGRESS.md` Quick Status 表為準。**
 
-- **Phase**: Phase 0 + 1 + 2 ✅；Phase 3 進度 6/8 (B01~B05 + J04 + D03a；D03 拆 a/b/c)，總計 23/41
+- **Phase**: Phase 0 + 1 + 2 + 3 ✅；Phase 4 R01 DONE，總計 **26/41**
 - **Spec 狀態**: V2 已含 8 項微調建議（已套用）；B04 走自製 backtester 取代 vectorbt（spec drift 記在 PROGRESS）
-- **下一 task**: **TASK-D03b**（cross-stock walk-forward orchestrator）
+- **下一 task**: **TASK-R02 PositionSizer**；或先補 chip/news/margin 至 ≥2 年再回頭做 V1 正式 V2 §6.1 判決
 - **Blocked**: 無
-- **Pytest**: profitability 相關 226/226 GREEN；完整 pytest 449 passed / 5 failed（既有 shioaji + market_strip 5 fails，pre-existing）
+- **Pytest**: R01 10/10 GREEN；相關 suite 45/45 GREEN；完整 pytest 受本機缺 `scipy` 影響 collection 中斷
 - **IC 決策摘要**: 5d/20d 多 feature 過門檻；1d 全敗 → 第一版策略只做 5d~20d holding，不做日內
 - **Phase 2 訊號邏輯**: Signal dataclass (無 risk) + evaluate_long_entry (V2 §2 6 條件) + evaluate_exit (V2 §2 出場 5 條件)，皆為 pure evaluator
+- **Phase 3 V1 實跑**: 39 stocks × 3 walk-forward windows → 0 trades（chip filter 被 neutral default 卡住，已知 chip/news 本地資料 ≤15 天）→ verdict ❌ FAIL，但報告 caveats 已明列為「結案 smoke artifact,非正式 V2 §6.1 判決」。正式判決前須補：(1) chip/news/margin backfill (2) 含息 weighted_index/0050 benchmark (3) regime classifier (4) IS pass for oos_is_ratio
 
 若實際狀態與此段不符 → 以 PROGRESS 為準，並順手更新本段。
 
