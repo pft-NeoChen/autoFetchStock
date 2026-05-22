@@ -10,10 +10,10 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | Phase 3 D03c (performance + V2 §6.1 gating + markdown report) — 33 tests GREEN；**Phase 3 全 8/8 DONE** |
-| 當前 phase | **Phase 3 完成 ✅**；D03c **gating logic 完成,實跑報告待 D03b orchestrator 接真實 feature_df 後產出** |
+| 上次 session | Phase 3 D03c (gating logic + 實跑端對端 report) — 33 tests GREEN + V1 backtest 實跑（0 trades / FAIL，已知 chip data 缺口） |
+| 當前 phase | **Phase 3 完成 ✅** + V1 報告產出（caveat：非正式 V2 §6.1 判決,為結案 smoke artifact） |
 | 當前 task | — |
-| 下一個建議 task | **TASK-D03c 實跑階段**(可選): 接 D03b orchestrator + 真實 universe + feature pipeline 產出 `analysis/backtest_v1_report.md`,做 V2 §6.1 量化判定 → 決定進 Phase 4 OR 回頭調 |
+| 下一個建議 task | **Phase 4** (TASK-R01 RiskManager / TASK-R02 PositionSizer) **或** 先補 chip/news data backfill 再做 V1 正式判決 |
 | 全域 blocked | 無 |
 | Pytest 狀態 | profitability 相關 268/268 GREEN（+33 D03c）；backtest+journal+signals+features+universe+scripts 全綠 |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report}.md` |
@@ -105,6 +105,16 @@
   - `backtest_report.py`：render_backtest_report 產 markdown 含 Manifest/Performance/Benchmark對照/V2§6.1門檻表 + verdict (✅PASS/❌FAIL) + 失敗原因 (4 tests)
   - 實跑 `analysis/backtest_v1_report.md` 待接 D03b orchestrator + 真實 feature pipeline 後產出（gating logic 已完成可直接呼叫）
   - 下一 session：實跑回測 OR 進 Phase 4 (TASK-R01 RiskManager / TASK-R02 PositionSizer)
+- 2026-05-23 | TASK-D03c 實跑 | d0bbf17：`scripts/run_backtest_v1.py` 端對端 + `analysis/backtest_v1_report.md` 產出
+  - 39 stocks × 3 walk-forward windows (IS=12mo / OOS=3mo / embargo=15bd) on data span 2024-06-26 ~ 2026-05-22
+  - **0 trades** (entry chip filter `foreign_net_streak ≥ 3 OR margin_5d_change < 0` 被 neutral default 卡住 — 已知 chip/news/margin 本地資料 ≤ 15 天)
+  - 報告 verdict ❌ FAIL（10/10 checks 8 失敗），caveats block 已明列「Phase 3 結案 smoke,非正式 V2 §6.1 判決」
+  - 重要 follow-up 須在 V1 正式判決前完成：
+    1. backfill chip / news / margin 至 ≥ 2 年（可能要寫 TASK-D01c 對應 orchestrator）
+    2. 接含息 weighted_index / 0050 真實 benchmark
+    3. regime classifier 標記 OOS 期間 bull/bear/range（供 regime_coverage 評估）
+    4. IS pass 計算 oos_is_ratio
+  - 下一 session 建議：進 Phase 4（TASK-R01 RiskManager / TASK-R02 PositionSizer），實跑判決待資料補齊後再回來重跑
 
 ---
 
