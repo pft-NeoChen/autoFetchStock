@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | D01b CLI 補強 (--stocks flag) + TASK-S01 + TASK-D02 完成；首份 IC report 產出，決策進 Phase 2 |
-| 當前 phase | Phase 1 ✅ 完成 → 進 Phase 2 |
+| 上次 session | Phase 2 全 DONE — TASK-S02 (engine ABC) + S03 (long-entry 6 條件) + S04 (出場 5 條件) |
+| 當前 phase | Phase 2 ✅ 完成 → 進 Phase 3 |
 | 當前 task | — |
-| 下一個建議 task | **TASK-S02**（Signal dataclass + Engine 框架） |
+| 下一個建議 task | **TASK-B01**（Cost model：手續費 / 稅 / 滑價 / tick rounding） |
 | 全域 blocked | 無 |
-| Pytest 狀態 | profitability 相關 127/127 GREEN；完整 pytest 350 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
-| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/ic_analysis.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report}.md` |
-| Repo 是否乾淨 | main：D02 / S01 已完成；4 個 commit 待 push |
+| Pytest 狀態 | profitability 相關 157/157 GREEN；完整 pytest 380 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
+| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report}.md` |
+| Repo 是否乾淨 | main：Phase 2 完成；多個 commit 待 push |
 
 ---
 
@@ -27,7 +27,7 @@
 |-------|-------|------|-------------|-------------|---------|
 | 0 — Universe + Feature Store | 12 | 12 | 0 | 0 | 0 |
 | 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
-| 2 — SignalEngine | 3 | 0 | 0 | 3 | 0 |
+| 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
 | 3 — Backtester | 6 | 0 | 0 | 6 | 0 |
 | 4 — Risk + Sizing | 2 | 0 | 0 | 2 | 0 |
 | 5 — Journal + Perf | 3 | 0 | 0 | 3 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **39** | **14** | **0** | **25** | **0** |
+| **總計** | **39** | **17** | **0** | **22** | **0** |
 
 ---
 
@@ -78,6 +78,11 @@
 - 2026-05-22 | TASK-D01b | RED ffc4420 + GREEN 9477345 + FIX cba24c8：scripts/backfill_historical_daily.py orchestrator + 10 unit tests GREEN。實跑 2 輪後 39/39 ok，**38 檔 ≥2 年日線**（7769 IPO 2025-11 上市無法回補）；FIX commit 改 per-month try/except + 修 DataFetcher 簽名 + StockDailyFile.daily_data 欄位名稱；新增 131 月份 / 1745 records。Blocked 解除，下一 session 進 TASK-S01。
 - 2026-05-22 | TASK-D01b enhancement | 236002f：新增 `--stocks SID,SID` CLI flag + resolve_stock_ids helper + 2 unit tests，支援新股票直接 backfill 2 年。
 - 2026-05-23 | TASK-S01 + D02 | primitives d4d0fb9/b3e35af + orchestrator ea1e129/4511fd9：src/signals/ic_analysis.py (compute_ic / decay_curve / monotonicity_test / meets_ic_threshold) + scripts/run_ic_analysis.py + analysis/ic_report.md。**21 unit tests GREEN**。實跑 39 stock 兩年日線結果：5d PASS = {ma_5, ma_10, ma_20, atr_14, vol_20}；20d 加 ma_60；1d 全 FAIL。**D02 決策：進 Phase 2，5d/20d holding，不做日內**。下一 session 接 TASK-S02。
+- 2026-05-23 | TASK-S02 + S03 + S04 | Phase 2 全 DONE (30 tests GREEN)：
+  - S02 ea69c09 + 4a48247：Signal dataclass (無 risk 欄位) + SignalEngine ABC + 7 tests
+  - S03 7a415a8 + c3ed23e：evaluate_long_entry 進場 6 條件 + 避免進場 5 條件 + EntryConditions + 12 tests
+  - S04 9647942 + b2b2929：evaluate_exit 出場 5 條件 + ExitConditions + 11 tests
+  - 下一 session 接 Phase 3：TASK-B01 (Cost model)
 
 ---
 
@@ -408,46 +413,51 @@
 
 - **Name**: Signal dataclass + Engine 框架
 - **Source**: V2 §2
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-F03
-- **Files (planned)**:
-  - `src/signals/engine.py`
-  - `tests/test_signals/test_engine.py`
-- **Acceptance**: Signal dataclass 無 risk 欄位；Engine 可子類化；空輸入回 []
-- **Tests (RED list)**: ≥ 5 項
-- **DoD**: API 凍結
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`
+- **Depends**: TASK-F03 ✅
+- **Files**:
+  - `src/signals/engine.py` ✅
+  - `tests/test_signals/test_engine.py` ✅（7 tests）
+- **Acceptance**: Signal dataclass 無 risk/stop_loss/position_size ✅；__post_init__ 驗證 action/side/confidence；to_dict/from_dict roundtrip；SignalEngine ABC 直接 instantiate 報 TypeError；子類化 generate 回 list；空輸入回 []
+- **Tests (RED list)**: 7 項 全 GREEN
+- **DoD**: API 凍結 — Signal + VALID_ACTIONS + VALID_SIDES
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 ea69c09 + 4a48247 | RED 7 tests + GREEN Signal dataclass + SignalEngine ABC | 接 TASK-S03
 
 ### TASK-S03
 
 - **Name**: Long-entry rule（爆量 + 趨勢 + 籌碼）
 - **Source**: V2 §2 第一版策略
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-S02, TASK-F04~F08
-- **Files (planned)**:
-  - `src/signals/rules/long_entry.py`
-  - `tests/test_signals/test_long_entry.py`
-- **Acceptance**: 同時滿足 6 條件；輸出 Signal with reasons
-- **Tests (RED list)**: 每個條件單獨缺一 → no signal；全滿足 → signal
-- **DoD**: 對 sample 股票歷史能跑出訊號清單
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`
+- **Depends**: TASK-S02 ✅, TASK-F04~F08 ✅
+- **Files**:
+  - `src/signals/rules/long_entry.py` ✅
+  - `tests/test_signals/test_long_entry.py` ✅（12 tests）
+- **Acceptance**: V2 §2 進場 6 條件 + 避免進場 5 條件全實作；evaluate_long_entry 返回 (pass, reasons, invalidations)
+- **Tests (RED list)**: 12 項 全 GREEN
+  - all pass / close < ma_20 blocks / close < ma_60 blocks / no spike / red without breakout / red with breakout passes / weak chip / market < ma_60 / limit_up / long upper shadow / negative news / daily_loss breached
+- **DoD**: invalidations 五項給 S04 使用；後續 LongEntryEngine 子類做 row-iteration
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 7a415a8 + c3ed23e | RED 12 tests + GREEN evaluate_long_entry + EntryConditions | 接 TASK-S04
 
 ### TASK-S04
 
 - **Name**: Exit rules（停損 / 停利 / 時間）
 - **Source**: V2 §2 出場
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-S03
-- **Files (planned)**:
-  - `src/signals/rules/exits.py`
-  - `tests/test_signals/test_exits.py`
-- **Acceptance**: 五條出場條件 + 任一觸發即出
-- **Tests (RED list)**: 每條件一個 case
-- **DoD**: 與 entry 串接整合測試
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`
+- **Depends**: TASK-S03 ✅
+- **Files**:
+  - `src/signals/rules/exits.py` ✅
+  - `tests/test_signals/test_exits.py` ✅（11 tests）
+- **Acceptance**: 五條出場條件獨立計算 + reasons 全列；should_exit = len(reasons) > 0 ✅
+- **Tests (RED list)**: 11 項 全 GREEN
+  - all clear / stop_atr / stop boundary / break_ma10 / bearish high spike / bearish low severity 不觸發 / trailing atr / trailing within atr 不觸發 / time_stop / trend still active 不觸發 / 多 reason
+- **DoD**: 與 entry invalidations 對齊；後續整合測試在 Phase 3 Backtester
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 9647942 + b2b2929 | RED 11 tests + GREEN evaluate_exit + ExitConditions | Phase 2 全 DONE，接 Phase 3 (TASK-B01 Cost model)
 
 ---
 
