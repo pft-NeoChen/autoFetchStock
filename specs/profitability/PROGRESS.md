@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-22 |
-| 上次 session | TASK-F01 完成（RED → GREEN → REFACTOR → DONE）；Corporate Actions backward-adjusted OHLC 介面已建立 |
+| 上次 session | TASK-F03 完成（RED → GREEN → DONE，REFACTOR 跳過）；Feature Store + manifest 介面建立，含 look-ahead 防護 |
 | 當前 phase | Phase 0 |
 | 當前 task | — |
-| 下一個建議 task | **TASK-F03**（Feature Store schema + manifest，依賴 TASK-F01/F02 皆已完成） |
+| 下一個建議 task | **TASK-F04**（Price Features：MA / return / ATR / vol，依賴 TASK-F01/F03 皆完成） |
 | 全域 blocked | ⚠️ 39 檔股票全數**未達 2 年日線**（最長 ~9 個月，2025-09~2026-05）。Phase 3 回測啟動前須補抓歷史日線。 |
-| Pytest 狀態 | profitability 相關 33/33 GREEN；完整 pytest 256 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
-| 檔案位置 | `specs/profitability/` + `src/features/corporate_actions.py` + `src/features/availability.py` + `src/universe/filter.py` + `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
-| Repo 是否乾淨 | main：TASK-F01 RED/GREEN/REFACTOR/DONE 已完成；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
+| Pytest 狀態 | profitability 相關 41/41 GREEN；完整 pytest 264 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
+| 檔案位置 | `specs/profitability/` + `src/features/{corporate_actions,availability,store,manifest}.py` + `src/universe/filter.py` + `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
+| Repo 是否乾淨 | main：TASK-F03 RED/GREEN/DONE 已完成；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
 
 ---
 
@@ -25,7 +25,7 @@
 
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
-| 0 — Universe + Feature Store | 11 | 4 | 0 | 7 | 0 |
+| 0 — Universe + Feature Store | 11 | 5 | 0 | 6 | 0 |
 | 1 — IC 分析 | 2 | 0 | 0 | 2 | 0 |
 | 2 — SignalEngine | 3 | 0 | 0 | 3 | 0 |
 | 3 — Backtester | 6 | 0 | 0 | 6 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **38** | **4** | **0** | **34** | **0** |
+| **總計** | **38** | **5** | **0** | **33** | **0** |
 
 ---
 
@@ -68,6 +68,7 @@
 - 2026-05-22 | TASK-U01 | RED 9076abb + GREEN 2a1b641：src/universe/filter.py + 12 unit tests GREEN。V2 §0.2 全規則實作。下一 session 接 TASK-F02 (availability) 或 TASK-F01 (corp actions)。
 - 2026-05-22 | TASK-F02 | RED 1ee538c + GREEN 9256671 + REFACTOR ba23a7a：src/features/availability.py + 11 unit tests GREEN；依 V2 §0.5 將法人/融資融券預設為下一交易日 08:30 可用，並校正 IMPLEMENTATION_PLAN。下一 session 接 TASK-F01。
 - 2026-05-22 | TASK-F01 | RED ee2c407 + GREEN 9b73a0d + REFACTOR 56a2f8a：src/features/corporate_actions.py + 6 unit tests GREEN；3 檔真實資料（2330/3036/8046）smoke OK。下一 session 接 TASK-F03。
+- 2026-05-22 | TASK-F03 | RED aca77bd + GREEN c2961ad：src/features/{store,manifest}.py + 8 unit tests GREEN；FeatureStore 接 corporate_actions，拒絕 look-ahead，manifest 持久化 + hash 穩定。下一 session 接 TASK-F04（Price Features）。
 
 ---
 
@@ -177,17 +178,20 @@
 
 - **Name**: Feature Store schema + manifest
 - **Source**: V2 §0.3, §0.6
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-F01, TASK-F02
-- **Files (planned)**:
-  - `src/features/store.py`
-  - `src/features/manifest.py`
-  - `tests/test_features/test_store.py`
-- **Acceptance**: build → DataFrame；manifest 完整；拒絕 look-ahead
-- **Tests (RED list)**: 正確性 / manifest / look-ahead exception / 重現性
-- **DoD**: manifest 寫入 `data/cache/feature_store/manifest_<hash>.json`
+- **Status**: `DONE`
+- **Depends**: TASK-F01 ✅, TASK-F02 ✅
+- **Files**:
+  - `src/features/store.py` ✅
+  - `src/features/manifest.py` ✅
+  - `tests/test_features/test_store.py` ✅（8 tests）
+- **Acceptance**: build → MultiIndex(date, stock_id) DataFrame ✅；manifest 含 raw_range/hash + universe/schema/corp_action version + git_commit + generated_at + manifest_hash ✅；拒絕 available_at > signal_ts → LookAheadError ✅；接 backward-adjusted OHLC ✅
+- **Tests (RED list)**: 8 項 全 GREEN
+  - multi_index schema / provider columns / backward-adjusted OHLC / look-ahead error / deterministic build / manifest required fields / manifest persisted to cache_dir / manifest_hash stable across builds
+- **DoD**: manifest 寫入 `cache_dir/manifest_<hash>.json` ✅；REFACTOR 跳過（無重複可清）
 - **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-22 aca77bd | RED：8 failing tests（ModuleNotFoundError，store/manifest 模組尚未存在） | 接 GREEN
+  - 2026-05-22 c2961ad | GREEN：FeatureStore + FeatureProvider + FeatureValue + LookAheadError + manifest helpers；providers 透過 adj_* 覆寫 OHLC 看到 backward-adjusted；manifest_hash 排除 generated_at 維持穩定 | 接 TASK-F04（Price Features）
 
 ### TASK-F04
 
