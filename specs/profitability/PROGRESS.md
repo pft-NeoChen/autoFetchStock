@@ -10,12 +10,12 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | Phase 2 全 DONE — TASK-S02 (engine ABC) + S03 (long-entry 6 條件) + S04 (出場 5 條件) |
-| 當前 phase | Phase 2 ✅ 完成 → 進 Phase 3 |
+| 上次 session | Phase 3 B01 + B02 完成 — Cost model + Execution model + 37 tests GREEN |
+| 當前 phase | Phase 3（B01/B02/B03 ✅；剩 B04/B05/J04/D03） |
 | 當前 task | — |
-| 下一個建議 task | **TASK-B01**（Cost model：手續費 / 稅 / 滑價 / tick rounding） |
+| 下一個建議 task | **TASK-B04**（vectorbt 整合 OR 自製簡易 backtester，**待決策**） |
 | 全域 blocked | 無 |
-| Pytest 狀態 | profitability 相關 157/157 GREEN；完整 pytest 380 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
+| Pytest 狀態 | profitability 相關 194/194 GREEN；完整 pytest 417 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report}.md` |
 | Repo 是否乾淨 | main：Phase 2 完成；多個 commit 待 push |
 
@@ -28,7 +28,7 @@
 | 0 — Universe + Feature Store | 12 | 12 | 0 | 0 | 0 |
 | 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
-| 3 — Backtester | 6 | 0 | 0 | 6 | 0 |
+| 3 — Backtester | 6 | 3 | 0 | 3 | 0 |
 | 4 — Risk + Sizing | 2 | 0 | 0 | 2 | 0 |
 | 5 — Journal + Perf | 3 | 0 | 0 | 3 | 0 |
 | 6 — Portfolio | 2 | 0 | 0 | 2 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **39** | **17** | **0** | **22** | **0** |
+| **總計** | **39** | **19** | **0** | **20** | **0** |
 
 ---
 
@@ -83,6 +83,10 @@
   - S03 7a415a8 + c3ed23e：evaluate_long_entry 進場 6 條件 + 避免進場 5 條件 + EntryConditions + 12 tests
   - S04 9647942 + b2b2929：evaluate_exit 出場 5 條件 + ExitConditions + 11 tests
   - 下一 session 接 Phase 3：TASK-B01 (Cost model)
+- 2026-05-23 | TASK-B01 + B02 | Phase 3 進度 3/6 (37 tests GREEN)：
+  - B01 2ca4ad7 + 163cb53：cost_model.py — tick rule 6 band + round_to_tick + commission + round_trip_cost (含 daytrade) + slippage + 23 tests
+  - B02 a09d928 + f782c23：execution_model.py — Order/MarketBar/FillResult + simulate_fill (T→T+1, 漲跌停作廢, 流動性 cap, lot rounding, T+2 settlement) + 14 tests
+  - 下一 session：**決策 B04 路線（vectorbt vs 自製）**，再 RED
 
 ---
 
@@ -467,31 +471,35 @@
 
 - **Name**: Cost model
 - **Source**: V2 §3.2
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: —
-- **Files (planned)**:
-  - `src/backtest/cost_model.py`
-  - `tests/test_backtest/test_cost_model.py`
-- **Acceptance**: 現股 / 當沖 / tick rounding / slippage
-- **Tests (RED list)**: ≥ 8 項（含 tick rounding 各段）
-- **DoD**: GREEN
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Files**:
+  - `src/backtest/cost_model.py` ✅
+  - `tests/test_backtest/test_cost_model.py` ✅（23 tests）
+- **Acceptance**: 常數 module-top (monkeypatchable)；tick_size_for + round_to_tick + commission + round_trip_cost (含 daytrade 稅率) + slippage ✅
+- **Tests (RED list)**: 23 項 全 GREEN
+  - tick band 13 parametrize / round_to_tick 多區段 / commission 單邊 / round_trip normal+daytrade / slippage buy+sell / 無效 side raise / monkeypatch
+- **DoD**: 全 GREEN
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 2ca4ad7 + 163cb53 | RED 22 tests + GREEN cost_model | 接 B02
 
 ### TASK-B02
 
 - **Name**: Execution model
 - **Source**: V2 §3.3, §3.7
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-B01
-- **Files (planned)**:
-  - `src/backtest/execution_model.py`
-  - `tests/test_backtest/test_execution_model.py`
-- **Acceptance**: T→T+1 / 漲跌停作廢 / 流動性 cap / partial fill / 整股 / cash ledger T+2
-- **Tests (RED list)**: ≥ 10 項
-- **DoD**: GREEN
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`
+- **Depends**: TASK-B01 ✅
+- **Files**:
+  - `src/backtest/execution_model.py` ✅
+  - `tests/test_backtest/test_execution_model.py` ✅（14 tests）
+- **Acceptance**: T→T+1 ✅ / 漲跌停作廢 ✅ / 流動性 cap 5% ✅ / partial fill ✅ / 整股 1000 股 ✅ / odd lot 另開 ✅ / settlement T+2 business days ✅
+- **Tests (RED list)**: 14 項 全 GREEN
+  - happy path / 鎖死兩向 / 流動性 cap / partial fill 不足取消 / lot rounding / odd lot / 結算 T+2 / 週末跳 / next_bar=None void / 常數對 spec
+- **DoD**: 全 GREEN；cash ledger 的 T+2 計入由 settlement_date 表達，後續 Backtester orchestrator 接 ledger
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 a09d928 + f782c23 | RED 14 tests + GREEN Order/MarketBar/FillResult/simulate_fill/next_business_day | 接 B04（vectorbt 整合 或 自製簡易 backtester，待決策）
 
 ### TASK-B04
 
