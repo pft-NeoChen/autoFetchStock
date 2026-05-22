@@ -5488,7 +5488,7 @@ def _render_market_strip(
                         className=f"num market-strip-value {cls}",
                     ),
                     html.Div(
-                        className=f"market-strip-delta {cls}",
+                        className=f"num market-strip-chg {cls}",
                         children=[
                             html.Span(
                                 _fmt_signed(e.change),

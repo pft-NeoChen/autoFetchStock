@@ -713,6 +713,7 @@ class ShioajiFetcher:
 
     def _account_bytes(self, est_bytes: int) -> None:
         """Accumulate estimated incoming bytes and trip alerts at 80%/95%."""
+        self._ensure_traffic_state()
         thresholds_fired: List[float] = []
         bytes_now = 0
         with self._bytes_lock:
@@ -751,6 +752,7 @@ class ShioajiFetcher:
 
     def _subscription_units_in_use(self) -> int:
         """Count Tick+BidAsk+Quote units currently subscribed."""
+        self._ensure_subscription_state()
         with self._subscription_lock:
             base = len(self._subscriptions) * 2  # Tick + BidAsk per stock
             extra_quote = len(self._quote_subscribed)
@@ -763,6 +765,38 @@ class ShioajiFetcher:
     def can_add_subscription(self, additional: int = 2) -> bool:
         """True if N more subscription units fit under the broker cap."""
         return self._subscription_units_in_use() + additional <= self._SUBSCRIPTION_HARD_CAP
+
+    def _ensure_traffic_state(self) -> None:
+        """Initialize traffic-accounting fields for lightweight test instances."""
+        if not hasattr(self, "_bytes_lock"):
+            self._bytes_lock = threading.Lock()
+        if not hasattr(self, "_bytes_today"):
+            self._bytes_today = 0
+        if not hasattr(self, "_bytes_day"):
+            self._bytes_day = date.today()
+        if not hasattr(self, "_daily_traffic_limit_mb"):
+            self._daily_traffic_limit_mb = int(
+                os.environ.get("SHIOAJI_DAILY_TRAFFIC_MB", "500")
+            )
+        if not hasattr(self, "_traffic_alert_thresholds"):
+            self._traffic_alert_thresholds = {0.8: False, 0.95: False}
+        if not hasattr(self, "_limit_alert_pusher"):
+            self._limit_alert_pusher = None
+
+    def _ensure_subscription_state(self) -> None:
+        """Initialize subscription-budget fields for lightweight test instances."""
+        if not hasattr(self, "_subscription_lock"):
+            self._subscription_lock = threading.RLock()
+        if not hasattr(self, "_subscriptions"):
+            self._subscriptions = {}
+        if not hasattr(self, "_quote_subscribed"):
+            self._quote_subscribed = set()
+        if not hasattr(self, "_index_subscribed"):
+            self._index_subscribed = set()
+        if not hasattr(self, "_index_reference"):
+            self._index_reference = {}
+        if not hasattr(self, "_index_tick_handler"):
+            self._index_tick_handler = None
 
     def is_subscribed(self, stock_id: str) -> bool:
         """Check if stock is currently subscribed."""
@@ -1141,6 +1175,7 @@ class ShioajiFetcher:
     def _handle_quote(self, exchange, quote):
         """Callback handler for Shioaji Quote updates."""
         self._account_bytes(self._BYTES_EST_QUOTE_STK)
+        self._ensure_subscription_state()
         try:
             stock_id = quote.code
 
@@ -1337,6 +1372,7 @@ class ShioajiFetcher:
     def _handle_tick(self, exchange, tick):
         """Callback handler for Shioaji Tick updates."""
         self._account_bytes(self._BYTES_EST_TICK_STK)
+        self._ensure_subscription_state()
         # logger.info(f"Raw Tick: code={tick.code}, type={tick.tick_type}, vol={tick.volume}, odd={tick.intraday_odd}")
 
         # MarketStrip — Indexs (TSE 001 / OTC 101) tick events ride the stk
