@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-22 |
-| 上次 session | TASK-F07 + F08 + B03 連做完成（Phase 0 全 DONE，11/11）；News / Regime / Benchmark 模組建立 |
-| 當前 phase | Phase 0 ✅ 完成 → 待進 Phase 1 |
+| 上次 session | TASK-D01b 完成（backfill orchestrator + 10 tests GREEN）；Phase 0 12/12（含 D01b） |
+| 當前 phase | Phase 0 ✅ 全 DONE → 等用戶實跑 backfill 後進 Phase 1 |
 | 當前 task | — |
-| 下一個建議 task | **TASK-S01**（IC / decay / 單調性分析，Phase 1 起點） |
-| 全域 blocked | ⚠️ 39 檔股票全數**未達 2 年日線**（最長 ~9 個月，2025-09~2026-05）。Phase 1 IC 跑分析需 ≥ 1 年日線，可能也卡住，須先補資料。Phase 3 回測前必補。 |
-| Pytest 狀態 | profitability 相關 94/94 GREEN；完整 pytest 317 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
-| 檔案位置 | `specs/profitability/` + `src/features/{corporate_actions,availability,store,manifest,price_features,volume_features,chip_features,news_features,regime_features}.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
-| Repo 是否乾淨 | main：F07/F08/B03 RED/GREEN 已完成（PROGRESS commit 中）；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
+| 下一個建議 task | **使用者手動跑** `python -m scripts.backfill_historical_daily --years 2`（~50 min, TWSE rate limit），再進 **TASK-S01** |
+| 全域 blocked | ⚠️ 39 檔股票歷史日線 ~9 個月，已備 backfill 腳本；跑完即解鎖 Phase 1 |
+| Pytest 狀態 | profitability 相關 104/104 GREEN；完整 pytest 327 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
+| 檔案位置 | `specs/profitability/` + `src/features/{corporate_actions,availability,store,manifest,price_features,volume_features,chip_features,news_features,regime_features}.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily}.py` + `analysis/local_data_audit.md` |
+| Repo 是否乾淨 | main：D01b RED/GREEN 已完成；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
 
 ---
 
@@ -25,7 +25,7 @@
 
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
-| 0 — Universe + Feature Store | 11 | 11 | 0 | 0 | 0 |
+| 0 — Universe + Feature Store | 12 | 12 | 0 | 0 | 0 |
 | 1 — IC 分析 | 2 | 0 | 0 | 2 | 0 |
 | 2 — SignalEngine | 3 | 0 | 0 | 3 | 0 |
 | 3 — Backtester | 6 | 0 | 0 | 6 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **38** | **11** | **0** | **27** | **0** |
+| **總計** | **39** | **12** | **0** | **27** | **0** |
 
 ---
 
@@ -75,6 +75,7 @@
 - 2026-05-22 | TASK-F07 | RED 6ff373d + GREEN ed6cde4：src/features/news_features.py NewsRecord + assign_effective_date (盤後/週末 roll 次日) + aggregate_news_by_day (count/severity/direction) + news_anomaly flag + 10 unit tests GREEN。下一 task 接 TASK-F08。
 - 2026-05-22 | TASK-F08 | RED f79a2fb + GREEN d64db21：src/features/regime_features.py market_moving_average + 簡化 adx (平盤 DX=0) + vol_percentile_rank + regime_feature_providers (廣播同值) + 7 unit tests GREEN。下一 task 接 TASK-B03。
 - 2026-05-22 | TASK-B03 | RED ed1c15e + GREEN 3ef072a：src/backtest/benchmark.py compute_benchmarks 五條基準 (weighted_index / etf_total_return / equal_weight_universe / ma_strategy / cash)；MA 策略 shift(1) 防 look-ahead + 8 unit tests GREEN。**Phase 0 全 11/11 DONE，下一 session 進 Phase 1 (TASK-S01 IC 分析)**。
+- 2026-05-22 | TASK-D01b | RED ffc4420 + GREEN 9477345：scripts/backfill_historical_daily.py orchestrator (is_month_covered + compute_missing_months + run_backfill 委派 DataFetcher/DataStorage) + 10 unit tests GREEN。**未實跑 backfill**（~50 min TWSE rate limit）；使用者下一動：`python -m scripts.backfill_historical_daily --years 2`，跑完進 TASK-S01。
 
 ---
 
@@ -118,6 +119,32 @@
 - **Session log**:
   - 2026-05-22 9a38595 | RED：寫 4 個失敗測試（3 acceptance + 1 markdown smoke） | 接 GREEN
   - 2026-05-22 a903983 | GREEN：實作 audit_local_data + render_markdown_report + CLI；跑真實資料 39 stocks，0 backtest-ready | 等用戶決定是否新增補抓歷史日線 task，否則接 TASK-U01
+
+### TASK-D01b
+
+- **Name**: 歷史日線補抓 orchestrator（解鎖 Phase 1）
+- **Source**: V2 §0.1（建議 ≥ 2 年日線）+ TASK-D01 發現 39 檔皆未達門檻
+- **Status**: `DONE`（script 完成，**未實跑 backfill**）
+- **Depends**: TASK-D01 ✅
+- **Files**:
+  - `scripts/backfill_historical_daily.py` ✅
+  - `tests/test_scripts/test_backfill_historical_daily.py` ✅（10 tests）
+- **Acceptance**:
+  - Pure helpers (is_month_covered / compute_missing_months) 處理「當前月強制 refresh」「跳過已覆蓋過去月」 ✅
+  - run_backfill 委派 DataFetcher.fetch_daily_history + DataStorage.save_daily_data（後者已有 dedupe + atomic）✅
+  - sleep_fn 注入支援測試 + 真實 3 秒 rate limit ✅
+  - 單檔錯誤不中斷整批 ✅
+- **Tests (RED list)**: 10 項 全 GREEN
+- **DoD**: Script 邏輯齊全並 mock-test 通過；**真實 backfill 由使用者手動跑**（~50 min，跨網路）
+- **Next action for user**:
+  ```bash
+  python -m scripts.backfill_historical_daily --years 2
+  ```
+  跑完後再開新 session 跑 TASK-S01。
+- **Last updated**: 2026-05-22
+- **Session log**:
+  - 2026-05-22 ffc4420 | RED：9 failing tests | 接 GREEN
+  - 2026-05-22 9477345 | GREEN：scripts/backfill_historical_daily.py + 10 unit tests GREEN | 使用者跑 backfill → TASK-S01
 
 ### TASK-U01
 

@@ -74,11 +74,11 @@ specs/
 
 > 本段每次大里程碑時手動同步。**真實狀態以 `PROGRESS.md` Quick Status 表為準。**
 
-- **Phase**: ✅ **Phase 0 全 11/11 DONE**（D01 + U01 + F01~F08 + B03），總計 11/38
+- **Phase**: ✅ **Phase 0 全 12/12 DONE**（D01 + D01b backfill orchestrator + U01 + F01~F08 + B03），總計 12/39
 - **Spec 狀態**: V2 已含 8 項微調建議（已套用）
-- **下一 task**: `TASK-S01`（Phase 1 起點：IC / decay / 單調性分析）
-- **Blocked**: ⚠️ 39 檔股票最長日線僅 ~9 個月。Phase 1 IC 分析需 ≥ 1 年日線，可能卡 → 建議下一 session 開始前先決定要不要補抓歷史日線
-- **Pytest**: profitability 相關 94/94 GREEN；完整 pytest 317 passed / 5 failed（既有 shioaji + market_strip 5 fails，pre-existing）
+- **下一動作**: **使用者手動跑** `python -m scripts.backfill_historical_daily --years 2`（~50 min TWSE rate limit），跑完進 TASK-S01
+- **Blocked**: 等 backfill 跑完。9 個月 → 2 年資料後 IC 分析才有意義
+- **Pytest**: profitability 相關 104/104 GREEN；完整 pytest 327 passed / 5 failed（既有 shioaji + market_strip 5 fails，pre-existing）
 
 若實際狀態與此段不符 → 以 PROGRESS 為準，並順手更新本段。
 
