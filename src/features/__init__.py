@@ -5,6 +5,12 @@ from src.features.availability import (
     UnknownFeatureError,
     availability_of,
 )
+from src.features.chip_features import (
+    chip_feature_providers,
+    foreign_net_streak,
+    margin_n_day_change,
+    rolling_net_buy,
+)
 from src.features.corporate_actions import (
     CorporateActionEvent,
     apply_backward_adjustment,
@@ -40,12 +46,16 @@ __all__ = [
     "apply_backward_adjustment",
     "atr",
     "availability_of",
+    "chip_feature_providers",
     "classify_volume_severity",
     "daily_return",
     "daily_volume_baseline",
     "daily_volume_ratio",
+    "foreign_net_streak",
+    "margin_n_day_change",
     "moving_average",
     "price_feature_providers",
+    "rolling_net_buy",
     "rolling_volatility",
     "volume_feature_providers",
 ]
