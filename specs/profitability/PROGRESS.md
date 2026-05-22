@@ -9,15 +9,15 @@
 
 | 欄位 | 值 |
 |------|----|
-| 上次更新 | 2026-05-22 |
-| 上次 session | TASK-D01b 跑完並修正：38/39 檔達 ≥2 年日線；唯一例外 7769 為 2025-11 IPO 無法回補；blocked 狀態解除 |
-| 當前 phase | Phase 0 ✅ 完成、blocked 解除 → 進 Phase 1 |
+| 上次更新 | 2026-05-23 |
+| 上次 session | D01b CLI 補強 (--stocks flag) + TASK-S01 + TASK-D02 完成；首份 IC report 產出，決策進 Phase 2 |
+| 當前 phase | Phase 1 ✅ 完成 → 進 Phase 2 |
 | 當前 task | — |
-| 下一個建議 task | **TASK-S01**（IC / decay / 單調性分析，Phase 1 起點） |
-| 全域 blocked | ✅ 已解除（38/39 檔達 ≥2 年日線，7769 IPO 上市不到 1 年屬內在限制；後續若需要可從 universe 剔除） |
-| Pytest 狀態 | profitability 相關 104/104 GREEN；完整 pytest 327 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
-| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily}.py` + `analysis/local_data_audit.md`（已重產） |
-| Repo 是否乾淨 | main：D01b 已含 backfill bug fix commit；本批 commits 已 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
+| 下一個建議 task | **TASK-S02**（Signal dataclass + Engine 框架） |
+| 全域 blocked | 無 |
+| Pytest 狀態 | profitability 相關 127/127 GREEN；完整 pytest 350 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
+| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/ic_analysis.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report}.md` |
+| Repo 是否乾淨 | main：D02 / S01 已完成；4 個 commit 待 push |
 
 ---
 
@@ -26,7 +26,7 @@
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
 | 0 — Universe + Feature Store | 12 | 12 | 0 | 0 | 0 |
-| 1 — IC 分析 | 2 | 0 | 0 | 2 | 0 |
+| 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
 | 2 — SignalEngine | 3 | 0 | 0 | 3 | 0 |
 | 3 — Backtester | 6 | 0 | 0 | 6 | 0 |
 | 4 — Risk + Sizing | 2 | 0 | 0 | 2 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **39** | **12** | **0** | **27** | **0** |
+| **總計** | **39** | **14** | **0** | **25** | **0** |
 
 ---
 
@@ -76,6 +76,8 @@
 - 2026-05-22 | TASK-F08 | RED f79a2fb + GREEN d64db21：src/features/regime_features.py market_moving_average + 簡化 adx (平盤 DX=0) + vol_percentile_rank + regime_feature_providers (廣播同值) + 7 unit tests GREEN。下一 task 接 TASK-B03。
 - 2026-05-22 | TASK-B03 | RED ed1c15e + GREEN 3ef072a：src/backtest/benchmark.py compute_benchmarks 五條基準 (weighted_index / etf_total_return / equal_weight_universe / ma_strategy / cash)；MA 策略 shift(1) 防 look-ahead + 8 unit tests GREEN。**Phase 0 全 11/11 DONE，下一 session 進 Phase 1 (TASK-S01 IC 分析)**。
 - 2026-05-22 | TASK-D01b | RED ffc4420 + GREEN 9477345 + FIX cba24c8：scripts/backfill_historical_daily.py orchestrator + 10 unit tests GREEN。實跑 2 輪後 39/39 ok，**38 檔 ≥2 年日線**（7769 IPO 2025-11 上市無法回補）；FIX commit 改 per-month try/except + 修 DataFetcher 簽名 + StockDailyFile.daily_data 欄位名稱；新增 131 月份 / 1745 records。Blocked 解除，下一 session 進 TASK-S01。
+- 2026-05-22 | TASK-D01b enhancement | 236002f：新增 `--stocks SID,SID` CLI flag + resolve_stock_ids helper + 2 unit tests，支援新股票直接 backfill 2 年。
+- 2026-05-23 | TASK-S01 + D02 | primitives d4d0fb9/b3e35af + orchestrator ea1e129/4511fd9：src/signals/ic_analysis.py (compute_ic / decay_curve / monotonicity_test / meets_ic_threshold) + scripts/run_ic_analysis.py + analysis/ic_report.md。**21 unit tests GREEN**。實跑 39 stock 兩年日線結果：5d PASS = {ma_5, ma_10, ma_20, atr_14, vol_20}；20d 加 ma_60；1d 全 FAIL。**D02 決策：進 Phase 2，5d/20d holding，不做日內**。下一 session 接 TASK-S02。
 
 ---
 
@@ -345,36 +347,58 @@
 
 - **Name**: IC / decay / 單調性分析
 - **Source**: V2 §1
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-F03 ~ F08
-- **Files (planned)**:
-  - `src/signals/ic_analysis.py`
-  - `tests/test_signals/test_ic_analysis.py`
-- **Acceptance**:
-  - `compute_ic(feature, returns) -> {ic_mean, ic_std, ic_ir, p_value}`
-  - `decay_curve(holding_days=[1,5,20])`
-  - `monotonicity_test(n_groups=5)`
-  - 門檻：1d ≥ 0.02 / 5d ≥ 0.03 / 20d ≥ 0.04
-- **Tests (RED list)**: random ≈ 0 / perfect = 1 / NaN robust / decay 單調
-- **DoD**: 產出 `analysis/ic_report.md`
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`
+- **Depends**: TASK-F03~F08 ✅
+- **Files**:
+  - `src/signals/ic_analysis.py` ✅
+  - `tests/test_signals/test_ic_analysis.py` ✅（16 tests）
+  - `scripts/run_ic_analysis.py` ✅（orchestrator）
+  - `tests/test_scripts/test_run_ic_analysis.py` ✅（5 tests）
+  - `analysis/ic_report.md` ✅
+- **Acceptance**: compute_ic / decay_curve / monotonicity_test / meets_ic_threshold ✅；IC_THRESHOLDS = {1: 0.02, 5: 0.03, 20: 0.04} 對齊 V2 §1 修訂 ✅；orchestrator 跑 38+1 真實 universe 產 markdown ✅
+- **Tests (RED list)**: 21 項 全 GREEN
+  - primitives 16: required fields / random ≈ 0 / perfect = 1 / NaN robust / negative=-1 / decay per-horizon dict / decay 衰減訊號遞減 / monotonicity n_groups / 強訊號遞增 / threshold 6 parametrize / IC_THRESHOLDS 符合 V2
+  - orchestrator 5: load_daily_frames / forward_returns h=1,5 / render markdown / end-to-end run
+- **Real-run findings (analysis/ic_report.md)**:
+  - 1d horizon 全 FAIL（短期 IC 太弱）
+  - 5d PASS：ma_5 / ma_10 / ma_20 / atr_14 / vol_20
+  - 20d PASS：ma_5 / ma_10 / ma_20 / ma_60 / atr_14 / vol_20 / baseline_low_confidence (n=40 不可靠)
+  - daily_return / volume_ratio 全 FAIL
+- **DoD**: pure functions + orchestrator + 報告齊全；scipy 加入 pyproject.toml deps
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-22 d4d0fb9 | RED：13 failing tests + scipy 加 deps | 接 GREEN
+  - 2026-05-22 b3e35af | GREEN primitives：compute_ic / decay_curve / monotonicity_test / meets_ic_threshold + IC_THRESHOLDS | 接 orchestrator
+  - 2026-05-22 ea1e129 | RED orchestrator：5 failing tests | 接 GREEN
+  - 2026-05-23 4511fd9 | GREEN orchestrator：load_daily_frames + forward_returns + render_ic_report + run_ic_analysis + 跑真實資料產 analysis/ic_report.md | 接 TASK-D02 決策
 
 ### TASK-D02
 
 - **Name**: IC 報告決策點
 - **Source**: V2 §8
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-S01
-- **Files (planned)**:
-  - `analysis/ic_report.md`（更新決策）
-- **Acceptance**:
-  - PROGRESS 記錄哪些 feature 過門檻
-  - 「進 Phase 2」或「回頭調 feature」二選一明寫
+- **Status**: `DONE`
+- **Depends**: TASK-S01 ✅
+- **Files**:
+  - `analysis/ic_report.md` ✅
+- **Decision**: **進 Phase 2（SignalEngine）**
+- **理由**：
+  - 至少 5 個 feature 過 5d 門檻：`ma_5`, `ma_10`, `ma_20`, `atr_14`, `vol_20`
+  - 20d 多 6 個過門檻（含 `ma_60`）
+  - 統計顯著（p < 0.05 多數情況），ic_mean 0.03~0.11 屬合理範圍
+- **限制 / 後續注意**：
+  1. **1d horizon 全 FAIL** → 第一版策略**不做日內訊號**，只做 5d/20d holding
+  2. ic_mean 落在 0.03~0.11 屬「能用但不強」，需配合 cost model 與 walk-forward 才能定生死
+  3. `daily_return` / `volume_ratio` 全 FAIL — 不單獨入訊號，但可做 reversal/confirmation 過濾條件
+  4. `baseline_low_confidence` 20d PASS 但 n=40 樣本不足，不可信
+  5. 尚未跑 chip / news / regime feature IC（orchestrator 暫只接 price/volume）— Phase 1.5 補
+- **Action items 給 Phase 2**:
+  - TASK-S03 long-entry：用 ma trend + atr 過濾 + vol regime；holding 目標 5~20d
+  - TASK-S04 exits：基於 atr 停損 + 時間出場（5d~20d）
 - **Tests**: 不適用（純決策）
-- **DoD**: PROGRESS 與本檔同步
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **DoD**: PROGRESS / README / ic_report 三方同步 ✅
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 | 依 analysis/ic_report.md 內容做決策；判定「進 Phase 2」並記錄 5d/20d PASS feature list 與限制 | 接 TASK-S02
 
 ---
 

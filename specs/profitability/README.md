@@ -74,11 +74,12 @@ specs/
 
 > 本段每次大里程碑時手動同步。**真實狀態以 `PROGRESS.md` Quick Status 表為準。**
 
-- **Phase**: ✅ **Phase 0 全 12/12 DONE**（D01 + D01b backfill + U01 + F01~F08 + B03），總計 12/39
+- **Phase**: ✅ **Phase 0 + Phase 1 全 DONE**（12+2 = 14/39）；D02 決策已落 PROGRESS
 - **Spec 狀態**: V2 已含 8 項微調建議（已套用）
-- **下一 task**: **TASK-S01**（IC / decay / 單調性分析，Phase 1 起點）
-- **Blocked**: ✅ 解除（38/39 檔達 ≥2 年日線；唯一例外 7769 為 2025-11 IPO，內在限制）
-- **Pytest**: profitability 相關 104/104 GREEN；完整 pytest 327 passed / 5 failed（既有 shioaji + market_strip 5 fails，pre-existing）
+- **下一 task**: **TASK-S02**（Signal dataclass + Engine 框架，Phase 2 起點）
+- **Blocked**: 無
+- **Pytest**: profitability 相關 127/127 GREEN；完整 pytest 350 passed / 5 failed（既有 shioaji + market_strip 5 fails，pre-existing）
+- **IC 決策摘要**: 5d/20d 多 feature 過門檻；1d 全敗 → 第一版策略只做 5d~20d holding，不做日內
 
 若實際狀態與此段不符 → 以 PROGRESS 為準，並順手更新本段。
 
