@@ -10,12 +10,12 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | Phase 3 B04 (engine) + B05 (walk-fwd) + J04 (registry) + D03a (adapter) — 32 tests GREEN |
-| 當前 phase | Phase 3（B01~B05 + J04 + D03a ✅；剩 D03b orchestrator + D03c report+決策） |
+| 上次 session | Phase 3 D03b (walk-forward orchestrator) — 9 tests GREEN，backtest suite 79/79 GREEN |
+| 當前 phase | Phase 3（B01~B05 + J04 + D03a + D03b ✅；剩 D03c report+決策） |
 | 當前 task | — |
-| 下一個建議 task | **TASK-D03b**（cross-stock walk-forward orchestrator） |
+| 下一個建議 task | **TASK-D03c**（performance metrics + benchmark + report + V2 §6.1 量化門檻判定） |
 | 全域 blocked | 無 |
-| Pytest 狀態 | profitability 相關 226/226 GREEN；完整 pytest 449 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
+| Pytest 狀態 | profitability 相關 235/235 GREEN（+9 D03b）；backtest suite 79/79 GREEN |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report}.md` |
 | Repo 是否乾淨 | main：Phase 2 完成；多個 commit 待 push |
 
@@ -28,7 +28,7 @@
 | 0 — Universe + Feature Store | 12 | 12 | 0 | 0 | 0 |
 | 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
-| 3 — Backtester | 8 | 6 | 0 | 2 | 1 |
+| 3 — Backtester | 8 | 7 | 0 | 1 | 1 |
 | 4 — Risk + Sizing | 2 | 0 | 0 | 2 | 0 |
 | 5 — Journal + Perf | 3 | 0 | 0 | 3 | 0 |
 | 6 — Portfolio | 2 | 0 | 0 | 2 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **41** | **23** | **0** | **17** | **1** |
+| **總計** | **41** | **24** | **0** | **16** | **1** |
 
 ---
 
@@ -94,6 +94,10 @@
   - D03 → split a/b/c
   - D03a 2793932 + 6a01d69：adapters/signal_adapter.py — build_entry/exit_conditions + make_entry/exit_decider + 8 tests
   - 下一 session：TASK-D03b (orchestrator)
+- 2026-05-23 | TASK-D03b | Phase 3 進度 7/8 (9 tests GREEN，backtest suite 79/79 GREEN)：
+  - a31523a (RED) + 189315f (GREEN)：src/backtest/walk_orchestrator.py — `run_walk_forward_backtest` 對 (universe × walk_forward windows) 切 OOS slice → 每股獨立 BacktestEngine.run → 彙總 trades + per_stock_equity + combined_equity → optional ExperimentRegistry.record（manifest 含 universe/windows，summary 含 trade_count/total_pnl）
+  - 9 tests: per-stock×window engine call / OOS date slicing / multi-stock trade aggregation / empty slice skip / combined equity sum / registry record / no-registry → id=None / window_result fields / multi-window
+  - 下一 session：TASK-D03c (performance + benchmark + report + V2 §6.1 量化門檻決策)
 
 ---
 
@@ -594,18 +598,24 @@
 
 - **Name**: Cross-stock walk-forward orchestrator（D03 拆分）
 - **Source**: V2 §3.4 / §3.7（D03 配套）
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: TASK-D03a ✅, TASK-B05 ✅, TASK-J04 ✅
-- **Files (planned)**:
-  - `scripts/run_backtest_v1.py`（或 `src/backtest/walk_orchestrator.py`）
-  - `tests/test_backtest/test_walk_orchestrator.py`
+- **Files**:
+  - `src/backtest/walk_orchestrator.py` ✅
+  - `tests/test_backtest/test_walk_orchestrator.py` ✅（9 tests）
 - **Acceptance**:
-  - 對 universe 每檔股票 build feature_df (含 ma/atr/vol/spike/chip/news/regime 至少基本欄)
-  - 依 walk_forward_windows 切 IS/OOS
-  - 對每個 OOS 跑 BacktestEngine（每檔獨立，初始現金均分或固定）
-  - 彙總 trades + equity，寫 experiment_registry
+  - `run_walk_forward_backtest` 對 universe × windows 切 OOS slice → 每股 BacktestEngine.run → 彙總 ✅
+  - decider factory 注入（預設搭 signal_adapter.make_entry/exit_decider，但 API 允許任意 callable，方便 grid search） ✅
+  - 空 OOS slice 不 crash ✅
+  - combined_equity = 各股 equity sum 對齊 ✅
+  - 可選 registry.record(manifest + summary) → experiment_id ✅
+- **Tests (RED list)**: 9 項 全 GREEN
+  - per-stock×window engine call / OOS date slicing / multi-stock trade aggregation / empty slice skip / combined equity sum / registry record / no-registry → id=None / window_result fields / multi-window
+- **DoD**: 9/9 GREEN + backtest suite 79/79 GREEN；REFACTOR 跳過（pure func + closure 已乾淨）
 - **Last updated**: 2026-05-23
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-23 a31523a | RED：9 failing tests + skeleton（NotImplementedError） | 接 GREEN
+  - 2026-05-23 189315f | GREEN：run_walk_forward_backtest 全邏輯 + WindowResult/OrchestratorResult dataclass + manifest 自動補 universe/windows + summary={trade_count, n_windows, total_pnl} | 接 TASK-D03c
 
 ### TASK-D03c
 
