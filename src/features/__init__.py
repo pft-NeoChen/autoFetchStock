@@ -15,6 +15,12 @@ from src.features.corporate_actions import (
     CorporateActionEvent,
     apply_backward_adjustment,
 )
+from src.features.news_features import (
+    NewsRecord,
+    aggregate_news_by_day,
+    assign_effective_date,
+    news_feature_providers,
+)
 from src.features.price_features import (
     atr,
     daily_return,
@@ -42,7 +48,11 @@ __all__ = [
     "FeatureStore",
     "FeatureValue",
     "LookAheadError",
+    "NewsRecord",
     "UnknownFeatureError",
+    "aggregate_news_by_day",
+    "assign_effective_date",
+    "news_feature_providers",
     "apply_backward_adjustment",
     "atr",
     "availability_of",
