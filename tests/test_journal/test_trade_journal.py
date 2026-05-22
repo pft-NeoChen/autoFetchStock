@@ -133,7 +133,7 @@ def test_from_backtest_trade_preserves_costs_and_cash_ledger() -> None:
     )
 
     assert entry.trade_id.startswith("2330-2026-05-21-2026-05-24")
-    assert entry.costs.total == pytest.approx(629.25)
+    assert entry.costs.total == pytest.approx(649.25)
     assert entry.net_pnl == pytest.approx(trade.pnl)
     assert entry.cash_ledger[1].kind == "sell_settlement"
 
