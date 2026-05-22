@@ -7,9 +7,19 @@ from src.portfolio.risk_manager import (
     RiskManager,
     RiskState,
 )
+from src.portfolio.position_sizer import (
+    PositionSizeDecision,
+    PositionSizer,
+    PositionSizerConfig,
+    PositionSizingError,
+)
 
 __all__ = [
+    "PositionSizeDecision",
     "PositionSnapshot",
+    "PositionSizer",
+    "PositionSizerConfig",
+    "PositionSizingError",
     "RiskConfig",
     "RiskDecision",
     "RiskManager",
