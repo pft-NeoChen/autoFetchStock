@@ -74,11 +74,11 @@ specs/
 
 > 本段每次大里程碑時手動同步。**真實狀態以 `PROGRESS.md` Quick Status 表為準。**
 
-- **Phase**: Phase 0 + 1 + 2 ✅；Phase 3 進度 3/6 (B01 + B02 + B03)，總計 19/39
-- **Spec 狀態**: V2 已含 8 項微調建議（已套用）
-- **下一 task**: **TASK-B04**（vectorbt 整合 OR 自製簡易 backtester，**待決策**）
+- **Phase**: Phase 0 + 1 + 2 ✅；Phase 3 進度 6/8 (B01~B05 + J04 + D03a；D03 拆 a/b/c)，總計 23/41
+- **Spec 狀態**: V2 已含 8 項微調建議（已套用）；B04 走自製 backtester 取代 vectorbt（spec drift 記在 PROGRESS）
+- **下一 task**: **TASK-D03b**（cross-stock walk-forward orchestrator）
 - **Blocked**: 無
-- **Pytest**: profitability 相關 194/194 GREEN；完整 pytest 417 passed / 5 failed（既有 shioaji + market_strip 5 fails，pre-existing）
+- **Pytest**: profitability 相關 226/226 GREEN；完整 pytest 449 passed / 5 failed（既有 shioaji + market_strip 5 fails，pre-existing）
 - **IC 決策摘要**: 5d/20d 多 feature 過門檻；1d 全敗 → 第一版策略只做 5d~20d holding，不做日內
 - **Phase 2 訊號邏輯**: Signal dataclass (無 risk) + evaluate_long_entry (V2 §2 6 條件) + evaluate_exit (V2 §2 出場 5 條件)，皆為 pure evaluator
 

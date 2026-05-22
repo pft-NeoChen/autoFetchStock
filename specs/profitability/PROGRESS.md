@@ -10,12 +10,12 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | Phase 3 B01 + B02 完成 — Cost model + Execution model + 37 tests GREEN |
-| 當前 phase | Phase 3（B01/B02/B03 ✅；剩 B04/B05/J04/D03） |
+| 上次 session | Phase 3 B04 (engine) + B05 (walk-fwd) + J04 (registry) + D03a (adapter) — 32 tests GREEN |
+| 當前 phase | Phase 3（B01~B05 + J04 + D03a ✅；剩 D03b orchestrator + D03c report+決策） |
 | 當前 task | — |
-| 下一個建議 task | **TASK-B04**（vectorbt 整合 OR 自製簡易 backtester，**待決策**） |
+| 下一個建議 task | **TASK-D03b**（cross-stock walk-forward orchestrator） |
 | 全域 blocked | 無 |
-| Pytest 狀態 | profitability 相關 194/194 GREEN；完整 pytest 417 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
+| Pytest 狀態 | profitability 相關 226/226 GREEN；完整 pytest 449 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report}.md` |
 | Repo 是否乾淨 | main：Phase 2 完成；多個 commit 待 push |
 
@@ -28,7 +28,7 @@
 | 0 — Universe + Feature Store | 12 | 12 | 0 | 0 | 0 |
 | 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
-| 3 — Backtester | 6 | 3 | 0 | 3 | 0 |
+| 3 — Backtester | 8 | 6 | 0 | 2 | 1 |
 | 4 — Risk + Sizing | 2 | 0 | 0 | 2 | 0 |
 | 5 — Journal + Perf | 3 | 0 | 0 | 3 | 0 |
 | 6 — Portfolio | 2 | 0 | 0 | 2 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **39** | **19** | **0** | **20** | **0** |
+| **總計** | **41** | **23** | **0** | **17** | **1** |
 
 ---
 
@@ -87,6 +87,13 @@
   - B01 2ca4ad7 + 163cb53：cost_model.py — tick rule 6 band + round_to_tick + commission + round_trip_cost (含 daytrade) + slippage + 23 tests
   - B02 a09d928 + f782c23：execution_model.py — Order/MarketBar/FillResult + simulate_fill (T→T+1, 漲跌停作廢, 流動性 cap, lot rounding, T+2 settlement) + 14 tests
   - 下一 session：**決策 B04 路線（vectorbt vs 自製）**，再 RED
+- 2026-05-23 | TASK-B04 + B05 + J04 + D03a | Phase 3 進度 6/8 (32 tests GREEN，D03 拆 a/b/c)：
+  - B04 0c810cb + a0950f0：engine.py 自製單股 backtester（無 vectorbt）— Position/Trade/BacktestResult + 日內迴圈 + T+2 cash ledger + mark-to-market + 10 tests
+  - B05 17aa9e7 + 531ab47：walk_forward.py — IS/embargo/OOS rolling + merge_small_windows + classify_oos_confidence + 7 tests
+  - J04 0ecaba7 + 40ff9ef：journal/experiment_registry.py — ExperimentRecord + Registry (record/lookup/list, sha256 dedupe, failed status) + 7 tests
+  - D03 → split a/b/c
+  - D03a 2793932 + 6a01d69：adapters/signal_adapter.py — build_entry/exit_conditions + make_entry/exit_decider + 8 tests
+  - 下一 session：TASK-D03b (orchestrator)
 
 ---
 
@@ -503,63 +510,118 @@
 
 ### TASK-B04
 
-- **Name**: vectorbt 整合 + 單股回測
+- **Name**: 單股回測引擎（自製，無 vectorbt）
 - **Source**: V2 §3.1, §3.7
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-S03, TASK-B02, TASK-B03
-- **Files (planned)**:
-  - `src/backtest/engine.py`
-  - `tests/test_backtest/test_engine.py`
-- **Acceptance**: 單股全期間回測 → 報酬曲線 + 交易明細
-- **Tests (RED list)**: ≥ 5 項
-- **DoD**: 跑 sample 股票，比對 benchmark
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`
+- **Depends**: TASK-S03 ✅, TASK-B02 ✅, TASK-B03 ✅
+- **Files**:
+  - `src/backtest/engine.py` ✅
+  - `tests/test_backtest/test_engine.py` ✅（10 tests）
+- **Decision**: 走自製簡易 backtester 而非 vectorbt（V2 §3.1 spec drift）。
+  理由：(a) 直接綁 cost_model + execution_model 介面零摩擦；
+  (b) 38 檔 × 2 年 pandas loop 跑得動；(c) 將來 grid search 需求大才上 vectorbt
+- **Acceptance**: Position / Trade / BacktestResult dataclasses；run(stock_id, ohlc_df) 回 trades + equity_curve + cash_curve + final_equity；T+2 cash ledger；mark-to-market 計入 final_equity ✅
+- **Tests (RED list)**: 10 項 全 GREEN
+- **DoD**: cross-stock + walk-forward 整合 → 留 D03b
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 0c810cb + a0950f0 | RED 11 + GREEN BacktestEngine | 接 B05
 
 ### TASK-B05
 
 - **Name**: Walk-forward + embargo
 - **Source**: V2 §3.4
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-B04
-- **Files (planned)**:
-  - `src/backtest/walk_forward.py`
-  - `tests/test_backtest/test_walk_forward.py`
-- **Acceptance**: IS/OOS rolling + embargo；OOS 交易 < 10 筆 → 合併下一窗
-- **Tests (RED list)**: ≥ 5 項
-- **DoD**: 全 universe 跑出 OOS 報告
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`
+- **Depends**: TASK-B04 ✅
+- **Files**:
+  - `src/backtest/walk_forward.py` ✅
+  - `tests/test_backtest/test_walk_forward.py` ✅（7 tests）
+- **Acceptance**: walk_forward_windows IS 12mo / embargo / OOS 3mo rolling；merge_small_windows 小窗 trade<10 合併；classify_oos_confidence LOW_CONFIDENCE flag ✅
+- **Tests (RED list)**: 7 項 全 GREEN
+- **DoD**: 跨 universe 套用 → 留 D03b
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 17aa9e7 + 531ab47 | RED 7 + GREEN walk_forward windows / merge / classify | 接 J04
 
 ### TASK-J04
 
 - **Name**: Experiment registry
 - **Source**: V2 §3.8
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-B04
-- **Files (planned)**:
-  - `src/journal/experiment_registry.py`
-  - `tests/test_journal/test_experiment_registry.py`
-- **Acceptance**: 每次跑回測自動記錄 manifest + 結果摘要；失敗也記
-- **Tests (RED list)**: ≥ 4 項
-- **DoD**: registry 可查詢、可 dedupe
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`
+- **Depends**: TASK-B04 ✅
+- **Files**:
+  - `src/journal/experiment_registry.py` ✅
+  - `tests/test_journal/test_experiment_registry.py` ✅（7 tests）
+- **Acceptance**: ExperimentRecord + ExperimentRegistry(record/lookup/list)；experiment_id = manifest sha256[:16]；同 manifest dedupe；status 支援 failed
+- **Tests (RED list)**: 7 項 全 GREEN
+- **DoD**: 留 D03b orchestrator 自動 record 每次跑
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 0ecaba7 + 40ff9ef | RED 7 + GREEN registry | 接 D03 (split 為 a/b/c)
 
 ### TASK-D03
 
-- **Name**: 首次完整回測報告（Phase 3 出口）
+- **Name**: 首次完整回測報告（Phase 3 出口）— **拆成 D03a / D03b / D03c**
+- **Source**: V2 §6.1
+- **Status**: `BLOCKED: split`（拆成 3 子 task）
+- **Depends**: TASK-B05 ✅, TASK-J04 ✅
+- **Sub-tasks**:
+  - **TASK-D03a** ✅：Adapter（evaluate_long_entry/exit → BacktestEngine deciders）
+  - **TASK-D03b**：跨股 × walk-forward × BacktestEngine orchestrator → trades + equity + 寫 experiment_registry
+  - **TASK-D03c**：performance metrics + benchmark 對照 + markdown 報告 + V2 §6.1 量化門檻判定
+- **Reason for split**: D03 估 3-5 hr + 多輪 debug 風險高；split 後每段 ≤ 1 session，中途錯不毀整批
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 | 拆分為 D03a/b/c。D03a 已 DONE。
+
+### TASK-D03a
+
+- **Name**: Signal-rule adapter（D03 拆分子 task）
+- **Source**: V2 §6.1（D03 配套）
+- **Status**: `DONE`
+- **Depends**: TASK-S03 ✅, TASK-S04 ✅, TASK-B04 ✅
+- **Files**:
+  - `src/backtest/adapters/signal_adapter.py` ✅
+  - `tests/test_backtest/test_signal_adapter.py` ✅（8 tests）
+- **Acceptance**: build_entry_conditions / build_exit_conditions 從 feature row 提取（缺欄位安全預設 → 阻擋 signal）；make_entry_decider / make_exit_decider 產出 BacktestEngine 可吃的 callable
+- **Tests (RED list)**: 8 項 全 GREEN
+- **DoD**: 純函式 + closure；orchestrator 引用待 D03b
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 2793932 + 6a01d69 | RED 8 + GREEN adapter | 接 D03b
+
+### TASK-D03b
+
+- **Name**: Cross-stock walk-forward orchestrator（D03 拆分）
+- **Source**: V2 §3.4 / §3.7（D03 配套）
+- **Status**: `NOT_STARTED`
+- **Depends**: TASK-D03a ✅, TASK-B05 ✅, TASK-J04 ✅
+- **Files (planned)**:
+  - `scripts/run_backtest_v1.py`（或 `src/backtest/walk_orchestrator.py`）
+  - `tests/test_backtest/test_walk_orchestrator.py`
+- **Acceptance**:
+  - 對 universe 每檔股票 build feature_df (含 ma/atr/vol/spike/chip/news/regime 至少基本欄)
+  - 依 walk_forward_windows 切 IS/OOS
+  - 對每個 OOS 跑 BacktestEngine（每檔獨立，初始現金均分或固定）
+  - 彙總 trades + equity，寫 experiment_registry
+- **Last updated**: 2026-05-23
+- **Session log**: _尚無_
+
+### TASK-D03c
+
+- **Name**: Performance + benchmark + report + 決策（D03 拆分）
 - **Source**: V2 §6.1
 - **Status**: `NOT_STARTED`
-- **Depends**: TASK-B05, TASK-J04
+- **Depends**: TASK-D03b
 - **Files (planned)**:
+  - `src/journal/performance.py`（部分 TASK-J03 可在此先做）
   - `analysis/backtest_v1_report.md`
 - **Acceptance**:
-  - 量化門檻全評估（V2 §6.1 表）
-  - 達標 → 進 Phase 4；未達 → PROGRESS 寫明回頭調哪個 task
-- **Tests**: 不適用
-- **DoD**: PROGRESS 同步決策
-- **Last updated**: 2026-05-22
+  - metrics: 總報酬 / Sharpe / Sortino / max DD / win rate / profit factor / turnover
+  - 對照 TASK-B03 benchmark 五條
+  - V2 §6.1 量化門檻判定 → 進 Phase 4 OR 回頭調 / V2 修訂
+  - PROGRESS 同步決策
+- **Last updated**: 2026-05-23
 - **Session log**: _尚無_
 
 ---
