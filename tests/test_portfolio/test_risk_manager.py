@@ -96,7 +96,7 @@ def test_existing_stock_does_not_count_against_max_positions() -> None:
         stock_id="2330",
         entry_price=100.0,
         stop_price=98.0,
-        target_shares=1000,
+        target_shares=500,
         open_positions=[_position("2330"), _position("2317")],
     )
 
