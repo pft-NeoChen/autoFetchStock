@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | Phase 4 R01 RiskManager — 10 tests GREEN；相關 suite 45/45 GREEN；完整 pytest 受本機 scipy 缺件影響 collection 中斷 |
-| 當前 phase | **Phase 4 進行中**（R01 DONE，下一步 R02 PositionSizer） |
+| 上次 session | Phase 4 R02 PositionSizer — 8 tests GREEN；相關 suite 61/61 GREEN；完整 pytest 受本機 scipy 缺件影響 collection 中斷 |
+| 當前 phase | **Phase 4 完成 ✅**（R01 RiskManager + R02 PositionSizer） |
 | 當前 task | — |
-| 下一個建議 task | **TASK-R02 PositionSizer**（vol-target / ATR-based）**或** 先補 chip/news data backfill 再做 V1 正式判決 |
+| 下一個建議 task | **TASK-J01 TradeJournal** **或** 先補 chip/news data backfill 再做 V1 正式判決 |
 | 全域 blocked | 無 |
-| Pytest 狀態 | R01 10/10 GREEN；相關 `tests/test_portfolio tests/test_signals/test_engine.py tests/test_backtest/test_engine.py tests/test_journal/test_performance.py` 45/45 GREEN；完整 pytest 因本機缺 `scipy` 中斷 |
-| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/risk_manager.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
-| Repo 是否乾淨 | main：R01 已 commit；仍有 pre-existing README/analysis/.claude/.antigravitycli 未提交內容 |
+| Pytest 狀態 | R02 8/8 GREEN；portfolio 18/18 GREEN；相關 `tests/test_portfolio tests/test_features/test_price_features.py tests/test_signals/test_engine.py tests/test_backtest/test_engine.py tests/test_journal/test_performance.py` 61/61 GREEN；完整 pytest 因本機缺 `scipy` 中斷 |
+| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer}.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
+| Repo 是否乾淨 | main：R02 已 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
 ---
 
@@ -29,14 +29,14 @@
 | 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
 | 3 — Backtester | 8 | 8 | 0 | 0 | 1 |
-| 4 — Risk + Sizing | 2 | 1 | 0 | 1 | 0 |
+| 4 — Risk + Sizing | 2 | 2 | 0 | 0 | 0 |
 | 5 — Journal + Perf | 3 | 0 | 0 | 3 | 0 |
 | 6 — Portfolio | 2 | 0 | 0 | 2 | 0 |
 | 7 — UI | 1 | 0 | 0 | 1 | 0 |
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **41** | **26** | **0** | **14** | **1** |
+| **總計** | **41** | **27** | **0** | **13** | **1** |
 
 ---
 
@@ -116,6 +116,7 @@
     4. IS pass 計算 oos_is_ratio
   - 下一 session 建議：進 Phase 4（TASK-R01 RiskManager / TASK-R02 PositionSizer），實跑判決待資料補齊後再回來重跑
 - 2026-05-23 | TASK-R01 | 88e5c5e (RED) + 26fbdc7 (GREEN)：`src/portfolio/risk_manager.py` + `src/portfolio/__init__.py` + 10 unit tests。實作單筆風險、最大持股數、單股 15% allocation cap、每日 -2% loss gate、連虧 3 次半倉、連虧 5 次暫停 1 交易日；相關 suite 45/45 GREEN。完整 pytest 受本機 Python 缺 `scipy` 影響無法 collection。下一 session 接 TASK-R02。
+- 2026-05-23 | TASK-R02 | 26ef190 (RED) + cfb00a7 (GREEN)：`src/portfolio/position_sizer.py` + 8 unit tests。實作 vol-target（20 日波動年化反推部位）與 ATR-based（risk budget / k×ATR）兩種 sizing，支援 lot rounding、max notional cap、RiskManager multiplier、Feature row adapter，並拒絕 Kelly；相關 suite 61/61 GREEN。完整 pytest 仍受本機 Python 缺 `scipy` 影響無法 collection。Phase 4 完成，下一 session 接 TASK-J01。
 
 ---
 
@@ -692,16 +693,27 @@
 
 - **Name**: PositionSizer
 - **Source**: V2 §4.1
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: TASK-F04, TASK-R01
-- **Files (planned)**:
-  - `src/portfolio/position_sizer.py`
-  - `tests/test_portfolio/test_position_sizer.py`
-- **Acceptance**: vol-target / ATR-based 兩種策略
-- **Tests (RED list)**: ≥ 6 項
-- **DoD**: GREEN
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Files**:
+  - `src/portfolio/position_sizer.py` ✅
+  - `tests/test_portfolio/test_position_sizer.py` ✅（8 tests）
+  - `src/portfolio/__init__.py` ✅（public exports）
+- **Acceptance**: vol-target / ATR-based 兩種策略 ✅；禁用 Kelly ✅
+- **Tests (RED list)**: 8 項 全 GREEN
+  - vol-target 依 20 日日波動年化 sizing ✅
+  - max notional cap ✅
+  - lot rounding ✅
+  - ATR-based = risk budget / (k × ATR) ✅
+  - RiskManager multiplier ✅
+  - rounded size zero → blocked ✅
+  - invalid inputs raise ✅
+  - feature-row adapter 支援 vol_target / atr_based 並拒絕 kelly ✅
+- **DoD**: R02 8/8 GREEN；portfolio 18/18 GREEN；相關 suite 61/61 GREEN；完整 pytest 受本機缺 `scipy` 影響 collection 中斷
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 26ef190 | RED：新增 8 個 PositionSizer 測試，因 `src.portfolio.position_sizer` 尚未存在而 fail | 接 GREEN
+  - 2026-05-23 cfb00a7 | GREEN：實作 PositionSizerConfig/Decision/vol_target/atr_based/size_from_features；相關 suite 61/61 GREEN | Phase 4 DONE，接 TASK-J01
 
 ---
 
