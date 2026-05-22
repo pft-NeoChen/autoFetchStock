@@ -119,7 +119,7 @@ def test_run_backfill_skips_covered_months() -> None:
     # Existing covers Jan fully (20 entries)
     existing = MagicMock()
     existing.stock_name = "Stock"
-    existing.daily_records = [_ohlc(date(2024, 1, d)) for d in range(1, 21)]
+    existing.daily_data = [_ohlc(date(2024, 1, d)) for d in range(1, 21)]
     storage.load_daily_data.return_value = existing
 
     run_backfill(

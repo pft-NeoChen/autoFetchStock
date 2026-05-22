@@ -124,38 +124,55 @@ def run_backfill(
     for sid in stock_ids:
         try:
             existing = storage.load_daily_data(sid)
-            if existing is None:
-                existing_dates: set[date] = set()
-            else:
-                existing_dates = {rec.date for rec in existing.daily_records}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("backfill: load_daily_data failed for %s: %s", sid, exc)
+            report.failed_stocks.append(sid)
+            continue
 
-            missing = compute_missing_months(
-                existing_dates,
-                target_start=target_start,
-                today=today,
-                min_records=min_records,
-            )
-            if not missing:
-                logger.info("backfill: %s already fully covered", sid)
-                report.successful_stocks.append(sid)
-                continue
+        existing_dates: set[date] = (
+            {rec.date for rec in existing.daily_data} if existing is not None else set()
+        )
+        missing = compute_missing_months(
+            existing_dates,
+            target_start=target_start,
+            today=today,
+            min_records=min_records,
+        )
+        if not missing:
+            logger.info("backfill: %s already fully covered", sid)
+            report.successful_stocks.append(sid)
+            continue
 
-            stock_name = stock_name_lookup(sid)
-            for year, month in missing:
-                if not first_request and sleep_seconds > 0:
-                    sleep_fn(sleep_seconds)
-                first_request = False
+        stock_name = stock_name_lookup(sid)
+        month_errors: list[str] = []
+        months_saved = 0
+        for year, month in missing:
+            if not first_request and sleep_seconds > 0:
+                sleep_fn(sleep_seconds)
+            first_request = False
 
+            try:
                 records = fetcher.fetch_daily_history(sid, year, month)
                 report.fetched_months += 1
                 if records:
                     storage.save_daily_data(sid, stock_name, records)
                     report.saved_records += len(records)
+                    months_saved += 1
+            except Exception as exc:  # noqa: BLE001 — per-month isolation
+                month_errors.append(f"{year}/{month:02d}:{exc}")
+                logger.warning(
+                    "backfill: %s skipped %d/%02d (%s)", sid, year, month, exc
+                )
 
-            report.successful_stocks.append(sid)
-        except Exception as exc:  # noqa: BLE001 — per-stock isolation
-            logger.warning("backfill failed for %s: %s", sid, exc)
+        if month_errors and months_saved == 0:
             report.failed_stocks.append(sid)
+        else:
+            report.successful_stocks.append(sid)
+            if month_errors:
+                logger.warning(
+                    "backfill: %s partial — %d/%d months ok, errors: %s",
+                    sid, months_saved, len(missing), month_errors,
+                )
 
     return report
 
@@ -182,13 +199,11 @@ def main() -> int:  # pragma: no cover — CLI glue
     today = date.today()
     target_start = date(today.year - args.years, today.month, 1)
 
-    from src.config import AppConfig
     from src.fetcher.data_fetcher import DataFetcher
     from src.storage.data_storage import DataStorage
 
-    config = AppConfig()
     storage = DataStorage(str(args.data_dir))
-    fetcher = DataFetcher(config=config, data_storage=storage)
+    fetcher = DataFetcher(storage=storage)
 
     stock_ids = _list_local_stock_ids(args.data_dir)
     logger.info("backfilling %d stocks from %s to %s", len(stock_ids), target_start, today)
