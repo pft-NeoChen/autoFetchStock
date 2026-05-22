@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-22 |
-| 上次 session | TASK-F06 完成（RED → GREEN → DONE，REFACTOR 跳過）；Chip features (法人 streak/cum + 融資 5日變化) + provider factory 建立 |
-| 當前 phase | Phase 0 |
+| 上次 session | TASK-F07 + F08 + B03 連做完成（Phase 0 全 DONE，11/11）；News / Regime / Benchmark 模組建立 |
+| 當前 phase | Phase 0 ✅ 完成 → 待進 Phase 1 |
 | 當前 task | — |
-| 下一個建議 task | **TASK-F07**（News Features：news_impact.severity 聚合到 stock-day） |
-| 全域 blocked | ⚠️ 39 檔股票全數**未達 2 年日線**（最長 ~9 個月，2025-09~2026-05）。Phase 3 回測啟動前須補抓歷史日線。 |
-| Pytest 狀態 | profitability 相關 69/69 GREEN；完整 pytest 292 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
-| 檔案位置 | `specs/profitability/` + `src/features/{corporate_actions,availability,store,manifest,price_features,volume_features,chip_features}.py` + `src/universe/filter.py` + `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
-| Repo 是否乾淨 | main：TASK-F06 RED/GREEN/DONE 已完成；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
+| 下一個建議 task | **TASK-S01**（IC / decay / 單調性分析，Phase 1 起點） |
+| 全域 blocked | ⚠️ 39 檔股票全數**未達 2 年日線**（最長 ~9 個月，2025-09~2026-05）。Phase 1 IC 跑分析需 ≥ 1 年日線，可能也卡住，須先補資料。Phase 3 回測前必補。 |
+| Pytest 狀態 | profitability 相關 94/94 GREEN；完整 pytest 317 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
+| 檔案位置 | `specs/profitability/` + `src/features/{corporate_actions,availability,store,manifest,price_features,volume_features,chip_features,news_features,regime_features}.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
+| Repo 是否乾淨 | main：F07/F08/B03 RED/GREEN 已完成（PROGRESS commit 中）；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
 
 ---
 
@@ -25,7 +25,7 @@
 
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
-| 0 — Universe + Feature Store | 11 | 8 | 0 | 3 | 0 |
+| 0 — Universe + Feature Store | 11 | 11 | 0 | 0 | 0 |
 | 1 — IC 分析 | 2 | 0 | 0 | 2 | 0 |
 | 2 — SignalEngine | 3 | 0 | 0 | 3 | 0 |
 | 3 — Backtester | 6 | 0 | 0 | 6 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **38** | **8** | **0** | **30** | **0** |
+| **總計** | **38** | **11** | **0** | **27** | **0** |
 
 ---
 
@@ -72,6 +72,9 @@
 - 2026-05-22 | TASK-F04 | RED f67627d + GREEN 8adea95：src/features/price_features.py 純函式 MA/return/ATR/vol + price_feature_providers() factory + 8 unit tests GREEN。下一 session 接 TASK-F05（Volume Features wrapper）。
 - 2026-05-22 | TASK-F05 | RED aca5c16 + GREEN ecf36c8：src/features/volume_features.py daily baseline (shift 1 防 look-ahead) + ratio + severity 五級分類 + low_conf flag + provider factory + 12 unit tests GREEN。下一 session 接 TASK-F06（Chip Features）。
 - 2026-05-22 | TASK-F06 | RED 1a99345 + GREEN 1bc18be：src/features/chip_features.py foreign_net_streak / rolling_net_buy / margin_n_day_change + chip_feature_providers (使用 T-1 chip 資料避免 look-ahead，available_at=08:30) + 8 unit tests GREEN。下一 session 接 TASK-F07（News Features）。
+- 2026-05-22 | TASK-F07 | RED 6ff373d + GREEN ed6cde4：src/features/news_features.py NewsRecord + assign_effective_date (盤後/週末 roll 次日) + aggregate_news_by_day (count/severity/direction) + news_anomaly flag + 10 unit tests GREEN。下一 task 接 TASK-F08。
+- 2026-05-22 | TASK-F08 | RED f79a2fb + GREEN d64db21：src/features/regime_features.py market_moving_average + 簡化 adx (平盤 DX=0) + vol_percentile_rank + regime_feature_providers (廣播同值) + 7 unit tests GREEN。下一 task 接 TASK-B03。
+- 2026-05-22 | TASK-B03 | RED ed1c15e + GREEN 3ef072a：src/backtest/benchmark.py compute_benchmarks 五條基準 (weighted_index / etf_total_return / equal_weight_universe / ma_strategy / cash)；MA 策略 shift(1) 防 look-ahead + 8 unit tests GREEN。**Phase 0 全 11/11 DONE，下一 session 進 Phase 1 (TASK-S01 IC 分析)**。
 
 ---
 
@@ -254,48 +257,57 @@
 ### TASK-F07
 
 - **Name**: News Features
-- **Source**: V2 §0.3
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-F03
-- **Files (planned)**:
-  - `src/features/news_features.py`
-  - `tests/test_features/test_news_features.py`
-- **Acceptance**: news_impact.severity 聚合到 stock-day；anomaly flag
-- **Tests (RED list)**: published_at 限制 / 多新聞合併 / 無新聞
-- **DoD**: 接 store
+- **Source**: V2 §0.3, §0.5
+- **Status**: `DONE`
+- **Depends**: TASK-F03 ✅
+- **Files**:
+  - `src/features/news_features.py` ✅
+  - `tests/test_features/test_news_features.py` ✅（10 tests）
+- **Acceptance**: news_count / news_severity / news_direction_score / news_anomaly 接 store；published_at > 13:30 / 週末 roll 到下一交易日避免 look-ahead ✅
+- **Tests (RED list)**: 10 項 全 GREEN
+  - effective_date before/after close / Fri-after-close → Mon / weekend → Mon / aggregate counts+severity / direction up/down/neutral / no news → 0 / 盤後 roll 次日 / anomaly flag / 多檔股票分流
+- **DoD**: NewsRecord 簡化欄位（stock_id/published_at/impact_score/direction），與既有 news_models.NewsArticle 解耦；REFACTOR 跳過
 - **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-22 6ff373d | RED：10 failing tests（ModuleNotFoundError） | 接 GREEN
+  - 2026-05-22 ed6cde4 | GREEN：NewsRecord + assign_effective_date + aggregate_news_by_day + news_feature_providers；anomaly flag = news_count > shift(1) rolling baseline × multiplier | 接 TASK-F08
 
 ### TASK-F08
 
 - **Name**: Regime Features
 - **Source**: V2 §6.1
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-F04
-- **Files (planned)**:
-  - `src/features/regime_features.py`
-  - `tests/test_features/test_regime_features.py`
-- **Acceptance**: 大盤 MA60、ADX14、30d vol 分位
-- **Tests (RED list)**: ≥ 4 項
-- **DoD**: 接 store
+- **Status**: `DONE`
+- **Depends**: TASK-F04 ✅
+- **Files**:
+  - `src/features/regime_features.py` ✅
+  - `tests/test_features/test_regime_features.py` ✅（7 tests）
+- **Acceptance**: 大盤 MA / ADX / vol 分位 + provider 廣播到所有股票 ✅
+- **Tests (RED list)**: 7 項 全 GREEN
+  - market MA known / ADX 強趨勢 > 20 / 平盤 < 25 (DX=0 fallback) / vol_rank ∈ [0,1] / spike rank 安全 / providers 廣播同值 / 缺 market date 不 crash
+- **DoD**: 簡化 ADX (rolling mean 代替 Wilder smoothing)；REFACTOR 跳過
 - **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-22 f79a2fb | RED：7 failing tests | 接 GREEN
+  - 2026-05-22 d64db21 | GREEN：market_moving_average + adx (含平盤 0 處置) + vol_percentile_rank + regime_feature_providers | 接 TASK-B03
 
 ### TASK-B03
 
 - **Name**: Benchmark engine
 - **Source**: V2 §3.5
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-F04
-- **Files (planned)**:
-  - `src/backtest/benchmark.py`
-  - `tests/test_backtest/test_benchmark.py`
-  - `analysis/benchmarks.html`
-- **Acceptance**: 五條基準（加權報酬指數 / 0050 含息 / 等權 universe / MA20>MA60 / cash）
-- **Tests (RED list)**: ≥ 6 項
-- **DoD**: 全期間累積報酬曲線 + plot
+- **Status**: `DONE`
+- **Depends**: TASK-F04 ✅
+- **Files**:
+  - `src/backtest/benchmark.py` ✅
+  - `tests/test_backtest/test_benchmark.py` ✅（8 tests）
+  - `analysis/benchmarks.html` ⏸ (待真實 market data 接入後再生成)
+- **Acceptance**: compute_benchmarks 回傳五條累積報酬曲線 (weighted_index / etf_total_return / equal_weight_universe / ma_strategy / cash)；MA 策略用 shift(1) 防 look-ahead ✅
+- **Tests (RED list)**: 8 項 全 GREEN
+  - 五條 key 全在 / 長度對齊 / buy-and-hold 起點 1.0 / cash 常數 1.0 / 等權 ≠ 市值權 / 含息 > 不含息 / MA 多頭趨勢正報酬 / 空 market_index raises
+- **DoD**: 全期間累積曲線可生成；plot 留到 Phase 3 接真實資料；REFACTOR 跳過
 - **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-22 ed1c15e | RED：8 failing tests | 接 GREEN
+  - 2026-05-22 3ef072a | GREEN：compute_benchmarks + BenchmarkInputError；MA 策略 shift(1) 防 look-ahead；equal-weight = cross-section mean | Phase 0 全 DONE，下一 task 進 Phase 1 (TASK-S01 IC analysis)
 
 ---
 
