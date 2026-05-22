@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-22 |
-| 上次 session | TASK-F04 完成（RED → GREEN → DONE，REFACTOR 跳過）；Price features（MA/return/ATR/vol）pure fns + provider factory 建立 |
+| 上次 session | TASK-F05 完成（RED → GREEN → DONE，REFACTOR 跳過）；Daily volume features (ratio/severity/low_conf) + provider factory 建立 |
 | 當前 phase | Phase 0 |
 | 當前 task | — |
-| 下一個建議 task | **TASK-F05**（Volume Features：包 processor/volume_spike_detector.py） |
+| 下一個建議 task | **TASK-F06**（Chip Features：三大法人 net buy / 連續日數 / 融資融券 5日變化） |
 | 全域 blocked | ⚠️ 39 檔股票全數**未達 2 年日線**（最長 ~9 個月，2025-09~2026-05）。Phase 3 回測啟動前須補抓歷史日線。 |
-| Pytest 狀態 | profitability 相關 49/49 GREEN；完整 pytest 272 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
-| 檔案位置 | `specs/profitability/` + `src/features/{corporate_actions,availability,store,manifest,price_features}.py` + `src/universe/filter.py` + `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
-| Repo 是否乾淨 | main：TASK-F04 RED/GREEN/DONE 已完成；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
+| Pytest 狀態 | profitability 相關 61/61 GREEN；完整 pytest 284 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
+| 檔案位置 | `specs/profitability/` + `src/features/{corporate_actions,availability,store,manifest,price_features,volume_features}.py` + `src/universe/filter.py` + `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
+| Repo 是否乾淨 | main：TASK-F05 RED/GREEN/DONE 已完成；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
 
 ---
 
@@ -25,7 +25,7 @@
 
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
-| 0 — Universe + Feature Store | 11 | 6 | 0 | 5 | 0 |
+| 0 — Universe + Feature Store | 11 | 7 | 0 | 4 | 0 |
 | 1 — IC 分析 | 2 | 0 | 0 | 2 | 0 |
 | 2 — SignalEngine | 3 | 0 | 0 | 3 | 0 |
 | 3 — Backtester | 6 | 0 | 0 | 6 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **38** | **6** | **0** | **32** | **0** |
+| **總計** | **38** | **7** | **0** | **31** | **0** |
 
 ---
 
@@ -70,6 +70,7 @@
 - 2026-05-22 | TASK-F01 | RED ee2c407 + GREEN 9b73a0d + REFACTOR 56a2f8a：src/features/corporate_actions.py + 6 unit tests GREEN；3 檔真實資料（2330/3036/8046）smoke OK。下一 session 接 TASK-F03。
 - 2026-05-22 | TASK-F03 | RED aca77bd + GREEN c2961ad：src/features/{store,manifest}.py + 8 unit tests GREEN；FeatureStore 接 corporate_actions，拒絕 look-ahead，manifest 持久化 + hash 穩定。下一 session 接 TASK-F04（Price Features）。
 - 2026-05-22 | TASK-F04 | RED f67627d + GREEN 8adea95：src/features/price_features.py 純函式 MA/return/ATR/vol + price_feature_providers() factory + 8 unit tests GREEN。下一 session 接 TASK-F05（Volume Features wrapper）。
+- 2026-05-22 | TASK-F05 | RED aca5c16 + GREEN ecf36c8：src/features/volume_features.py daily baseline (shift 1 防 look-ahead) + ratio + severity 五級分類 + low_conf flag + provider factory + 12 unit tests GREEN。下一 session 接 TASK-F06（Chip Features）。
 
 ---
 
@@ -216,16 +217,20 @@
 
 - **Name**: Volume Features（包 spike detector）
 - **Source**: V2 §0.3
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-F03
-- **Files (planned)**:
-  - `src/features/volume_features.py`
-  - `tests/test_features/test_volume_features.py`
-- **Acceptance**: 包裝 `processor/volume_spike_detector.py`，輸出 spike_severity / volume_ratio / baseline_low_confidence column
-- **Tests (RED list)**: 不偷看（baseline 只用 T 之前）+ 各 severity
-- **DoD**: 與既有 detector 行為一致
+- **Status**: `DONE`
+- **Depends**: TASK-F03 ✅
+- **Files**:
+  - `src/features/volume_features.py` ✅
+  - `tests/test_features/test_volume_features.py` ✅（12 tests）
+- **Acceptance**: 產出 volume_ratio / spike_severity / baseline_low_confidence；沿用 SPIKE_THRESHOLD_* / SpikeSeverity；shift(1) baseline 防 look-ahead ✅
+- **Tests (RED list)**: 12 項 全 GREEN
+  - baseline shift no look-ahead / low_conf when window未滿 / 完整視窗 not low_conf / ratio known / severity 五級 parametrize / min_abs_volume 抑制 / NaN safe / providers integrate with store
+- **DoD**: 與既有 detector 共用閾值；day-level vs minute-level 分離（minute 版仍給 live UI 用）；REFACTOR 跳過
+- **Note**: 沒有完全「重複包裝」既有 detector（minute K 需 storage backend），改在 day-level 重新實作同邏輯。如後續策略要 minute-level spike 入 feature，再開 TASK-F05b
 - **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-22 aca5c16 | RED：12 failing tests（ModuleNotFoundError） | 接 GREEN
+  - 2026-05-22 ecf36c8 | GREEN：daily_volume_baseline / daily_volume_ratio / classify_volume_severity + volume_feature_providers；以 ohlc.attrs 做 per-frame 記憶化 | 接 TASK-F06
 
 ### TASK-F06
 
