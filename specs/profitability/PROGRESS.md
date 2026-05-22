@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-22 |
-| 上次 session | TASK-D01b 完成（backfill orchestrator + 10 tests GREEN）；Phase 0 12/12（含 D01b） |
-| 當前 phase | Phase 0 ✅ 全 DONE → 等用戶實跑 backfill 後進 Phase 1 |
+| 上次 session | TASK-D01b 跑完並修正：38/39 檔達 ≥2 年日線；唯一例外 7769 為 2025-11 IPO 無法回補；blocked 狀態解除 |
+| 當前 phase | Phase 0 ✅ 完成、blocked 解除 → 進 Phase 1 |
 | 當前 task | — |
-| 下一個建議 task | **使用者手動跑** `python -m scripts.backfill_historical_daily --years 2`（~50 min, TWSE rate limit），再進 **TASK-S01** |
-| 全域 blocked | ⚠️ 39 檔股票歷史日線 ~9 個月，已備 backfill 腳本；跑完即解鎖 Phase 1 |
+| 下一個建議 task | **TASK-S01**（IC / decay / 單調性分析，Phase 1 起點） |
+| 全域 blocked | ✅ 已解除（38/39 檔達 ≥2 年日線，7769 IPO 上市不到 1 年屬內在限制；後續若需要可從 universe 剔除） |
 | Pytest 狀態 | profitability 相關 104/104 GREEN；完整 pytest 327 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
-| 檔案位置 | `specs/profitability/` + `src/features/{corporate_actions,availability,store,manifest,price_features,volume_features,chip_features,news_features,regime_features}.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily}.py` + `analysis/local_data_audit.md` |
-| Repo 是否乾淨 | main：D01b RED/GREEN 已完成；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
+| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily}.py` + `analysis/local_data_audit.md`（已重產） |
+| Repo 是否乾淨 | main：D01b 已含 backfill bug fix commit；本批 commits 已 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
 
 ---
 
@@ -75,7 +75,7 @@
 - 2026-05-22 | TASK-F07 | RED 6ff373d + GREEN ed6cde4：src/features/news_features.py NewsRecord + assign_effective_date (盤後/週末 roll 次日) + aggregate_news_by_day (count/severity/direction) + news_anomaly flag + 10 unit tests GREEN。下一 task 接 TASK-F08。
 - 2026-05-22 | TASK-F08 | RED f79a2fb + GREEN d64db21：src/features/regime_features.py market_moving_average + 簡化 adx (平盤 DX=0) + vol_percentile_rank + regime_feature_providers (廣播同值) + 7 unit tests GREEN。下一 task 接 TASK-B03。
 - 2026-05-22 | TASK-B03 | RED ed1c15e + GREEN 3ef072a：src/backtest/benchmark.py compute_benchmarks 五條基準 (weighted_index / etf_total_return / equal_weight_universe / ma_strategy / cash)；MA 策略 shift(1) 防 look-ahead + 8 unit tests GREEN。**Phase 0 全 11/11 DONE，下一 session 進 Phase 1 (TASK-S01 IC 分析)**。
-- 2026-05-22 | TASK-D01b | RED ffc4420 + GREEN 9477345：scripts/backfill_historical_daily.py orchestrator (is_month_covered + compute_missing_months + run_backfill 委派 DataFetcher/DataStorage) + 10 unit tests GREEN。**未實跑 backfill**（~50 min TWSE rate limit）；使用者下一動：`python -m scripts.backfill_historical_daily --years 2`，跑完進 TASK-S01。
+- 2026-05-22 | TASK-D01b | RED ffc4420 + GREEN 9477345 + FIX cba24c8：scripts/backfill_historical_daily.py orchestrator + 10 unit tests GREEN。實跑 2 輪後 39/39 ok，**38 檔 ≥2 年日線**（7769 IPO 2025-11 上市無法回補）；FIX commit 改 per-month try/except + 修 DataFetcher 簽名 + StockDailyFile.daily_data 欄位名稱；新增 131 月份 / 1745 records。Blocked 解除，下一 session 進 TASK-S01。
 
 ---
 
@@ -124,7 +124,7 @@
 
 - **Name**: 歷史日線補抓 orchestrator（解鎖 Phase 1）
 - **Source**: V2 §0.1（建議 ≥ 2 年日線）+ TASK-D01 發現 39 檔皆未達門檻
-- **Status**: `DONE`（script 完成，**未實跑 backfill**）
+- **Status**: `DONE`（script + 實跑 + 修正完成）
 - **Depends**: TASK-D01 ✅
 - **Files**:
   - `scripts/backfill_historical_daily.py` ✅
@@ -135,16 +135,17 @@
   - sleep_fn 注入支援測試 + 真實 3 秒 rate limit ✅
   - 單檔錯誤不中斷整批 ✅
 - **Tests (RED list)**: 10 項 全 GREEN
-- **DoD**: Script 邏輯齊全並 mock-test 通過；**真實 backfill 由使用者手動跑**（~50 min，跨網路）
-- **Next action for user**:
-  ```bash
-  python -m scripts.backfill_historical_daily --years 2
-  ```
-  跑完後再開新 session 跑 TASK-S01。
+- **DoD**: Script + 實跑 + 修正全完成；**38/39 檔達 ≥2 年日線**（7769 IPO 上市時間不夠，內在限制）
+- **Real-run results**:
+  - 第一輪 35/39 ok（4 檔卡 API edge case：「查詢日期大於今日」/「上市前」）
+  - FIX commit `cba24c8`：per-month try/except + DataFetcher 簽名 + StockDailyFile 欄位名
+  - 第二輪 39/39 ok（idempotent，補 131 月份 / 1745 records）
+  - 7769 = 2025-11-27 上市，5.8 月覆蓋，無法補
 - **Last updated**: 2026-05-22
 - **Session log**:
   - 2026-05-22 ffc4420 | RED：9 failing tests | 接 GREEN
-  - 2026-05-22 9477345 | GREEN：scripts/backfill_historical_daily.py + 10 unit tests GREEN | 使用者跑 backfill → TASK-S01
+  - 2026-05-22 9477345 | GREEN：scripts/backfill_historical_daily.py + 10 unit tests GREEN | 接實跑
+  - 2026-05-22 cba24c8 | FIX：實跑暴露三 bug（DataFetcher 簽名、StockDailyFile.daily_data 欄位、per-stock try 太粗）；改 per-month try + 修簽名 + 修欄位後第二輪 39/39 ok | 接 TASK-S01
 
 ### TASK-U01
 
