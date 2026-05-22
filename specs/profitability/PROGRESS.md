@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-22 |
-| 上次 session | TASK-F03 完成（RED → GREEN → DONE，REFACTOR 跳過）；Feature Store + manifest 介面建立，含 look-ahead 防護 |
+| 上次 session | TASK-F04 完成（RED → GREEN → DONE，REFACTOR 跳過）；Price features（MA/return/ATR/vol）pure fns + provider factory 建立 |
 | 當前 phase | Phase 0 |
 | 當前 task | — |
-| 下一個建議 task | **TASK-F04**（Price Features：MA / return / ATR / vol，依賴 TASK-F01/F03 皆完成） |
+| 下一個建議 task | **TASK-F05**（Volume Features：包 processor/volume_spike_detector.py） |
 | 全域 blocked | ⚠️ 39 檔股票全數**未達 2 年日線**（最長 ~9 個月，2025-09~2026-05）。Phase 3 回測啟動前須補抓歷史日線。 |
-| Pytest 狀態 | profitability 相關 41/41 GREEN；完整 pytest 264 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
-| 檔案位置 | `specs/profitability/` + `src/features/{corporate_actions,availability,store,manifest}.py` + `src/universe/filter.py` + `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
-| Repo 是否乾淨 | main：TASK-F03 RED/GREEN/DONE 已完成；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
+| Pytest 狀態 | profitability 相關 49/49 GREEN；完整 pytest 272 passed / 5 failed（既有 shioaji/market_strip 5 fails，pre-existing） |
+| 檔案位置 | `specs/profitability/` + `src/features/{corporate_actions,availability,store,manifest,price_features}.py` + `src/universe/filter.py` + `scripts/audit_local_data.py` + `analysis/local_data_audit.md` |
+| Repo 是否乾淨 | main：TASK-F04 RED/GREEN/DONE 已完成；未 push；仍有未追蹤 `.antigravitycli/`、`.claude/` |
 
 ---
 
@@ -25,7 +25,7 @@
 
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
-| 0 — Universe + Feature Store | 11 | 5 | 0 | 6 | 0 |
+| 0 — Universe + Feature Store | 11 | 6 | 0 | 5 | 0 |
 | 1 — IC 分析 | 2 | 0 | 0 | 2 | 0 |
 | 2 — SignalEngine | 3 | 0 | 0 | 3 | 0 |
 | 3 — Backtester | 6 | 0 | 0 | 6 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **38** | **5** | **0** | **33** | **0** |
+| **總計** | **38** | **6** | **0** | **32** | **0** |
 
 ---
 
@@ -69,6 +69,7 @@
 - 2026-05-22 | TASK-F02 | RED 1ee538c + GREEN 9256671 + REFACTOR ba23a7a：src/features/availability.py + 11 unit tests GREEN；依 V2 §0.5 將法人/融資融券預設為下一交易日 08:30 可用，並校正 IMPLEMENTATION_PLAN。下一 session 接 TASK-F01。
 - 2026-05-22 | TASK-F01 | RED ee2c407 + GREEN 9b73a0d + REFACTOR 56a2f8a：src/features/corporate_actions.py + 6 unit tests GREEN；3 檔真實資料（2330/3036/8046）smoke OK。下一 session 接 TASK-F03。
 - 2026-05-22 | TASK-F03 | RED aca77bd + GREEN c2961ad：src/features/{store,manifest}.py + 8 unit tests GREEN；FeatureStore 接 corporate_actions，拒絕 look-ahead，manifest 持久化 + hash 穩定。下一 session 接 TASK-F04（Price Features）。
+- 2026-05-22 | TASK-F04 | RED f67627d + GREEN 8adea95：src/features/price_features.py 純函式 MA/return/ATR/vol + price_feature_providers() factory + 8 unit tests GREEN。下一 session 接 TASK-F05（Volume Features wrapper）。
 
 ---
 
@@ -197,16 +198,19 @@
 
 - **Name**: Price Features（MA / return / ATR / vol）
 - **Source**: V2 §0.3
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-F01, TASK-F03
-- **Files (planned)**:
-  - `src/features/price_features.py`
-  - `tests/test_features/test_price_features.py`
-- **Acceptance**: 計算 MA5/10/20/60、daily return、ATR14、20d vol；對齊 store schema
-- **Tests (RED list)**: 每個 feature 至少 1 個 known 對照 + 邊界
-- **DoD**: 接入 store
+- **Status**: `DONE`
+- **Depends**: TASK-F01 ✅, TASK-F03 ✅
+- **Files**:
+  - `src/features/price_features.py` ✅
+  - `tests/test_features/test_price_features.py` ✅（8 tests）
+- **Acceptance**: MA5/10/20/60、daily return、ATR14、20d vol；provider factory 接 FeatureStore ✅
+- **Tests (RED list)**: 8 項 全 GREEN
+  - ma known values / ma window NaN / ma invalid window / daily return known / atr known TR / atr window guard / vol matches std of returns / providers integrate with FeatureStore
+- **DoD**: 透過 `price_feature_providers()` factory 接 store；REFACTOR 跳過（純函式已乾淨）
 - **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-22 f67627d | RED：8 failing tests（ModuleNotFoundError） | 接 GREEN
+  - 2026-05-22 8adea95 | GREEN：moving_average / daily_return / atr / rolling_volatility + price_feature_providers factory；available_at = ref_date 13:30；first TR fallback = high-low | 接 TASK-F05
 
 ### TASK-F05
 
