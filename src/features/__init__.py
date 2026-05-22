@@ -9,6 +9,13 @@ from src.features.corporate_actions import (
     CorporateActionEvent,
     apply_backward_adjustment,
 )
+from src.features.price_features import (
+    atr,
+    daily_return,
+    moving_average,
+    price_feature_providers,
+    rolling_volatility,
+)
 from src.features.store import (
     FeatureProvider,
     FeatureStore,
@@ -25,5 +32,10 @@ __all__ = [
     "LookAheadError",
     "UnknownFeatureError",
     "apply_backward_adjustment",
+    "atr",
     "availability_of",
+    "daily_return",
+    "moving_average",
+    "price_feature_providers",
+    "rolling_volatility",
 ]
