@@ -28,6 +28,12 @@ from src.features.price_features import (
     price_feature_providers,
     rolling_volatility,
 )
+from src.features.regime_features import (
+    adx,
+    market_moving_average,
+    regime_feature_providers,
+    vol_percentile_rank,
+)
 from src.features.store import (
     FeatureProvider,
     FeatureStore,
@@ -66,6 +72,10 @@ __all__ = [
     "moving_average",
     "price_feature_providers",
     "rolling_net_buy",
+    "adx",
+    "market_moving_average",
+    "regime_feature_providers",
     "rolling_volatility",
+    "vol_percentile_rank",
     "volume_feature_providers",
 ]
