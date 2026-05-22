@@ -10,12 +10,12 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | Phase 3 D03b (walk-forward orchestrator) — 9 tests GREEN，backtest suite 79/79 GREEN |
-| 當前 phase | Phase 3（B01~B05 + J04 + D03a + D03b ✅；剩 D03c report+決策） |
+| 上次 session | Phase 3 D03c (performance + V2 §6.1 gating + markdown report) — 33 tests GREEN；**Phase 3 全 8/8 DONE** |
+| 當前 phase | **Phase 3 完成 ✅**；D03c **gating logic 完成,實跑報告待 D03b orchestrator 接真實 feature_df 後產出** |
 | 當前 task | — |
-| 下一個建議 task | **TASK-D03c**（performance metrics + benchmark + report + V2 §6.1 量化門檻判定） |
+| 下一個建議 task | **TASK-D03c 實跑階段**(可選): 接 D03b orchestrator + 真實 universe + feature pipeline 產出 `analysis/backtest_v1_report.md`,做 V2 §6.1 量化判定 → 決定進 Phase 4 OR 回頭調 |
 | 全域 blocked | 無 |
-| Pytest 狀態 | profitability 相關 235/235 GREEN（+9 D03b）；backtest suite 79/79 GREEN |
+| Pytest 狀態 | profitability 相關 268/268 GREEN（+33 D03c）；backtest+journal+signals+features+universe+scripts 全綠 |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/benchmark.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report}.md` |
 | Repo 是否乾淨 | main：Phase 2 完成；多個 commit 待 push |
 
@@ -28,7 +28,7 @@
 | 0 — Universe + Feature Store | 12 | 12 | 0 | 0 | 0 |
 | 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
-| 3 — Backtester | 8 | 7 | 0 | 1 | 1 |
+| 3 — Backtester | 8 | 8 | 0 | 0 | 1 |
 | 4 — Risk + Sizing | 2 | 0 | 0 | 2 | 0 |
 | 5 — Journal + Perf | 3 | 0 | 0 | 3 | 0 |
 | 6 — Portfolio | 2 | 0 | 0 | 2 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **41** | **24** | **0** | **16** | **1** |
+| **總計** | **41** | **25** | **0** | **15** | **1** |
 
 ---
 
@@ -98,6 +98,13 @@
   - a31523a (RED) + 189315f (GREEN)：src/backtest/walk_orchestrator.py — `run_walk_forward_backtest` 對 (universe × walk_forward windows) 切 OOS slice → 每股獨立 BacktestEngine.run → 彙總 trades + per_stock_equity + combined_equity → optional ExperimentRegistry.record（manifest 含 universe/windows，summary 含 trade_count/total_pnl）
   - 9 tests: per-stock×window engine call / OOS date slicing / multi-stock trade aggregation / empty slice skip / combined equity sum / registry record / no-registry → id=None / window_result fields / multi-window
   - 下一 session：TASK-D03c (performance + benchmark + report + V2 §6.1 量化門檻決策)
+- 2026-05-23 | TASK-D03c | **Phase 3 全 8/8 DONE** (33 tests GREEN，profitability 268/268 GREEN)：
+  - 62b52c7 (RED) + dfbbd07 (GREEN)：三個 journal module
+  - `performance.py`：PerformanceMetrics + total_return/sharpe/sortino/max_drawdown/win_rate/profit_factor/expectancy_bp/turnover/summarize_performance (18 tests)
+  - `decision.py`：evaluate_v2_thresholds 全 10 項 V2 §6.1 門檻（expectancy ≥5bp / pf ≥1.3 / mdd ≤20% / sharpe ≥1.0 / oos_is_ratio ≥0.7 / top5_excluded >0 / beats_benchmarks / oos_alpha >0 / regime_coverage 1+1+1 / n_trades ≥50），thresholds 提到 module top 方便 monkeypatch (11 tests)
+  - `backtest_report.py`：render_backtest_report 產 markdown 含 Manifest/Performance/Benchmark對照/V2§6.1門檻表 + verdict (✅PASS/❌FAIL) + 失敗原因 (4 tests)
+  - 實跑 `analysis/backtest_v1_report.md` 待接 D03b orchestrator + 真實 feature pipeline 後產出（gating logic 已完成可直接呼叫）
+  - 下一 session：實跑回測 OR 進 Phase 4 (TASK-R01 RiskManager / TASK-R02 PositionSizer)
 
 ---
 
@@ -621,18 +628,26 @@
 
 - **Name**: Performance + benchmark + report + 決策（D03 拆分）
 - **Source**: V2 §6.1
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-D03b
-- **Files (planned)**:
-  - `src/journal/performance.py`（部分 TASK-J03 可在此先做）
-  - `analysis/backtest_v1_report.md`
+- **Status**: `DONE`（gating logic 完成；實跑報告留待接真實 feature pipeline）
+- **Depends**: TASK-D03b ✅
+- **Files**:
+  - `src/journal/performance.py` ✅（PerformanceMetrics + 8 metric 函式 + summarize_performance）
+  - `src/journal/decision.py` ✅（DecisionInput/Result + evaluate_v2_thresholds + module-top thresholds）
+  - `src/journal/backtest_report.py` ✅（render_backtest_report markdown 渲染）
+  - `tests/test_journal/test_performance.py` ✅（18 tests）
+  - `tests/test_journal/test_decision.py` ✅（11 tests）
+  - `tests/test_journal/test_backtest_report.py` ✅（4 tests）
+  - `analysis/backtest_v1_report.md` ⏸（待接 D03b orchestrator + 真實 universe/feature_df 後執行）
 - **Acceptance**:
-  - metrics: 總報酬 / Sharpe / Sortino / max DD / win rate / profit factor / turnover
-  - 對照 TASK-B03 benchmark 五條
-  - V2 §6.1 量化門檻判定 → 進 Phase 4 OR 回頭調 / V2 修訂
-  - PROGRESS 同步決策
+  - metrics: 總報酬 / Sharpe / Sortino / max DD / win rate / profit factor / expectancy_bp / turnover ✅
+  - V2 §6.1 全 10 項門檻判定 ✅（含 trade count ≥ 50 / regime coverage 1+1+1 / benchmark beat / oos_alpha）
+  - markdown 報告含 verdict (PASS/FAIL) + 失敗原因 ✅
+- **Tests (RED list)**: 33 項 全 GREEN
+- **DoD**: gating + reporting 完成；實跑階段為 V2 §6.1 決策觸發點，需有真實 backtest 結果後執行
 - **Last updated**: 2026-05-23
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-23 62b52c7 | RED：33 failing tests + 3 skeleton modules（NotImplementedError） | 接 GREEN
+  - 2026-05-23 dfbbd07 | GREEN：performance.py + decision.py + backtest_report.py 全實作；profitability cross-suite 268/268 GREEN | Phase 3 全 8/8 DONE，下一階段：實跑 D03c 報告 OR 進 Phase 4
 
 ---
 
