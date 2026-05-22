@@ -187,11 +187,28 @@ def _list_local_stock_ids(data_dir: Path) -> list[str]:
     return sorted(p.stem for p in stocks_dir.glob("*.json"))
 
 
+def resolve_stock_ids(
+    data_dir: Path,
+    *,
+    override: list[str] | None = None,
+) -> list[str]:
+    """Choose backfill targets: explicit override > local glob."""
+    if override:
+        return sorted({sid.strip() for sid in override if sid.strip()})
+    return _list_local_stock_ids(data_dir)
+
+
 def main() -> int:  # pragma: no cover — CLI glue
     parser = argparse.ArgumentParser(description="Backfill historical daily OHLC.")
     parser.add_argument("--years", type=int, default=2, help="Lookback window in years")
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--sleep", type=float, default=DEFAULT_SLEEP_SECONDS)
+    parser.add_argument(
+        "--stocks",
+        type=str,
+        default=None,
+        help="Comma-separated stock_ids (overrides local glob; for new stocks)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -205,7 +222,8 @@ def main() -> int:  # pragma: no cover — CLI glue
     storage = DataStorage(str(args.data_dir))
     fetcher = DataFetcher(storage=storage)
 
-    stock_ids = _list_local_stock_ids(args.data_dir)
+    override = args.stocks.split(",") if args.stocks else None
+    stock_ids = resolve_stock_ids(args.data_dir, override=override)
     logger.info("backfilling %d stocks from %s to %s", len(stock_ids), target_start, today)
 
     report = run_backfill(

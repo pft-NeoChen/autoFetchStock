@@ -11,6 +11,7 @@ from scripts.backfill_historical_daily import (
     BackfillReport,
     compute_missing_months,
     is_month_covered,
+    resolve_stock_ids,
     run_backfill,
 )
 from src.models import DailyOHLC
@@ -160,6 +161,28 @@ def test_run_backfill_continues_on_stock_error() -> None:
     assert isinstance(report, BackfillReport)
     assert report.failed_stocks == ["2330"]
     assert "2317" in report.successful_stocks
+
+
+@pytest.mark.unit
+def test_resolve_stock_ids_uses_local_glob_when_no_override(tmp_path) -> None:
+    stocks_dir = tmp_path / "stocks"
+    stocks_dir.mkdir()
+    (stocks_dir / "2330.json").write_text("{}")
+    (stocks_dir / "2317.json").write_text("{}")
+
+    ids = resolve_stock_ids(tmp_path, override=None)
+    assert ids == ["2317", "2330"]
+
+
+@pytest.mark.unit
+def test_resolve_stock_ids_uses_override_when_provided(tmp_path) -> None:
+    # Local glob has one stock; override should win.
+    stocks_dir = tmp_path / "stocks"
+    stocks_dir.mkdir()
+    (stocks_dir / "2330.json").write_text("{}")
+
+    ids = resolve_stock_ids(tmp_path, override=["6789", " 1234 ", "6789"])
+    assert ids == ["1234", "6789"]  # trimmed + deduped + sorted
 
 
 @pytest.mark.unit
