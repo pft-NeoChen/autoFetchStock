@@ -10,12 +10,12 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | TASK-D01c chip/margin backfill orchestrator — 14 tests GREEN；完整 pytest 556/556 GREEN（實跑待) |
-| 當前 phase | **Phase 0 補件中**（D01c IN_PROGRESS，待實跑 ~100min 後接 V1 重判決） |
-| 當前 task | **TASK-D01c**（script DONE，real-run pending） |
-| 下一個建議 task | 跑 `python -m scripts.backfill_historical_chips --years 2` 背景補 chip/margin → 重跑 `scripts/run_backtest_v1.py` → V1 正式 V2 §6.1 判決 |
+| 上次 session | TASK-D03d Regime classifier — 13 tests GREEN；完整 pytest 569/569 GREEN；D01c backfill 背景跑中 (PID 11925) |
+| 當前 phase | **Phase 0 補件 + Phase 6 平行**（D01c backfill 跑中；D03d DONE；S05 待） |
+| 當前 task | — |
+| 下一個建議 task | **TASK-S05** Regime gating（吃 D03d classify_regime → bear/range 擋進場）；或等 backfill 跑完接 walk_orchestrator 整合 + 重跑 V1 判決 |
 | 全域 blocked | 無 |
-| Pytest 狀態 | D01c 14/14 GREEN；完整 pytest 556/556 GREEN（12 warnings） |
+| Pytest 狀態 | D03d 13/13 GREEN；完整 pytest 569/569 GREEN（12 warnings） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
 | Repo 是否乾淨 | main：D01c RED+GREEN 已 commit (ahead origin/main by 2)；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
@@ -25,10 +25,10 @@
 
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
-| 0 — Universe + Feature Store | 12 | 12 | 0 | 0 | 0 |
+| 0 — Universe + Feature Store | 13 | 12 | 1 | 0 | 0 |
 | 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
-| 3 — Backtester | 8 | 8 | 0 | 0 | 1 |
+| 3 — Backtester | 9 | 9 | 0 | 0 | 1 |
 | 4 — Risk + Sizing | 2 | 2 | 0 | 0 | 0 |
 | 5 — Journal + Perf | 3 | 3 | 0 | 0 | 0 |
 | 6 — Portfolio | 2 | 1 | 0 | 1 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **41** | **31** | **0** | **9** | **1** |
+| **總計** | **43** | **32** | **1** | **9** | **1** |
 
 ---
 
@@ -123,6 +123,8 @@
 - 2026-05-23 | TASK-J03 | 7b241ae (RED) + b4e1f95 (GREEN)：`src/journal/performance.py` + tests/test_journal/test_performance.py 擴充至 25 tests。補平均盈虧比、OOS/IS ratio、Top-N excluded return、benchmark alpha、render_performance_report；完整 pytest 535/535 GREEN。Phase 5 完成，下一 session 接 TASK-R03。
 - 2026-05-23 | TASK-R03 | 1f31cfb (RED) + a52b47d (GREEN)：`src/portfolio/correlation_filter.py` + 7 unit tests。實作 sector + 60d return correlation clustering、同 cluster ≤2 檔限制、portfolio beta ≤1.2 gate、public exports；完整 pytest 542/542 GREEN。下一 session 接 TASK-S05。
 - 2026-05-23 | TASK-D01c | 6d2f81b (RED) + a0d7c79 (GREEN)：`scripts/backfill_historical_chips.py` + 14 unit tests。date-major orchestrator 走 weekdays × 4 endpoints (TWSE/TPEX × T86/Margin)，merge 後存 daily snapshot，per-endpoint 例外隔離 + sleep DI；完整 pytest 556/556 GREEN。**實跑待**：`python -m scripts.backfill_historical_chips --years 2`（~100 min），完成後重跑 run_backtest_v1 解 0 trades 困境。news 不在本 task（RSS 無歷史，另起 D01d 即時累積）。
+- 2026-05-23 | TASK-D01c real-run | nohup PID 11925 啟動於 19:57，log `/tmp/backfill_chips.log`，背景跑 ~100 min。9 min 已寫 36 chip files，順利。
+- 2026-05-23 | TASK-D03d | 7802934 (RED) + cff8f70 (GREEN)：`src/backtest/regime_classifier.py` + 13 unit tests。MA-based labeller (BULL=close>MA200 AND MA50>MA200；BEAR 反向；RANGE 含 flat) + classify_window Counter.most_common + count_regime_coverage 餵 DecisionInput.regime_coverage_*；解 backtest_v1_report caveats #3。完整 pytest 569/569 GREEN。S05 可直接吃 classify_regime。
 
 ---
 
@@ -693,6 +695,31 @@
 - **Session log**:
   - 2026-05-23 62b52c7 | RED：33 failing tests + 3 skeleton modules（NotImplementedError） | 接 GREEN
   - 2026-05-23 dfbbd07 | GREEN：performance.py + decision.py + backtest_report.py 全實作；profitability cross-suite 268/268 GREEN | Phase 3 全 8/8 DONE，下一階段：實跑 D03c 報告 OR 進 Phase 4
+
+### TASK-D03d
+
+- **Name**: Market regime classifier（D03 caveats #3 / Phase 6 S05 前置）
+- **Source**: V2 §6.1（regime_coverage check）+ backtest_v1_report caveats (3)
+- **Status**: `DONE`
+- **Depends**: TASK-F08 ✅（regime_features 之上的 discrete labeller）
+- **Files**:
+  - `src/backtest/regime_classifier.py` ✅
+  - `tests/test_backtest/test_regime_classifier.py` ✅（13 tests）
+- **Acceptance**:
+  - `Regime` enum {BULL, BEAR, RANGE} ✅
+  - `RegimeCoverage` dataclass (bull/bear/range counts) ✅
+  - `classify_regime(market_ohlc, ref_date)` MA-based labeller（BULL = close>MA200 AND MA50>MA200；BEAR 反向；RANGE 其餘含 flat）✅
+  - `classify_window(market_ohlc, start, end)` Counter.most_common ✅
+  - `count_regime_coverage(windows, market_ohlc)` 餵入 DecisionInput.regime_coverage_* ✅
+  - 缺資料（slow MA NaN）/ 未知日期 → None ✅
+- **Tests (RED list)**: 13 項 全 GREEN
+  - enum sanity / BULL / BEAR / RANGE flat / unknown date / insufficient history / window dominant / window unclassifiable / window mixed / count single / count multi / count skips unclassifiable / count empty
+- **DoD**: 13/13 GREEN + 完整 pytest 569/569 GREEN
+- **Next**: 接 walk_orchestrator 把 OOS windows 餵入 count_regime_coverage，產出 regime_coverage_* 給 evaluate_v2_thresholds（留待 backfill 跑完重跑 run_backtest_v1 時整合）；S05 regime gating 可直接吃 classify_regime
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 7802934 | RED：13 tests，12 fail (stubs) + 1 enum GREEN | 接 GREEN
+  - 2026-05-23 cff8f70 | GREEN：MA-based classifier 三函式 + flat-market range test fix；13/13 GREEN，完整 pytest 569/569 GREEN | 接 S05 OR backfill 跑完整合 walk_orchestrator
 
 ---
 
