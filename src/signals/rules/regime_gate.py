@@ -45,13 +45,15 @@ def gate_by_regime(
     allowed: FrozenSet[Regime] = DEFAULT_ALLOWED_REGIMES,
     pass_on_unknown: bool = False,
 ) -> Tuple[bool, str]:
-    """Return ``(passes, reason)`` for an already-classified regime label.
+    """Return ``(passes, reason)`` for an already-classified regime label."""
+    if regime is None:
+        if pass_on_unknown:
+            return True, "regime_unknown_pass"
+        return False, "regime_unknown_blocked"
 
-    ``None`` (insufficient data) is blocked unless ``pass_on_unknown`` is True.
-    Reason text always names the current regime so journal entries are
-    debuggable without joining a separate table.
-    """
-    raise NotImplementedError("RED stub")
+    if regime in allowed:
+        return True, f"regime_{regime.value}_allowed"
+    return False, f"regime_{regime.value}_blocked"
 
 
 def evaluate_regime_for_signal(
@@ -60,4 +62,13 @@ def evaluate_regime_for_signal(
     config: Optional[RegimeGateConfig] = None,
 ) -> Tuple[bool, str]:
     """Classify ``ref_date`` then apply :func:`gate_by_regime`."""
-    raise NotImplementedError("RED stub")
+    cfg = config or RegimeGateConfig()
+    regime = classify_regime(
+        market_ohlc,
+        ref_date,
+        fast_window=cfg.fast_window,
+        slow_window=cfg.slow_window,
+    )
+    return gate_by_regime(
+        regime, allowed=cfg.allowed, pass_on_unknown=cfg.pass_on_unknown
+    )
