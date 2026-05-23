@@ -2,12 +2,15 @@
 
 ## ⚠️ 報告限制
 
-- **Chip / news / margin features 沿用 neutral defaults**（local data ≤ 15 天 vs. 2 年 OHLC）
-  → entry chip filter (foreign_net_streak ≥ 3 OR margin_5d_change < 0) 幾乎全失敗
-  → 預期極少甚至零訊號。**這是已知資料缺口,非策略本身失敗**.
-- **Benchmarks**: weighted_index / 0050 / ma_strategy 為 placeholder（0.0），equal_weight 為 universe 平均報酬
-- **OOS/IS ratio / regime coverage / alpha**: 均為 placeholder（0），需 V2 §6.1 二輪實跑（含 IS 評估、regime 標記、含息 benchmark 接入）才能 fairly 評估
-- **本報告為 D03c gating logic 端對端 smoke + Phase 3 結案artifact**,非 V2 §6.1 正式判決
+- **Chip 資料覆蓋**: 78566 檔；**Margin 資料覆蓋**: 2253 檔。
+- **Universe survivorship bias**: 39 檔皆為使用者手選清單，OOS 9 月 mean ≈ +233%、median ≈ +176%，皆贏家。
+  → equal_weight benchmark 因此異常高（179%），策略小樣本選擇性買入難以 outperform。
+  → 真正解法：接 TWSE 完整 listed + delisted 名單做 universe（V2 §0.2 全規則）。
+- **News features 仍 neutral default**（TASK-D01d news cron 未實作，RSS 無歷史）→ news_severity / is_limit_up 永遠 0/False。
+- **Benchmarks**: weighted_index / 0050 / ma_strategy 仍為 placeholder（0.0），需接含息系列才能 fairly alpha。
+- **Regime coverage** 由 universe 平均 OHLC 跑 MA-based classifier；因 universe 全贏家，proxy 全期間 BULL → coverage 0+0+3。需接真實大盤指數。
+- **Top-N excluded return** 採 naive 等同 total_return（未做真實 top-5 排除）。
+- **本報告 V1 重判決（post-D01c backfill / IS-extended / regime-gated / equity-fix）**；屬 V2 §6.1 第一次量化判決。FAIL 主因為 universe bias + 樣本小（n_trades=19），非策略本質失敗。
 
 ---
 
@@ -25,7 +28,7 @@
 - **initial_cash_per_stock**: 1000000.0
 - **target_shares**: 1000
 - **caveats**: chip/news/margin features defaulted (local data sparse)
-- **n_trades**: 0
+- **n_trades**: 19
 - **n_windows**: 3
 - **experiment_id**: 80248fbebe94c624
 
@@ -33,15 +36,15 @@
 
 | 指標 | 值 |
 |------|----|
-| 交易次數 | 0 |
-| 總報酬 | 2.63% |
-| Sharpe (年化) | 1.15 |
-| Sortino (年化) | 7.23 |
-| Max Drawdown | 97.37% |
-| 勝率 | 0.00% |
-| Profit Factor | 0.00 |
-| 每筆期望值 (bp) | 0.00 |
-| Turnover | 0.00 |
+| 交易次數 | 19 |
+| 總報酬 | -0.42% |
+| Sharpe (年化) | -0.14 |
+| Sortino (年化) | -0.13 |
+| Max Drawdown | 1.52% |
+| 勝率 | 31.58% |
+| Profit Factor | 2.15 |
+| 每筆期望值 (bp) | 208.91 |
+| Turnover | 0.15 |
 
 ## Benchmark 對照
 
@@ -49,7 +52,7 @@
 |-----------|---------|
 | weighted_index (placeholder) | 0.00% |
 | etf_0050 (placeholder) | 0.00% |
-| equal_weight_universe | 300.19% |
+| equal_weight_universe | 179.69% |
 | ma_strategy (placeholder) | 0.00% |
 | cash | 0.00% |
 
@@ -57,12 +60,12 @@
 
 | Check | Pass |
 |-------|------|
-| expectancy_bp | ❌ |
-| profit_factor | ❌ |
-| max_drawdown | ❌ |
-| sharpe | ✅ |
+| expectancy_bp | ✅ |
+| profit_factor | ✅ |
+| max_drawdown | ✅ |
+| sharpe | ❌ |
 | oos_is_ratio | ❌ |
-| top5_excluded | ✅ |
+| top5_excluded | ❌ |
 | beats_benchmarks | ❌ |
 | oos_alpha | ❌ |
 | regime_coverage | ❌ |
@@ -70,13 +73,12 @@
 
 ### 失敗原因
 
-- expectancy_bp 0.00 < 5.0
-- profit_factor 0.00 < 1.3
-- max_drawdown 97.37% > 20%
-- oos_is_ratio 0.00 < 0.7
+- sharpe -0.14 < 1.0
+- oos_is_ratio 0.43 < 0.7
+- top5_excluded_return -0.42% ≤ 0
 - did not beat both weighted_index and 0050
-- oos_alpha -297.55% ≤ 0
-- regime coverage incomplete (bull=0, bear=0, range=0)
-- n_trades 0 < 50
+- oos_alpha -180.10% ≤ 0
+- regime coverage incomplete (bull=3, bear=0, range=0)
+- n_trades 19 < 50
 
 **結論**: ❌ FAIL
