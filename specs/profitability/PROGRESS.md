@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | TASK-M01 Data Freshness Guard — 16 tests GREEN（6 pure + 10 stateful）；完整 pytest 604/604 GREEN；D01c backfill 仍背景跑中 |
-| 當前 phase | **Phase 9 起步**（Phase 6 全 DONE，M01 DONE；等 backfill 完一次跑 V1 重判決） |
+| 上次 session | TASK-X01 OrderRouter Protocol + DryRunRouter — 15 tests GREEN（4 LiveOrder validation + 1 protocol + 10 DryRun behaviour）；完整 pytest 619/619 GREEN；D01c backfill 仍背景跑中（~60% / ETA ~22:00） |
+| 當前 phase | **Phase 9 + 10 起步**（Phase 6 全 DONE，M01 + X01 DONE；等 backfill 完跑 V1 重判決） |
 | 當前 task | — |
-| 下一個建議 task | 等 backfill 完成 → 改 `scripts/run_backtest_v1.py` 加 include_is=True + 接 compute_oos_is_ratio_from_result + count_regime_coverage + regime_gate → 重跑 → V1 正式 V2 §6.1 判決；或續 Phase 9 做 TASK-M02（Consistency Check，依 P01+B04，B04 已 ✅ 但 P01 未 DONE）→ 退而求其次先 TASK-X01（OrderRouter Protocol+DryRunRouter，無依賴 0.5d）|
+| 下一個建議 task | 等 backfill 完成 → 改 `scripts/run_backtest_v1.py` 加 include_is=True + 接 compute_oos_is_ratio_from_result + count_regime_coverage + regime_gate → 重跑 → V1 正式 V2 §6.1 判決；或續做 TASK-X02（ShioajiSimRouter，依 X01 ✅，1d，需 mock Shioaji）|
 | 全域 blocked | 無 |
-| Pytest 狀態 | M01 16/16 GREEN；完整 pytest 604/604 GREEN（12 warnings） |
-| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
-| Repo 是否乾淨 | main：M01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
+| Pytest 狀態 | X01 15/15 GREEN；完整 pytest 619/619 GREEN（12 warnings） |
+| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/execution/order_router.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
+| Repo 是否乾淨 | main：X01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
 ---
 
@@ -35,8 +35,8 @@
 | 7 — UI | 1 | 0 | 0 | 1 | 0 |
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 1 | 0 | 1 | 0 |
-| 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **44** | **35** | **1** | **7** | **1** |
+| 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
+| **總計** | **44** | **36** | **1** | **6** | **1** |
 
 ---
 
@@ -1029,6 +1029,7 @@
   - 2026-05-23 93722b7 | RED：16 failing tests + skeleton（NotImplementedError） | 接 GREEN
   - 2026-05-23 98838b3 | GREEN：DataFreshnessGuard 全實作；16/16 GREEN，完整 pytest 604/604 GREEN | 接 chore mark done
   - 2026-05-23 5285959 | chore：PROGRESS Phase 9 +1 DONE / 總計 35/44 | Phase 9 起步，下一步：等 backfill 完跑 V1 OR 做 X01
+- 2026-05-23 | TASK-X01 | `src/execution/order_router.py` + `src/execution/__init__.py` + 15 unit tests。OrderID/OrderState enum + LiveOrder dataclass (__post_init__ 驗 shares>0 / market 禁 limit_price / limit 要 price) + OrderStatus / Position dataclasses + `OrderRouter` runtime-checkable Protocol + `DryRunRouter` (log-only：submit → unique id `<prefix>-NNNNNN` 並記 _DryRunLogEntry；cancel → terminal state raise；query → UnknownOrderError；positions → 永遠 []) + OrderRouterError / UnknownOrderError。完整 pytest 619/619 GREEN。下一步：等 backfill 完跑 V1 OR 做 X02 (ShioajiSimRouter 需 mock Shioaji)。
 
 ### TASK-M02
 
@@ -1053,16 +1054,28 @@
 
 - **Name**: OrderRouter 抽象介面 + DryRunRouter
 - **Source**: V2 §10
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: —
-- **Files (planned)**:
-  - `src/execution/order_router.py`
-  - `tests/test_execution/test_order_router.py`
-- **Acceptance**: Protocol + DryRunRouter 實作
-- **Tests (RED list)**: ≥ 4 項
-- **DoD**: GREEN
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Files**:
+  - `src/execution/__init__.py` ✅
+  - `src/execution/order_router.py` ✅
+  - `tests/test_execution/__init__.py` ✅
+  - `tests/test_execution/test_order_router.py` ✅（15 tests）
+- **Acceptance**:
+  - `OrderRouter` Protocol (runtime_checkable) — submit / cancel / query / positions ✅
+  - `LiveOrder` dataclass — stock_id/side/shares/order_type/limit_price/tif/submitted_at/client_tag + __post_init__ 驗證 ✅
+  - `OrderState` enum (PENDING/SUBMITTED/PARTIAL/FILLED/CANCELLED/REJECTED) + TERMINAL_STATES frozenset ✅
+  - `OrderStatus` / `Position` dataclasses ✅
+  - `DryRunRouter` log-only — unique id `<prefix>-NNNNNN`、_DryRunLogEntry 記錄 submit/cancel、positions 永遠空、terminal state cancel 拋 OrderRouterError、unknown id 拋 UnknownOrderError ✅
+- **Tests (RED list)**: 15 項 全 GREEN
+  - LiveOrder 4：market default / limit requires price / market forbids price / shares > 0
+  - Protocol 1：DryRunRouter isinstance OrderRouter
+  - DryRun 10：unique ids / custom prefix / log entry / query submitted / query unknown raises / cancel marks cancelled + log / cancel unknown raises / cancel terminal raises / positions empty / multi orders independent
+- **DoD**: 15/15 GREEN + 完整 pytest 619/619 GREEN
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 (pending sha) | RED：15 tests，11 fail (DryRunRouter NotImplementedError) + 4 LiveOrder validation pass on skeleton dataclass | 接 GREEN
+  - 2026-05-23 (pending sha) | GREEN：DryRunRouter 全實作 + docstring；15/15 GREEN，完整 pytest 619/619 GREEN | Phase 10 起步，下一步：X02 (ShioajiSimRouter) OR 等 backfill 完跑 V1
 
 ### TASK-X02
 
