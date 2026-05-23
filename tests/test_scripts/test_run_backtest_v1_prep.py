@@ -218,8 +218,8 @@ def test_make_regime_gated_entry_factory_blocks_when_bear_regime() -> None:
     inner_calls: list[date] = []
 
     def inner_factory(stock_id: str, frame: pd.DataFrame):
-        def decider(stock_id_, ref_date, position, ohlc_row):
-            inner_calls.append(ref_date)
+        def decider(today, row, has_position):
+            inner_calls.append(today)
             return None
         return decider
 
@@ -231,7 +231,8 @@ def test_make_regime_gated_entry_factory_blocks_when_bear_regime() -> None:
 
     # Pick a ref_date that has MA history (after slow_window).
     ref = idx[250].date()
-    result = decider("2330", ref, None, feat.iloc[-1] if not feat.empty else None)
+    row = feat.iloc[-1] if not feat.empty else None
+    result = decider(ref, row, False)
     assert result is None
     # Bear → wrapper short-circuits, inner not called.
     assert inner_calls == []
