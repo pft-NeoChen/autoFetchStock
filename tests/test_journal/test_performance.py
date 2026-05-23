@@ -11,12 +11,17 @@ import pytest
 from src.backtest.engine import Trade
 from src.journal.performance import (
     PerformanceMetrics,
+    average_win_loss_ratio,
+    benchmark_alpha,
     expectancy_bp,
     max_drawdown,
+    oos_is_ratio,
     profit_factor,
+    render_performance_report,
     sharpe_ratio,
     sortino_ratio,
     summarize_performance,
+    top_n_excluded_return,
     total_return,
     turnover,
     win_rate,
@@ -148,6 +153,39 @@ def test_expectancy_bp_empty_is_zero() -> None:
     assert expectancy_bp([]) == 0.0
 
 
+@pytest.mark.unit
+def test_average_win_loss_ratio_known() -> None:
+    trades = [_trade(200, 0.02), _trade(100, 0.01), _trade(-50, -0.005)]
+    assert average_win_loss_ratio(trades) == pytest.approx(150 / 50)
+
+
+@pytest.mark.unit
+def test_average_win_loss_ratio_zero_when_missing_side() -> None:
+    assert average_win_loss_ratio([_trade(100, 0.01)]) == 0.0
+
+
+@pytest.mark.unit
+def test_oos_is_ratio_known_and_zero_guard() -> None:
+    assert oos_is_ratio(oos_return=0.07, is_return=0.10) == pytest.approx(0.7)
+    assert oos_is_ratio(oos_return=0.07, is_return=0.0) == 0.0
+
+
+@pytest.mark.unit
+def test_top_n_excluded_return_removes_biggest_winners() -> None:
+    trades = [
+        _trade(1000, 0.10),
+        _trade(300, 0.03),
+        _trade(-100, -0.01),
+        _trade(50, 0.005),
+    ]
+    assert top_n_excluded_return(trades, initial_capital=10_000, n=2) == pytest.approx(-0.005)
+
+
+@pytest.mark.unit
+def test_benchmark_alpha_is_strategy_minus_benchmark() -> None:
+    assert benchmark_alpha(strategy_return=0.12, benchmark_return=0.08) == pytest.approx(0.04)
+
+
 # ── turnover ────────────────────────────────────────────────────────────────
 
 
@@ -182,5 +220,52 @@ def test_summarize_returns_dataclass_with_all_fields() -> None:
     assert metrics.win_rate == pytest.approx(0.5)
     # Field presence smoke
     for attr in ("sharpe", "sortino", "max_drawdown", "profit_factor",
-                 "expectancy_bp", "turnover"):
+                 "expectancy_bp", "turnover", "avg_win_loss_ratio",
+                 "benchmark_alpha", "top5_excluded_return"):
         assert hasattr(metrics, attr)
+
+
+@pytest.mark.unit
+def test_summarize_accepts_benchmark_and_is_return_for_extended_metrics() -> None:
+    trades = [_trade(200, 0.002), _trade(-100, -0.001)]
+    equity = pd.Series([1_000_000.0, 1_050_000.0])
+
+    metrics = summarize_performance(
+        trades=trades,
+        equity=equity,
+        initial_capital=1_000_000.0,
+        benchmark_return=0.02,
+        is_return=0.10,
+        top_n=1,
+    )
+
+    assert metrics.benchmark_alpha == pytest.approx(0.03)
+    assert metrics.oos_is_ratio == pytest.approx(0.5)
+    assert metrics.top5_excluded_return == pytest.approx(-0.0001)
+
+
+@pytest.mark.unit
+def test_render_performance_report_contains_j03_metrics() -> None:
+    metrics = PerformanceMetrics(
+        n_trades=2,
+        total_return=0.05,
+        sharpe=1.2,
+        sortino=1.4,
+        max_drawdown=0.1,
+        win_rate=0.5,
+        profit_factor=2.0,
+        expectancy_bp=5.0,
+        turnover=1.1,
+        avg_win_loss_ratio=3.0,
+        oos_is_ratio=0.7,
+        top5_excluded_return=0.02,
+        benchmark_alpha=0.03,
+    )
+
+    md = render_performance_report(metrics)
+
+    assert "# Performance Report" in md
+    assert "平均盈虧比" in md
+    assert "OOS / IS" in md
+    assert "Top-5" in md
+    assert "Benchmark Alpha" in md
