@@ -10,12 +10,12 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | TASK-X01 OrderRouter Protocol + DryRunRouter — 15 tests GREEN（4 LiveOrder validation + 1 protocol + 10 DryRun behaviour）；完整 pytest 619/619 GREEN；D01c backfill 仍背景跑中（~60% / ETA ~22:00） |
-| 當前 phase | **Phase 9 + 10 起步**（Phase 6 全 DONE，M01 + X01 DONE；等 backfill 完跑 V1 重判決） |
+| 上次 session | V1 重判決 plumbing prep — `scripts/run_backtest_v1.py` 加 chip/margin loaders + market_ohlc proxy + regime-gated entry factory + build_feature_frame 接真實 chip_df/margin_df + run() wire include_is=True + compute_oos_is_ratio_from_result + count_regime_coverage；10 unit tests GREEN；完整 pytest 629/629 GREEN；D01c backfill ~85%（408 chips，processing 2025-12-31，ETA ~20min） |
+| 當前 phase | **V1 重判決 ready**（Phase 6/9/10 起步皆 DONE，plumbing 完成；等 backfill 完一鍵跑 `python -m scripts.run_backtest_v1`） |
 | 當前 task | — |
-| 下一個建議 task | 等 backfill 完成 → 改 `scripts/run_backtest_v1.py` 加 include_is=True + 接 compute_oos_is_ratio_from_result + count_regime_coverage + regime_gate → 重跑 → V1 正式 V2 §6.1 判決；或續做 TASK-X02（ShioajiSimRouter，依 X01 ✅，1d，需 mock Shioaji）|
+| 下一個建議 task | backfill 完成 → 跑 `python -m scripts.run_backtest_v1` 產 V1 正式 V2 §6.1 判決報告；若 0 trades 或 FAIL → 檢視 caveats（chip 覆蓋 / news 仍 neutral / weighted_index 含息接入）|
 | 全域 blocked | 無 |
-| Pytest 狀態 | X01 15/15 GREEN；完整 pytest 619/619 GREEN（12 warnings） |
+| Pytest 狀態 | V1 prep 10/10 GREEN；完整 pytest 629/629 GREEN（12 warnings） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/execution/order_router.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
 | Repo 是否乾淨 | main：X01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
@@ -743,7 +743,7 @@
 - **Tests (RED list)**: 7 項 全 GREEN（+ 9 個既有 orchestrator test 不變）
   - default include_is False fields empty / IS slice engine call / aggregate fields populated / OOS not polluted regression / ratio helper math / zero IS handle / empty curve → 0
 - **DoD**: 16/16 (7 new + 9 existing) GREEN，完整 pytest 588/588 GREEN
-- **Next**: scripts/run_backtest_v1 加 `include_is=True` + 把 `compute_oos_is_ratio_from_result` 接到 DecisionInput.oos_is_ratio；待 backfill 跑完一起做
+- **Next**: ~~scripts/run_backtest_v1 加 `include_is=True` + 把 `compute_oos_is_ratio_from_result` 接到 DecisionInput.oos_is_ratio；待 backfill 跑完一起做~~ **DONE 2026-05-23**（V1 重判決 plumbing prep；見 Global Session Log）
 - **Last updated**: 2026-05-23
 - **Session log**:
   - 2026-05-23 fe70880 | RED：7 tests，6 fail (IS extension + ratio helper) + 1 default-behaviour GREEN | 接 GREEN
@@ -1030,6 +1030,17 @@
   - 2026-05-23 98838b3 | GREEN：DataFreshnessGuard 全實作；16/16 GREEN，完整 pytest 604/604 GREEN | 接 chore mark done
   - 2026-05-23 5285959 | chore：PROGRESS Phase 9 +1 DONE / 總計 35/44 | Phase 9 起步，下一步：等 backfill 完跑 V1 OR 做 X01
 - 2026-05-23 | TASK-X01 | `src/execution/order_router.py` + `src/execution/__init__.py` + 15 unit tests。OrderID/OrderState enum + LiveOrder dataclass (__post_init__ 驗 shares>0 / market 禁 limit_price / limit 要 price) + OrderStatus / Position dataclasses + `OrderRouter` runtime-checkable Protocol + `DryRunRouter` (log-only：submit → unique id `<prefix>-NNNNNN` 並記 _DryRunLogEntry；cancel → terminal state raise；query → UnknownOrderError；positions → 永遠 []) + OrderRouterError / UnknownOrderError。完整 pytest 619/619 GREEN。下一步：等 backfill 完跑 V1 OR 做 X02 (ShioajiSimRouter 需 mock Shioaji)。
+- 2026-05-23 | V1 重判決 plumbing prep | `scripts/run_backtest_v1.py` 大改 + 10 unit tests：
+  - 新增 `load_chip_frames(data_dir)` / `load_margin_frames(data_dir)`：走 `data/chips/*.json` `data/margin/*.json` 組成 per-stock time series（容錯 invalid JSON / missing dir）
+  - 新增 `build_market_ohlc_proxy(feature_frames)`：cross-section mean → OHLC DataFrame，供 regime classifier 用
+  - 新增 `make_regime_gated_entry_factory(inner_factory, market_ohlc)`：wrap base entry decider，bear/range/unknown → 短路 return None，不呼叫內層
+  - `build_feature_frame(ohlc, *, chip_df, margin_df)` 改吃可選 chip/margin DF：有資料 → `foreign_net_streak` + `margin_n_day_change`；無 → neutral default
+  - `run()` 接 `include_is=True` + `compute_oos_is_ratio_from_result(result)` → `DecisionInput.oos_is_ratio` + `count_regime_coverage(oos_ranges, market_ohlc)` → `regime_coverage_*` + 用 `make_regime_gated_entry_factory` 包裝 entry
+  - caveats block 改寫，標明此為「V1 重判決」非 smoke
+  - 10 tests GREEN（chip loader 3 / margin loader 1 / market_ohlc proxy 2 / build_feature_frame 3 / regime gate factory 1）
+  - 完整 pytest 629/629 GREEN
+  - **不在 PROGRESS task list 中**（D03e Next: 的後續整合工作），歸 D03e 之延伸。
+  - 下一步：backfill 完成（ETA ~22:20）→ `python -m scripts.run_backtest_v1` 一鍵產 V1 §6.1 判決
 
 ### TASK-M02
 
