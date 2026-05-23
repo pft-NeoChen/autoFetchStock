@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | Phase 6 R03 Correlation Filter — 7 tests GREEN；完整 pytest 542/542 GREEN |
-| 當前 phase | **Phase 6 進行中**（R03 DONE，下一步 S05 Regime gating） |
-| 當前 task | — |
-| 下一個建議 task | **TASK-S05 Regime gating 接入 SignalEngine** **或** 先補 chip/news data backfill 再做 V1 正式判決 |
+| 上次 session | TASK-D01c chip/margin backfill orchestrator — 14 tests GREEN；完整 pytest 556/556 GREEN（實跑待) |
+| 當前 phase | **Phase 0 補件中**（D01c IN_PROGRESS，待實跑 ~100min 後接 V1 重判決） |
+| 當前 task | **TASK-D01c**（script DONE，real-run pending） |
+| 下一個建議 task | 跑 `python -m scripts.backfill_historical_chips --years 2` 背景補 chip/margin → 重跑 `scripts/run_backtest_v1.py` → V1 正式 V2 §6.1 判決 |
 | 全域 blocked | 無 |
-| Pytest 狀態 | R03 7/7 GREEN；portfolio+features related 40/40 GREEN；完整 pytest 542/542 GREEN（12 warnings） |
-| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
-| Repo 是否乾淨 | main：R03 已 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
+| Pytest 狀態 | D01c 14/14 GREEN；完整 pytest 556/556 GREEN（12 warnings） |
+| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
+| Repo 是否乾淨 | main：D01c RED+GREEN 已 commit (ahead origin/main by 2)；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
 ---
 
@@ -122,6 +122,7 @@
 - 2026-05-23 | TASK-J02 | e90df41 (RED) + c4a4f60 (GREEN)：`src/journal/signal_log.py` + 7 unit tests。實作 append-only JSONL SignalLog、SignalLogEntry、from_signal、entered/filtered 狀態、filter reasons、RiskDecision snapshot、list filter、summary；完整 pytest 528/528 GREEN。下一 session 接 TASK-J03。
 - 2026-05-23 | TASK-J03 | 7b241ae (RED) + b4e1f95 (GREEN)：`src/journal/performance.py` + tests/test_journal/test_performance.py 擴充至 25 tests。補平均盈虧比、OOS/IS ratio、Top-N excluded return、benchmark alpha、render_performance_report；完整 pytest 535/535 GREEN。Phase 5 完成，下一 session 接 TASK-R03。
 - 2026-05-23 | TASK-R03 | 1f31cfb (RED) + a52b47d (GREEN)：`src/portfolio/correlation_filter.py` + 7 unit tests。實作 sector + 60d return correlation clustering、同 cluster ≤2 檔限制、portfolio beta ≤1.2 gate、public exports；完整 pytest 542/542 GREEN。下一 session 接 TASK-S05。
+- 2026-05-23 | TASK-D01c | 6d2f81b (RED) + a0d7c79 (GREEN)：`scripts/backfill_historical_chips.py` + 14 unit tests。date-major orchestrator 走 weekdays × 4 endpoints (TWSE/TPEX × T86/Margin)，merge 後存 daily snapshot，per-endpoint 例外隔離 + sleep DI；完整 pytest 556/556 GREEN。**實跑待**：`python -m scripts.backfill_historical_chips --years 2`（~100 min），完成後重跑 run_backtest_v1 解 0 trades 困境。news 不在本 task（RSS 無歷史，另起 D01d 即時累積）。
 
 ---
 
@@ -192,6 +193,33 @@
   - 2026-05-22 ffc4420 | RED：9 failing tests | 接 GREEN
   - 2026-05-22 9477345 | GREEN：scripts/backfill_historical_daily.py + 10 unit tests GREEN | 接實跑
   - 2026-05-22 cba24c8 | FIX：實跑暴露三 bug（DataFetcher 簽名、StockDailyFile.daily_data 欄位、per-stock try 太粗）；改 per-month try + 修簽名 + 修欄位後第二輪 39/39 ok | 接 TASK-S01
+
+### TASK-D01c
+
+- **Name**: chip + margin 歷史回補 orchestrator（解開 V1 0 trades）
+- **Source**: V2 §0.1 / §0.5 + backtest_v1_report.md caveats (1)
+- **Status**: `IN_PROGRESS`（script + tests DONE；實跑待跑）
+- **Depends**: TASK-D01 ✅
+- **Files**:
+  - `scripts/backfill_historical_chips.py` ✅
+  - `tests/test_scripts/test_backfill_historical_chips.py` ✅（14 tests）
+- **Acceptance**:
+  - Pure helpers (is_trading_day / compute_missing_dates) 處理週末跳過、雙 snapshot 缺一即補 ✅
+  - date-major loop：每日 4 endpoints (TWSE/TPEX × T86/Margin) ✅
+  - TWSE+TPEX merge 後存單一 daily snapshot ✅
+  - per-endpoint 例外隔離（TWSE 掛不擋 TPEX）✅
+  - sleep_fn 注入 + 3s rate limit between requests ✅
+  - 雙 snapshot 都空 → 記 skipped_empty_days（假日 / 上市前）✅
+- **Tests (RED list)**: 14 項 全 GREEN
+  - is_trading_day weekday/weekend ×2
+  - compute_missing_dates: empty / skips weekends / skips when both exist / includes when only one exists
+  - run: 4 endpoints called / merges TWSE+TPEX / skips covered / skips weekends / continues on endpoint error / records empty day / respects sleep / report counts
+- **DoD**: 14/14 GREEN + 完整 pytest 556/556 GREEN
+- **Real-run pending**: 預估 ~500 trading days × 4 requests × 3s ≈ 100 min。背景跑，跑完接 run_backtest_v1 重判決
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 6d2f81b | RED：14 tests，8 fail (orchestrator NotImplementedError) + 6 pure helpers GREEN | 接 GREEN
+  - 2026-05-23 a0d7c79 | GREEN：run_chips_backfill 實作（date-major + 4 endpoints merge + per-endpoint isolation + sleep DI）；14/14 GREEN，完整 pytest 556/556 GREEN | 接實跑 backfill
 
 ### TASK-U01
 
