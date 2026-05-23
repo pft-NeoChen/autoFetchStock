@@ -37,7 +37,7 @@ def _equal_weight_curve(universe_daily: Mapping[str, pd.DataFrame]) -> pd.Series
     closes = pd.DataFrame(
         {sid: df["close"].astype(float) for sid, df in universe_daily.items()}
     ).sort_index()
-    returns = closes.pct_change()
+    returns = closes.pct_change(fill_method=None)
     # Daily rebalance: equal weight = mean cross-section return.
     daily = returns.mean(axis=1, skipna=True).fillna(0.0)
     return (1.0 + daily).cumprod()
@@ -53,8 +53,9 @@ def _ma_strategy_curve(
     short = close.rolling(window=short_window, min_periods=short_window).mean()
     long = close.rolling(window=long_window, min_periods=long_window).mean()
     # Decide at T-1, apply to T (no look-ahead).
-    in_market = (short > long).shift(1).fillna(False).astype(bool)
-    daily_return = close.pct_change().fillna(0.0)
+    raw = (short > long).shift(1)
+    in_market = raw.astype("boolean").fillna(False).astype(bool)
+    daily_return = close.pct_change(fill_method=None).fillna(0.0)
     strat_return = daily_return.where(in_market, 0.0)
     return (1.0 + strat_return).cumprod()
 
