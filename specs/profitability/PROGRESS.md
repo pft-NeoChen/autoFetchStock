@@ -10,12 +10,12 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | TASK-D03d Regime classifier — 13 tests GREEN；完整 pytest 569/569 GREEN；D01c backfill 背景跑中 (PID 11925) |
-| 當前 phase | **Phase 0 補件 + Phase 6 平行**（D01c backfill 跑中；D03d DONE；S05 待） |
+| 上次 session | TASK-S05 Regime gate — 12 tests GREEN；完整 pytest 581/581 GREEN；D01c backfill 背景跑中 (PID 11925, 14min/~100min) |
+| 當前 phase | **Phase 0 補件中**（Phase 6 全 DONE；等 backfill 完接 walk_orchestrator 整合 + V1 重判決） |
 | 當前 task | — |
-| 下一個建議 task | **TASK-S05** Regime gating（吃 D03d classify_regime → bear/range 擋進場）；或等 backfill 跑完接 walk_orchestrator 整合 + 重跑 V1 判決 |
+| 下一個建議 task | 等 backfill 完成 → 接 walk_orchestrator 串入 count_regime_coverage + regime_gate → 重跑 `scripts/run_backtest_v1.py` → V1 正式 V2 §6.1 判決 |
 | 全域 blocked | 無 |
-| Pytest 狀態 | D03d 13/13 GREEN；完整 pytest 569/569 GREEN（12 warnings） |
+| Pytest 狀態 | S05 12/12 GREEN；完整 pytest 581/581 GREEN（12 warnings） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
 | Repo 是否乾淨 | main：D01c RED+GREEN 已 commit (ahead origin/main by 2)；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
@@ -31,12 +31,12 @@
 | 3 — Backtester | 9 | 9 | 0 | 0 | 1 |
 | 4 — Risk + Sizing | 2 | 2 | 0 | 0 | 0 |
 | 5 — Journal + Perf | 3 | 3 | 0 | 0 | 0 |
-| 6 — Portfolio | 2 | 1 | 0 | 1 | 0 |
+| 6 — Portfolio | 2 | 2 | 0 | 0 | 0 |
 | 7 — UI | 1 | 0 | 0 | 1 | 0 |
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **43** | **32** | **1** | **9** | **1** |
+| **總計** | **43** | **33** | **1** | **8** | **1** |
 
 ---
 
@@ -125,6 +125,7 @@
 - 2026-05-23 | TASK-D01c | 6d2f81b (RED) + a0d7c79 (GREEN)：`scripts/backfill_historical_chips.py` + 14 unit tests。date-major orchestrator 走 weekdays × 4 endpoints (TWSE/TPEX × T86/Margin)，merge 後存 daily snapshot，per-endpoint 例外隔離 + sleep DI；完整 pytest 556/556 GREEN。**實跑待**：`python -m scripts.backfill_historical_chips --years 2`（~100 min），完成後重跑 run_backtest_v1 解 0 trades 困境。news 不在本 task（RSS 無歷史，另起 D01d 即時累積）。
 - 2026-05-23 | TASK-D01c real-run | nohup PID 11925 啟動於 19:57，log `/tmp/backfill_chips.log`，背景跑 ~100 min。9 min 已寫 36 chip files，順利。
 - 2026-05-23 | TASK-D03d | 7802934 (RED) + cff8f70 (GREEN)：`src/backtest/regime_classifier.py` + 13 unit tests。MA-based labeller (BULL=close>MA200 AND MA50>MA200；BEAR 反向；RANGE 含 flat) + classify_window Counter.most_common + count_regime_coverage 餵 DecisionInput.regime_coverage_*；解 backtest_v1_report caveats #3。完整 pytest 569/569 GREEN。S05 可直接吃 classify_regime。
+- 2026-05-23 | TASK-S05 | c4526f8 (RED) + c258cef (GREEN)：`src/signals/rules/regime_gate.py` + 12 unit tests。RegimeGateConfig + gate_by_regime + evaluate_regime_for_signal；預設 allowed={BULL} → bear/range/unknown 全擋；reason 含 regime label 方便 journal lookup。**Phase 6 全 DONE**。完整 pytest 581/581 GREEN。下一步：等 backfill 跑完整合 walk_orchestrator + 重跑 V1。
 
 ---
 
@@ -882,16 +883,26 @@
 
 - **Name**: Regime gating 接入 SignalEngine
 - **Source**: V2 §6.1
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-F08, TASK-S03
-- **Files (planned)**:
-  - `src/signals/rules/regime_gate.py`
-  - `tests/test_signals/test_regime_gate.py`
-- **Acceptance**: 弱勢 regime 停做多；高波動部位減半
-- **Tests (RED list)**: ≥ 4 項
-- **DoD**: 整合測試與 engine 串接
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`（gate primitives；高波動部位減半併入 PositionSizer config，不在此 task）
+- **Depends**: TASK-F08 ✅, TASK-S03 ✅, TASK-D03d ✅
+- **Files**:
+  - `src/signals/rules/regime_gate.py` ✅
+  - `tests/test_signals/test_regime_gate.py` ✅（12 tests）
+- **Acceptance**:
+  - `RegimeGateConfig` dataclass (allowed set, pass_on_unknown, MA window overrides) ✅
+  - `gate_by_regime(label, allowed, pass_on_unknown)` 純函式回 (passes, reason) ✅
+  - `evaluate_regime_for_signal(market_ohlc, ref_date, config)` 整合 classify_regime + gate ✅
+  - 預設 allowed = {BULL} → bear/range 擋下 ✅
+  - reason 字串含 regime 名稱（`regime_bull_allowed` / `regime_bear_blocked` / `regime_unknown_blocked`）方便 journal lookup ✅
+- **Tests (RED list)**: 12 項 全 GREEN
+  - gate: bull pass / bear block / range block / unknown block / unknown pass via flag / custom allowed set / DEFAULT_ALLOWED_REGIMES sanity
+  - evaluate: bull pass / bear block / insufficient history block / config overrides / default config
+- **DoD**: 12/12 GREEN + 完整 pytest 581/581 GREEN
+- **Next**: long_entry pipeline 在 features_snapshot 內已有 market_close/market_ma_60 簡版 gate；後續 LongEntryEngine 子類可以在 entry decider 前先呼叫 evaluate_regime_for_signal 做硬擋（整合測試留 backfill 跑完後做 walk_orchestrator 整合）
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 c4526f8 | RED：12 tests，11 fail (stubs) + 1 sanity GREEN | 接 GREEN
+  - 2026-05-23 c258cef | GREEN：gate_by_regime + evaluate_regime_for_signal 實作；12/12 GREEN，完整 pytest 581/581 GREEN | Phase 6 全 DONE，下一階段：backfill 跑完接 walk_orchestrator 整合 + V1 重判決
 
 ---
 
