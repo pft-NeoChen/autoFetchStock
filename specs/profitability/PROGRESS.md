@@ -10,12 +10,12 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | V1 §6.1 第二次判決（Plan A real-benchmark）— `scripts/run_backtest_v1.py` 接 `compute_benchmarks` 用 0050 作雙 proxy（market_index + etf_total_return），並用 0050 OHLC 作 regime classifier 輸入；加 `load_market_proxy_from_disk` + `benchmark_period_returns` helpers + 4 unit tests；完整 pytest 643/643 GREEN。重跑揭露：0050 兩年 -38% (156→97) 後 OOS 反彈 +67%，universe 39 檔同期 +233% — universe 與 0050 嚴重脫鉤；regime gate 用 0050 → 全 3 OOS window BEAR → 擋下 18/19 訊號，n_trades 19→1；verdict 仍 ❌ FAIL 但暴露真正設計問題：「universe-regime 脫鉤時 gate 變禁止交易開關」 |
-| 當前 phase | **V1 §6.1 第二次判決完成（❌ FAIL）** — Plan A real benchmark wiring DONE；揭露 regime gate 設計缺陷 + universe-market 脫鉤 |
+| 上次 session | V1 §6.1 第三次判決（Plan D per-stock regime gate）— `make_per_stock_regime_gated_entry_factory` 新 helper（每股自己 OHLC 做 regime classifier）+ `make_regime_gated_entry_factory` 加 config kwarg + `run()` 切到 per-stock + allowed={BULL,RANGE}；5 new tests (3 widened-config + 2 per-stock)；完整 pytest 648/648 GREEN。重跑：n_trades 1→17、total_return -0.09%→+0.28%、max_dd 0.74%→1.06%、expectancy_bp PASS；regime_gate 設計問題解決，策略可正常運作；剩餘 FAIL 為 n_trades<50 + universe bias + 0050 OOS 全 BEAR（regime_coverage 1+1+1 仍缺）|
+| 當前 phase | **V1 §6.1 第三次判決完成（❌ FAIL）** — gate 設計修正；剩餘問題屬資料 / universe 範疇 |
 | 當前 task | — |
-| 下一個建議 task | 兩方向擇一：(D) 重思 regime gate 設計 — per-stock regime（個股自己的 MA200）取代 market-wide gate，或放寬 allowed regime（BULL+RANGE），讓 universe-market 脫鉤情境策略仍能運作 (B) 解 universe survivorship bias — 加 delisted 名單（V2 §0.2 全規則）|
+| 下一個建議 task | 兩方向擇一：(B) 解 universe survivorship bias — TWSE 完整 listed + delisted 名單（V2 §0.2 全規則），需找歷史下市資料源；(E) 擴 data span 至 ≥ 3 年覆蓋 BULL+BEAR+RANGE 三段（需 D01b 再跑 2 年）|
 | 全域 blocked | 無 |
-| Pytest 狀態 | Plan A market proxy 4/4 GREEN；完整 pytest 643/643 GREEN（12 warnings） |
+| Pytest 狀態 | Plan D config + per-stock 5/5 GREEN；完整 pytest 648/648 GREEN（12 warnings） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/execution/order_router.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
 | Repo 是否乾淨 | main：X01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
@@ -1030,6 +1030,25 @@
   - 2026-05-23 98838b3 | GREEN：DataFreshnessGuard 全實作；16/16 GREEN，完整 pytest 604/604 GREEN | 接 chore mark done
   - 2026-05-23 5285959 | chore：PROGRESS Phase 9 +1 DONE / 總計 35/44 | Phase 9 起步，下一步：等 backfill 完跑 V1 OR 做 X01
 - 2026-05-23 | TASK-X01 | `src/execution/order_router.py` + `src/execution/__init__.py` + 15 unit tests。OrderID/OrderState enum + LiveOrder dataclass (__post_init__ 驗 shares>0 / market 禁 limit_price / limit 要 price) + OrderStatus / Position dataclasses + `OrderRouter` runtime-checkable Protocol + `DryRunRouter` (log-only：submit → unique id `<prefix>-NNNNNN` 並記 _DryRunLogEntry；cancel → terminal state raise；query → UnknownOrderError；positions → 永遠 []) + OrderRouterError / UnknownOrderError。完整 pytest 619/619 GREEN。下一步：等 backfill 完跑 V1 OR 做 X02 (ShioajiSimRouter 需 mock Shioaji)。
+- 2026-05-24 | V1 §6.1 第三次判決（Plan D per-stock regime gate）|
+  - 診斷 Plan A 後 n_trades=1 根因：0050 close<MA200 全 OOS → market-wide regime_gate 變禁止交易開關
+  - 試 (D-1) 廣 allowed 至 {BULL, RANGE}：因 0050 全 BEAR（無 RANGE）→ n_trades 仍 1，無效
+  - 改 (D-2) per-stock regime：每股自己 OHLC 做 classifier，小型贏家股按自身 MA200 判 BULL → 可交易
+  - 加 `make_per_stock_regime_gated_entry_factory(inner_factory, feature_frames, config)` 在 `scripts/run_backtest_v1.py`
+  - `make_regime_gated_entry_factory` 加 `config: RegimeGateConfig | None` kwarg（向後相容）
+  - `run()` 切到 per-stock + `allowed={BULL, RANGE}`
+  - 5 new tests（D-1 widened-config 3 + D-2 per-stock 2）GREEN；完整 pytest 648/648 GREEN
+  - 重跑結果 (vs Plan A)：
+    - n_trades: 1 → 17
+    - total_return: -0.09% → +0.28%
+    - sharpe: -0.11 → 0.13
+    - max_dd: 0.74% → 1.06%
+    - expectancy_bp ✅ PASS (與第一次同)
+  - 仍 ❌ FAIL，剩餘原因屬資料層（非策略 / gate）：
+    1. n_trades 17 < 50 — 39 檔 × 9mo OOS 範圍太小
+    2. universe survivorship bias 推高 benchmark
+    3. regime_coverage bull=0 bear=3 range=0 — 0050 整段 BEAR，data span 不足 2 年難覆蓋 1+1+1
+  - 下一步建議 (B) 解 universe bias / (E) 擴 data span ≥ 3 年
 - 2026-05-24 | V1 §6.1 第二次判決（Plan A real-benchmark wiring）|
   - `scripts/run_backtest_v1.py` 加 `load_market_proxy_from_disk(data_dir, stock_id="0050")` + `benchmark_period_returns(curves, period)` 兩 helpers
   - `run()` 載入 0050 OHLC 作 market_index + etf_total_return 雙 proxy 餵 `compute_benchmarks`；market_ohlc 也改用 0050（取代 universe-mean）作 regime classifier 輸入
