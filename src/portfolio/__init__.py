@@ -13,9 +13,21 @@ from src.portfolio.position_sizer import (
     PositionSizerConfig,
     PositionSizingError,
 )
+from src.portfolio.correlation_filter import (
+    CorrelationDecision,
+    CorrelationFilter,
+    CorrelationFilterConfig,
+    PositionExposure,
+    build_correlation_clusters,
+    portfolio_beta_after_add,
+)
 
 __all__ = [
+    "CorrelationDecision",
+    "CorrelationFilter",
+    "CorrelationFilterConfig",
     "PositionSizeDecision",
+    "PositionExposure",
     "PositionSnapshot",
     "PositionSizer",
     "PositionSizerConfig",
@@ -24,4 +36,6 @@ __all__ = [
     "RiskDecision",
     "RiskManager",
     "RiskState",
+    "build_correlation_clusters",
+    "portfolio_beta_after_add",
 ]
