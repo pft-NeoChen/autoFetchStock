@@ -10,12 +10,12 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | V1 重判決首跑 + equity-fix — backfill 完成（22:01，t86=478 / margin=478）；首跑 OOS 19 trades / IS 21 trades 但 max_dd 97% + equal_weight 300% 顯異常；診斷 + 修兩 bug：(1) `_combine_equity` 未 pad inactive stocks (2) 跨 window concat 製造邊界跳變；新增 `_pad_per_stock_equity` + `_chain_window_equities_dollar` helpers；`equal_weight_total_return` 接 `oos_dates` 對齊 OOS 跨期；10 new tests GREEN（7 padding/chain + 3 benchmark）；完整 pytest 639/639 GREEN。重跑後 max_dd 97%→1.52%、equal_weight 300%→179%、oos_is_ratio 0→0.43 — 數字真實化但 verdict 仍 ❌ FAIL（n=19 太小 + universe survivorship bias）|
-| 當前 phase | **V1 §6.1 判決完成（❌ FAIL）** — 數字真實，verdict 反映 universe 偏誤而非策略本質；待下一輪改進 |
+| 上次 session | V1 §6.1 第二次判決（Plan A real-benchmark）— `scripts/run_backtest_v1.py` 接 `compute_benchmarks` 用 0050 作雙 proxy（market_index + etf_total_return），並用 0050 OHLC 作 regime classifier 輸入；加 `load_market_proxy_from_disk` + `benchmark_period_returns` helpers + 4 unit tests；完整 pytest 643/643 GREEN。重跑揭露：0050 兩年 -38% (156→97) 後 OOS 反彈 +67%，universe 39 檔同期 +233% — universe 與 0050 嚴重脫鉤；regime gate 用 0050 → 全 3 OOS window BEAR → 擋下 18/19 訊號，n_trades 19→1；verdict 仍 ❌ FAIL 但暴露真正設計問題：「universe-regime 脫鉤時 gate 變禁止交易開關」 |
+| 當前 phase | **V1 §6.1 第二次判決完成（❌ FAIL）** — Plan A real benchmark wiring DONE；揭露 regime gate 設計缺陷 + universe-market 脫鉤 |
 | 當前 task | — |
-| 下一個建議 task | 三方向擇一：(A) 接含息 weighted_index / 0050 系列 + 真實大盤 OHLC 做 regime proxy（V2 §3.5）(B) 解 universe survivorship bias — 加入 delisted 名單（V2 §0.2 全規則）(C) 放寬 entry 規則或調 chip 門檻以增 n_trades 至 ≥50 |
+| 下一個建議 task | 兩方向擇一：(D) 重思 regime gate 設計 — per-stock regime（個股自己的 MA200）取代 market-wide gate，或放寬 allowed regime（BULL+RANGE），讓 universe-market 脫鉤情境策略仍能運作 (B) 解 universe survivorship bias — 加 delisted 名單（V2 §0.2 全規則）|
 | 全域 blocked | 無 |
-| Pytest 狀態 | equity-fix 10/10 GREEN + 16 既有 orchestrator GREEN；完整 pytest 639/639 GREEN（12 warnings） |
+| Pytest 狀態 | Plan A market proxy 4/4 GREEN；完整 pytest 643/643 GREEN（12 warnings） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/execution/order_router.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
 | Repo 是否乾淨 | main：X01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
@@ -1030,6 +1030,16 @@
   - 2026-05-23 98838b3 | GREEN：DataFreshnessGuard 全實作；16/16 GREEN，完整 pytest 604/604 GREEN | 接 chore mark done
   - 2026-05-23 5285959 | chore：PROGRESS Phase 9 +1 DONE / 總計 35/44 | Phase 9 起步，下一步：等 backfill 完跑 V1 OR 做 X01
 - 2026-05-23 | TASK-X01 | `src/execution/order_router.py` + `src/execution/__init__.py` + 15 unit tests。OrderID/OrderState enum + LiveOrder dataclass (__post_init__ 驗 shares>0 / market 禁 limit_price / limit 要 price) + OrderStatus / Position dataclasses + `OrderRouter` runtime-checkable Protocol + `DryRunRouter` (log-only：submit → unique id `<prefix>-NNNNNN` 並記 _DryRunLogEntry；cancel → terminal state raise；query → UnknownOrderError；positions → 永遠 []) + OrderRouterError / UnknownOrderError。完整 pytest 619/619 GREEN。下一步：等 backfill 完跑 V1 OR 做 X02 (ShioajiSimRouter 需 mock Shioaji)。
+- 2026-05-24 | V1 §6.1 第二次判決（Plan A real-benchmark wiring）|
+  - `scripts/run_backtest_v1.py` 加 `load_market_proxy_from_disk(data_dir, stock_id="0050")` + `benchmark_period_returns(curves, period)` 兩 helpers
+  - `run()` 載入 0050 OHLC 作 market_index + etf_total_return 雙 proxy 餵 `compute_benchmarks`；market_ohlc 也改用 0050（取代 universe-mean）作 regime classifier 輸入
+  - DecisionInput.beats_weighted_index / beats_etf_0050 / oos_alpha 用真實 benchmark period return（取代 placeholder 0.0）
+  - caveats 重寫，明列 universe-market 脫鉤 + regime gate 過嚴
+  - 4 new tests GREEN（load_market_proxy 2 / benchmark_period_returns 2）
+  - 完整 pytest 643/643 GREEN
+  - 重跑結果：n_trades=1（regime gate 擋下 18/19）、total_return -0.09%、benchmark 0050 +67.65% / equal_weight +166.15% / ma_strategy +57.70%
+  - **真正失敗原因**：(1) 0050 兩年 -38% 後反彈 → MA200 還在高位 → close<MA200 → 3 個 OOS window 全 BEAR → 預設 allowed={BULL} 把策略凍結 (2) universe 39 檔小型股與 0050 大型股嚴重脫鉤
+  - 下一步建議 (D)：重思 regime gate — 個股 MA 取代 market-wide，或放寬 allowed = {BULL, RANGE}
 - 2026-05-24 | V1 §6.1 首次正式判決 + equity-fix | backfill 完 + V1 run + 修兩 equity bug：
   - **Backfill 完成**（19:57→22:01，2h04m）：t86=478 / margin=478 / failed=0 / empty=38；3 次 timeout per-endpoint isolation 處理。
   - **V1 首跑** OOS 19 trades / IS 21 trades，**max_dd 97.38% + equal_weight_universe 300% 異常**。診斷出兩 bug：
