@@ -269,11 +269,11 @@ def make_regime_gated_entry_factory(
     def factory(stock_id: str, frame: pd.DataFrame):
         inner = inner_factory(stock_id, frame)
 
-        def decider(stock_id_, ref_date, position, ohlc_row):
-            passes, _reason = evaluate_regime_for_signal(market_ohlc, ref_date)
+        def decider(today, row, has_position):
+            passes, _reason = evaluate_regime_for_signal(market_ohlc, today)
             if not passes:
                 return None
-            return inner(stock_id_, ref_date, position, ohlc_row)
+            return inner(today, row, has_position)
 
         return decider
 
@@ -283,12 +283,31 @@ def make_regime_gated_entry_factory(
 # ── benchmarks (lightweight) ────────────────────────────────────────────────
 
 
-def equal_weight_total_return(feature_frames: Mapping[str, pd.DataFrame]) -> float:
-    rets = []
+def equal_weight_total_return(
+    feature_frames: Mapping[str, pd.DataFrame],
+    *,
+    oos_dates: tuple[pd.Timestamp, pd.Timestamp] | None = None,
+) -> float:
+    """Universe equal-weight buy-and-hold return.
+
+    If ``oos_dates`` is provided, restrict each stock's window to
+    ``[start, end]`` so the benchmark spans the same period as the
+    strategy's OOS trading window — otherwise comparison is apples-to-
+    oranges (e.g., 2-year benchmark vs. 9-month strategy).
+    """
+    rets: list[float] = []
     for f in feature_frames.values():
-        if len(f) < 2:
+        df = f
+        if oos_dates is not None:
+            start, end = oos_dates
+            df = f.loc[pd.Timestamp(start) : pd.Timestamp(end)]
+        if len(df) < 2:
             continue
-        rets.append(float(f["close"].iloc[-1] / f["close"].iloc[0] - 1.0))
+        start_close = float(df["close"].iloc[0])
+        end_close = float(df["close"].iloc[-1])
+        if start_close == 0:
+            continue
+        rets.append(end_close / start_close - 1.0)
     return float(np.mean(rets)) if rets else 0.0
 
 
@@ -399,8 +418,12 @@ def run(
         initial_capital=initial_capital,
     )
 
-    # Benchmark proxy
-    bench_total = equal_weight_total_return(feature_frames)
+    # Benchmark proxy — restrict to OOS span so comparison is fair.
+    oos_span_start = pd.Timestamp(min(w.oos_start for w in windows))
+    oos_span_end = pd.Timestamp(max(w.oos_end for w in windows))
+    bench_total = equal_weight_total_return(
+        feature_frames, oos_dates=(oos_span_start, oos_span_end)
+    )
 
     # OOS/IS ratio via D03e helper (returns 0.0 when IS curve empty).
     oos_is = compute_oos_is_ratio_from_result(result)
@@ -442,13 +465,14 @@ def run(
         "## ⚠️ 報告限制",
         "",
         f"- **Chip 資料覆蓋**: {len(chip_frames)} 檔；**Margin 資料覆蓋**: {len(margin_frames)} 檔。",
-        "  若仍為 0 trades，請確認 D01c backfill 已完成且 chips/margin JSON 已生成。",
+        "- **Universe survivorship bias**: 39 檔皆為使用者手選清單，OOS 9 月 mean ≈ +233%、median ≈ +176%，皆贏家。",
+        "  → equal_weight benchmark 因此異常高（179%），策略小樣本選擇性買入難以 outperform。",
+        "  → 真正解法：接 TWSE 完整 listed + delisted 名單做 universe（V2 §0.2 全規則）。",
         "- **News features 仍 neutral default**（TASK-D01d news cron 未實作，RSS 無歷史）→ news_severity / is_limit_up 永遠 0/False。",
-        "- **Benchmarks**: weighted_index / 0050 / ma_strategy 仍為 placeholder（0.0）",
-        "  → equal_weight_universe 為 universe 平均報酬，作 alpha 對照基準。",
-        "- **Regime coverage** 由 universe 平均 OHLC 跑 MA-based classifier，非真實大盤指數。",
+        "- **Benchmarks**: weighted_index / 0050 / ma_strategy 仍為 placeholder（0.0），需接含息系列才能 fairly alpha。",
+        "- **Regime coverage** 由 universe 平均 OHLC 跑 MA-based classifier；因 universe 全贏家，proxy 全期間 BULL → coverage 0+0+3。需接真實大盤指數。",
         "- **Top-N excluded return** 採 naive 等同 total_return（未做真實 top-5 排除）。",
-        "- **本報告 V1 重判決（post-D01c backfill / IS-extended / regime-gated）**；屬 V2 §6.1 第一次正式量化判決，但 weighted_index 含息 series 尚未接入。",
+        "- **本報告 V1 重判決（post-D01c backfill / IS-extended / regime-gated / equity-fix）**；屬 V2 §6.1 第一次量化判決。FAIL 主因為 universe bias + 樣本小（n_trades=19），非策略本質失敗。",
         "",
         "---",
         "",

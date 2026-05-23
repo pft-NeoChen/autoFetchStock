@@ -80,6 +80,55 @@ def _combine_equity(per_stock: dict[str, pd.Series]) -> pd.Series:
     return combined
 
 
+def _pad_per_stock_equity(
+    *,
+    per_stock: dict[str, pd.Series],
+    universe: list[str],
+    date_index: pd.DatetimeIndex,
+    initial_cash: float,
+) -> pd.DataFrame:
+    """Return DataFrame indexed by ``date_index`` with one column per
+    ``universe`` stock. Active stocks are reindexed and forward-filled
+    from their final known equity; inactive stocks get a flat
+    ``initial_cash`` baseline so the universe-wide combined equity has
+    no artificial dips on dates where some stocks haven't traded yet.
+    """
+    cols: dict[str, pd.Series] = {}
+    for sid in universe:
+        eq = per_stock.get(sid)
+        if eq is None or eq.empty:
+            cols[sid] = pd.Series(initial_cash, index=date_index, name=sid)
+            continue
+        reindexed = eq.reindex(date_index)
+        # Forward-fill after last known; back-fill at the start with initial_cash.
+        reindexed = reindexed.ffill().fillna(initial_cash)
+        reindexed.name = sid
+        cols[sid] = reindexed
+    return pd.DataFrame(cols)
+
+
+def _chain_window_equities_dollar(segments: list[pd.Series]) -> pd.Series:
+    """Concatenate window-level equity curves, shifting each successive
+    segment so it starts where the previous one ended. Preserves dollar
+    scale and removes the boundary jump caused by each window's engine
+    resetting to initial cash.
+    """
+    nonempty = [s for s in segments if not s.empty]
+    if not nonempty:
+        return pd.Series(dtype=float, name="combined_equity")
+
+    out: list[pd.Series] = [nonempty[0]]
+    offset = float(nonempty[0].iloc[-1])
+    for seg in nonempty[1:]:
+        shift = offset - float(seg.iloc[0])
+        shifted = seg + shift
+        out.append(shifted)
+        offset = float(shifted.iloc[-1])
+    chained = pd.concat(out)
+    chained.name = "combined_equity"
+    return chained
+
+
 def _run_slice(
     *,
     universe: list[str],
@@ -127,6 +176,30 @@ def run_walk_forward_backtest(
     all_trades: list[Trade] = []
     is_all_trades: list[Trade] = []
 
+    def _padded_combined(
+        per_stock: dict[str, pd.Series], slice_fn
+    ) -> pd.Series:
+        if per_stock:
+            date_index = pd.concat(per_stock.values(), axis=1).index.sort_values()
+        else:
+            date_index = pd.DatetimeIndex([])
+            for f in feature_frames.values():
+                sliced_idx = slice_fn(f).index
+                if not sliced_idx.empty:
+                    date_index = sliced_idx
+                    break
+        if date_index.empty:
+            return _empty_equity("combined_equity")
+        padded = _pad_per_stock_equity(
+            per_stock=per_stock,
+            universe=universe,
+            date_index=date_index,
+            initial_cash=initial_cash_per_stock,
+        )
+        combined = padded.sum(axis=1)
+        combined.name = "combined_equity"
+        return combined
+
     for window in windows:
         oos_trades, oos_equity = _run_slice(
             universe=universe,
@@ -148,7 +221,9 @@ def run_walk_forward_backtest(
                 entry_decider_factory=entry_decider_factory,
                 exit_decider_factory=exit_decider_factory,
             )
-            is_combined = _combine_equity(is_equity)
+            is_combined = _padded_combined(
+                is_equity, lambda f, w=window: _slice_is(f, w)
+            )
             is_combined.name = "is_combined_equity"
         else:
             is_combined = _empty_equity("is_combined_equity")
@@ -158,7 +233,9 @@ def run_walk_forward_backtest(
                 window=window,
                 trades=oos_trades,
                 per_stock_equity=oos_equity,
-                combined_equity=_combine_equity(oos_equity),
+                combined_equity=_padded_combined(
+                    oos_equity, lambda f, w=window: _slice_oos(f, w)
+                ),
                 is_trades=is_trades,
                 is_per_stock_equity=is_equity,
                 is_combined_equity=is_combined,
@@ -167,13 +244,13 @@ def run_walk_forward_backtest(
         all_trades.extend(oos_trades)
         is_all_trades.extend(is_trades)
 
-    combined_across_windows = (
-        pd.concat([wr.combined_equity for wr in window_results])
-        if window_results
-        else _empty_equity("combined_equity")
+    combined_across_windows = _chain_window_equities_dollar(
+        [wr.combined_equity for wr in window_results]
     )
     if include_is and window_results:
-        is_combined_across = pd.concat([wr.is_combined_equity for wr in window_results])
+        is_combined_across = _chain_window_equities_dollar(
+            [wr.is_combined_equity for wr in window_results]
+        )
         is_combined_across.name = "is_combined_equity"
     else:
         is_combined_across = _empty_equity("is_combined_equity")
