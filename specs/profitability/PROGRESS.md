@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | Phase 5 J01 TradeJournal — 7 tests GREEN；完整 pytest 521/521 GREEN |
-| 當前 phase | **Phase 5 進行中**（J01 DONE，下一步 J02 SignalLog） |
+| 上次 session | Phase 5 J02 SignalLog — 7 tests GREEN；完整 pytest 528/528 GREEN |
+| 當前 phase | **Phase 5 進行中**（J01 + J02 DONE，下一步 J03 Performance metrics） |
 | 當前 task | — |
-| 下一個建議 task | **TASK-J02 SignalLog** **或** 先補 chip/news data backfill 再做 V1 正式判決 |
+| 下一個建議 task | **TASK-J03 Performance metrics** **或** 先補 chip/news data backfill 再做 V1 正式判決 |
 | 全域 blocked | 無 |
-| Pytest 狀態 | J01 7/7 GREEN；journal+backtest related 66/66 GREEN；完整 pytest 521/521 GREEN（12 warnings） |
+| Pytest 狀態 | J02 7/7 GREEN；journal+portfolio+signals related 79/79 GREEN；完整 pytest 528/528 GREEN（12 warnings） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer}.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
-| Repo 是否乾淨 | main：J01 已 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
+| Repo 是否乾淨 | main：J02 已 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
 ---
 
@@ -30,13 +30,13 @@
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
 | 3 — Backtester | 8 | 8 | 0 | 0 | 1 |
 | 4 — Risk + Sizing | 2 | 2 | 0 | 0 | 0 |
-| 5 — Journal + Perf | 3 | 1 | 0 | 2 | 0 |
+| 5 — Journal + Perf | 3 | 2 | 0 | 1 | 0 |
 | 6 — Portfolio | 2 | 0 | 0 | 2 | 0 |
 | 7 — UI | 1 | 0 | 0 | 1 | 0 |
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **41** | **28** | **0** | **12** | **1** |
+| **總計** | **41** | **29** | **0** | **11** | **1** |
 
 ---
 
@@ -119,6 +119,7 @@
 - 2026-05-23 | TASK-R02 | 26ef190 (RED) + cfb00a7 (GREEN)：`src/portfolio/position_sizer.py` + 8 unit tests。實作 vol-target（20 日波動年化反推部位）與 ATR-based（risk budget / k×ATR）兩種 sizing，支援 lot rounding、max notional cap、RiskManager multiplier、Feature row adapter，並拒絕 Kelly；相關 suite 61/61 GREEN。完整 pytest 仍受本機 Python 缺 `scipy` 影響無法 collection。Phase 4 完成，下一 session 接 TASK-J01。
 - 2026-05-23 | full pytest fix | 1951947：安裝目前 pytest Python 環境的 scipy，補 `requirements.txt`；修 MarketStrip className 與 ShioajiFetcher lightweight test instance lazy state；完整 pytest 514/514 GREEN。
 - 2026-05-23 | TASK-J01 | 13585a6 (RED) + c1c7563 (GREEN)：`src/journal/trade_journal.py` + 7 unit tests。實作 append-only JSONL TradeJournal、TradeJournalEntry、FillSnapshot、CostBreakdown、CashLedgerEntry、from_backtest_trade、list/filter/summary；完整 pytest 521/521 GREEN。下一 session 接 TASK-J02。
+- 2026-05-23 | TASK-J02 | e90df41 (RED) + c4a4f60 (GREEN)：`src/journal/signal_log.py` + 7 unit tests。實作 append-only JSONL SignalLog、SignalLogEntry、from_signal、entered/filtered 狀態、filter reasons、RiskDecision snapshot、list filter、summary；完整 pytest 528/528 GREEN。下一 session 接 TASK-J03。
 
 ---
 
@@ -749,16 +750,25 @@
 
 - **Name**: SignalLog（含未進場）
 - **Source**: V2 §5.2
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: TASK-R01
-- **Files (planned)**:
-  - `src/journal/signal_log.py`
-  - `tests/test_journal/test_signal_log.py`
-- **Acceptance**: 訊號 + 是否進場 + 過濾原因
-- **Tests (RED list)**: ≥ 5 項
-- **DoD**: GREEN
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Files**:
+  - `src/journal/signal_log.py` ✅
+  - `tests/test_journal/test_signal_log.py` ✅（7 tests）
+- **Acceptance**: 訊號 + 是否進場 + 過濾原因 ✅；含 RiskDecision snapshot / linked trade id / summary ✅
+- **Tests (RED list)**: 7 項 全 GREEN
+  - 記錄 signal snapshot + entered state ✅
+  - blocked signal 記錄 filter reasons + risk decision ✅
+  - JSON dict roundtrip ✅
+  - append-only JSONL record ✅
+  - stock_id / entered filters ✅
+  - summary counts + reason histogram ✅
+  - from_signal + RiskDecision 建 blocked entry ✅
+- **DoD**: J02 7/7 GREEN；journal+portfolio+signals related 79/79 GREEN；完整 pytest 528/528 GREEN
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 e90df41 | RED：新增 7 個 SignalLog 測試，因 `src.journal.signal_log` 尚未存在而 fail | 接 GREEN
+  - 2026-05-23 c4a4f60 | GREEN：實作 SignalLogEntry + append-only JSONL + filtering + summary；完整 pytest 528/528 GREEN | 接 TASK-J03
 
 ### TASK-J03
 
