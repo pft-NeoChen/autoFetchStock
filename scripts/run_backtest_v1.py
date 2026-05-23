@@ -37,7 +37,7 @@ from src.backtest.adapters.signal_adapter import (
     make_exit_decider,
 )
 from src.backtest.benchmark import compute_benchmarks
-from src.backtest.regime_classifier import count_regime_coverage
+from src.backtest.regime_classifier import Regime, count_regime_coverage
 from src.backtest.walk_forward import walk_forward_windows
 from src.backtest.walk_orchestrator import (
     compute_oos_is_ratio_from_result,
@@ -54,7 +54,7 @@ from src.journal.backtest_report import render_backtest_report
 from src.journal.decision import DecisionInput, evaluate_v2_thresholds
 from src.journal.experiment_registry import ExperimentRegistry
 from src.journal.performance import summarize_performance
-from src.signals.rules.regime_gate import evaluate_regime_for_signal
+from src.signals.rules.regime_gate import RegimeGateConfig, evaluate_regime_for_signal
 
 logger = logging.getLogger("autofetchstock.scripts.backtest_v1")
 
@@ -312,21 +312,61 @@ def build_market_ohlc_proxy(
 # ── regime-gated entry ──────────────────────────────────────────────────────
 
 
+def make_per_stock_regime_gated_entry_factory(
+    *,
+    inner_factory: callable,
+    feature_frames: Mapping[str, pd.DataFrame],
+    config: RegimeGateConfig | None = None,
+):
+    """Per-stock regime gate.
+
+    Each stock's own OHLC is used as the regime classifier input — so a
+    small-cap winner decoupled from a broad-market index (0050) is still
+    free to trade when its own MA200 trend is up.
+
+    This addresses the Plan A finding that a market-wide gate killed the
+    strategy when the universe and the market proxy decoupled.
+    """
+    cfg = config or RegimeGateConfig()
+
+    def factory(stock_id: str, frame: pd.DataFrame):
+        inner = inner_factory(stock_id, frame)
+        stock_ohlc = feature_frames.get(stock_id)
+
+        def decider(today, row, has_position):
+            if stock_ohlc is None or stock_ohlc.empty:
+                return None
+            passes, _reason = evaluate_regime_for_signal(stock_ohlc, today, cfg)
+            if not passes:
+                return None
+            return inner(today, row, has_position)
+
+        return decider
+
+    return factory
+
+
 def make_regime_gated_entry_factory(
     *,
     inner_factory: callable,
     market_ohlc: pd.DataFrame,
+    config: RegimeGateConfig | None = None,
 ):
     """Wrap an entry-decider factory so each decision first checks regime.
 
-    BEAR / RANGE / unknown → short-circuit return (no signal) without
-    invoking the inner decider. BULL → delegate to inner.
+    ``config`` (default ``RegimeGateConfig()`` → allowed={BULL}) controls
+    which regimes pass through. Pass a widened allowed set when the
+    universe is decoupled from the market_index proxy (e.g. small-cap
+    universe vs 0050) — otherwise the gate becomes a hard-off switch
+    during regime mislabels.
     """
+    cfg = config or RegimeGateConfig()
+
     def factory(stock_id: str, frame: pd.DataFrame):
         inner = inner_factory(stock_id, frame)
 
         def decider(today, row, has_position):
-            passes, _reason = evaluate_regime_for_signal(market_ohlc, today)
+            passes, _reason = evaluate_regime_for_signal(market_ohlc, today, cfg)
             if not passes:
                 return None
             return inner(today, row, has_position)
@@ -439,9 +479,19 @@ def run(
             target_shares=target_shares,
         )
 
-    entry_factory = make_regime_gated_entry_factory(
+    # Plan D: per-stock regime gate. Market-wide gate using 0050 froze the
+    # strategy when 0050 (large-cap proxy) and the universe (small caps)
+    # decoupled — see analysis/backtest_v1_report.md Plan-A caveats.
+    # Each stock now gates by its own MA200/MA50 trend; {BULL, RANGE} is
+    # the allowed set so flat consolidations still trade, only clear
+    # individual-stock downtrends are skipped.
+    regime_cfg = RegimeGateConfig(
+        allowed=frozenset({Regime.BULL, Regime.RANGE})
+    )
+    entry_factory = make_per_stock_regime_gated_entry_factory(
         inner_factory=base_entry_factory,
-        market_ohlc=market_ohlc,
+        feature_frames=feature_frames,
+        config=regime_cfg,
     )
 
     def exit_factory(stock_id: str, frame: pd.DataFrame):
@@ -562,12 +612,12 @@ def run(
         "- **Universe vs market 脫鉤**: 39 檔小型股 OOS 9mo mean ≈ +233%；同期 0050 兩年 -38% 後 OOS 反彈 +67%。",
         "  → universe 大幅 outperform 0050 → equal_weight 166% vs 0050 67%。survivorship bias + 大小盤脫鉤雙重影響。",
         "  → 真正解法：接 TWSE 完整 listed + delisted 名單做 universe（V2 §0.2 全規則）。",
-        "- **Regime gate 過嚴**: 改用 0050 OHLC 作 regime classifier 後，OOS 期間 0050 close<MA200 → 全 3 個 OOS window labeled BEAR → gate 擋下 18/19 訊號，剩 1 trade。",
-        "  → 當策略 universe 與 regime proxy 脫鉤時，gate 變成「禁止交易」開關。需重思 gate 設計（per-stock regime?或放寬 allowed regime?）。",
+        "- **Regime gate（Plan D）**: 改用 **per-stock regime**（每檔自己的 MA50/MA200）+ allowed={BULL, RANGE}；取代原市場 wide gate（0050）。修正 Plan A 「universe-market 脫鉤時 gate 變禁止交易」的 bug。",
+        "  → market-wide regime_coverage 仍取 0050 OHLC（V2 §6.1 是評估 backtest 跨 regime 多樣性，與 trade 開閘無關）。",
         "- **News features 仍 neutral default**（TASK-D01d news cron 未實作，RSS 無歷史）→ news_severity / is_limit_up 永遠 0/False。",
         "- **Benchmarks**: weighted_index / etf_total_return 兩槽位皆用 **0050 raw OHLC 作 proxy**（含息 IR0003 backfill 未做；0050 也未做 dividend adjustment）→ price-only 近似。",
         "- **Top-N excluded return** 採 naive 等同 total_return（未做真實 top-5 排除）。",
-        "- **本報告 V1 重判決（post-D01c backfill / IS-extended / regime-gated / equity-fix / real-benchmark）**；屬 V2 §6.1 第二次量化判決。FAIL 主因為 universe-regime 脫鉤導致 n_trades=1，需重設計 regime gate 或 universe 選擇。",
+        "- **本報告 V1 §6.1 第三次量化判決（post equity-fix / real-benchmark / per-stock regime gate）**。剩餘 FAIL 主因：(1) n_trades 仍 < 50（資料 span 僅 2 年 × 39 檔，OOS 9mo 內訊號自然有限）(2) universe survivorship bias 推高 benchmark (3) 0050 OOS 全 BEAR → regime_coverage 不滿足 1+1+1。",
         "",
         "---",
         "",
