@@ -91,11 +91,11 @@ def test_include_is_runs_engine_on_is_slice(monkeypatch) -> None:
 
             equity = pd.Series([self.initial_cash] * len(ohlc_df), index=ohlc_df.index)
             return BacktestResult(
-                stock_id=stock_id,
                 trades=[],
                 equity_curve=equity,
                 cash_curve=equity.copy(),
                 final_equity=float(self.initial_cash),
+                final_cash=float(self.initial_cash),
             )
 
     monkeypatch.setattr("src.backtest.walk_orchestrator.BacktestEngine", _RecordingEngine)
@@ -136,16 +136,16 @@ def test_include_is_populates_aggregate_fields(monkeypatch) -> None:
 
     fake_trade = Trade(
         stock_id="2330",
-        signal_ts=pd.Timestamp(date(2024, 1, 5)),
-        entry_ts=pd.Timestamp(date(2024, 1, 6)),
-        exit_ts=pd.Timestamp(date(2024, 1, 12)),
+        entry_date=date(2024, 1, 6),
         entry_price=100.0,
+        exit_date=date(2024, 1, 12),
         exit_price=101.0,
         shares=1000,
         pnl=500.0,
-        costs={},
-        cash_ledger=[],
-        exit_reason="time_stop",
+        pnl_pct=0.01,
+        fees=100.0,
+        tax=30.0,
+        reason="time_stop",
     )
 
     class _StubEngine:
@@ -155,11 +155,11 @@ def test_include_is_populates_aggregate_fields(monkeypatch) -> None:
         def run(self, *, stock_id, ohlc_df):
             equity = pd.Series([float(self.initial_cash)] * len(ohlc_df), index=ohlc_df.index)
             return BacktestResult(
-                stock_id=stock_id,
                 trades=[fake_trade],
                 equity_curve=equity,
                 cash_curve=equity.copy(),
                 final_equity=float(self.initial_cash),
+                final_cash=float(self.initial_cash),
             )
 
     monkeypatch.setattr("src.backtest.walk_orchestrator.BacktestEngine", _StubEngine)
@@ -199,24 +199,24 @@ def test_include_is_does_not_pollute_oos_trades(monkeypatch) -> None:
         counter["n"] += 1
         trade = Trade(
             stock_id=stock_id,
-            signal_ts=ohlc_df.index[0],
-            entry_ts=ohlc_df.index[0],
-            exit_ts=ohlc_df.index[-1],
+            entry_date=ohlc_df.index[0].date(),
             entry_price=100.0,
+            exit_date=ohlc_df.index[-1].date(),
             exit_price=101.0,
             shares=1000,
             pnl=float(counter["n"]),
-            costs={},
-            cash_ledger=[],
-            exit_reason="time_stop",
+            pnl_pct=0.01,
+            fees=100.0,
+            tax=30.0,
+            reason="time_stop",
         )
         equity = pd.Series([100_000.0] * len(ohlc_df), index=ohlc_df.index)
         return BacktestResult(
-            stock_id=stock_id,
             trades=[trade],
             equity_curve=equity,
             cash_curve=equity.copy(),
             final_equity=100_000.0,
+            final_cash=100_000.0,
         )
 
     from src.backtest import engine as engine_mod
