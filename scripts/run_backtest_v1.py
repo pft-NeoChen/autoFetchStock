@@ -36,6 +36,7 @@ from src.backtest.adapters.signal_adapter import (
     make_entry_decider,
     make_exit_decider,
 )
+from src.backtest.benchmark import compute_benchmarks
 from src.backtest.regime_classifier import count_regime_coverage
 from src.backtest.walk_forward import walk_forward_windows
 from src.backtest.walk_orchestrator import (
@@ -94,6 +95,61 @@ def _parse_yyyymmdd(stem: str) -> pd.Timestamp | None:
         return pd.Timestamp(f"{stem[:4]}-{stem[4:6]}-{stem[6:8]}")
     except ValueError:
         return None
+
+
+def load_market_proxy_from_disk(
+    data_dir: Path, *, stock_id: str = "0050"
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Load a single stock's OHLC as market-index proxy.
+
+    Until IR0003 (加權報酬指數含息) backfill lands, 0050 raw price serves as
+    both ``market_index`` and ``etf_total_return`` proxies for
+    :func:`compute_benchmarks`. Returns ``(ohlc_df, close_series)``;
+    missing file → ``(empty df, empty series)``.
+    """
+    path = data_dir / "stocks" / f"{stock_id}.json"
+    empty_cols = ["open", "high", "low", "close", "volume"]
+    if not path.exists():
+        return pd.DataFrame(columns=empty_cols), pd.Series(dtype=float)
+    try:
+        payload = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return pd.DataFrame(columns=empty_cols), pd.Series(dtype=float)
+    rows = payload.get("daily_data", [])
+    if not rows:
+        return pd.DataFrame(columns=empty_cols), pd.Series(dtype=float)
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date").sort_index()
+    for col in empty_cols:
+        if col not in df.columns:
+            df[col] = float("nan")
+    df = df[empty_cols].astype(float)
+    return df, df["close"].copy()
+
+
+def benchmark_period_returns(
+    curves: Mapping[str, pd.Series],
+    *,
+    period: tuple[pd.Timestamp, pd.Timestamp],
+) -> dict[str, float]:
+    """Slice each cumulative curve to ``[start, end]`` and compute period
+    return = end / start - 1. Empty / single-point curves → 0.0.
+    """
+    start, end = period
+    out: dict[str, float] = {}
+    for name, curve in curves.items():
+        if curve is None or curve.empty:
+            out[name] = 0.0
+            continue
+        sliced = curve.loc[pd.Timestamp(start) : pd.Timestamp(end)]
+        if len(sliced) < 2:
+            out[name] = 0.0
+            continue
+        first = float(sliced.iloc[0])
+        last = float(sliced.iloc[-1])
+        out[name] = (last / first - 1.0) if first != 0 else 0.0
+    return out
 
 
 def load_chip_frames(data_dir: Path) -> dict[str, pd.DataFrame]:
@@ -342,7 +398,18 @@ def run(
     }
     feature_frames = {sid: f for sid, f in feature_frames.items() if not f.empty}
     market_state = build_market_state(feature_frames)
-    market_ohlc = build_market_ohlc_proxy(feature_frames)
+
+    # 0050 OHLC as proxy for market_index AND etf_total_return (price-only;
+    # IR0003 含息 backfill not yet done — see caveats).
+    market_proxy_ohlc, etf_close = load_market_proxy_from_disk(data_dir, stock_id="0050")
+    if not market_proxy_ohlc.empty:
+        market_ohlc = market_proxy_ohlc
+        logger.info("using 0050 as market_index / regime proxy (%d rows)",
+                    len(market_proxy_ohlc))
+    else:
+        # Fallback to universe-mean proxy if 0050 unavailable.
+        market_ohlc = build_market_ohlc_proxy(feature_frames)
+        logger.warning("0050 unavailable — falling back to universe-mean market proxy")
 
     all_idx = sorted({ts for f in feature_frames.values() for ts in f.index})
     if not all_idx:
@@ -418,12 +485,39 @@ def run(
         initial_capital=initial_capital,
     )
 
-    # Benchmark proxy — restrict to OOS span so comparison is fair.
     oos_span_start = pd.Timestamp(min(w.oos_start for w in windows))
     oos_span_end = pd.Timestamp(max(w.oos_end for w in windows))
-    bench_total = equal_weight_total_return(
-        feature_frames, oos_dates=(oos_span_start, oos_span_end)
-    )
+
+    # Real benchmark curves via compute_benchmarks (when market proxy present).
+    benchmark_curves: dict[str, pd.Series] = {}
+    bench_returns: dict[str, float] = {
+        "weighted_index": 0.0,
+        "etf_total_return": 0.0,
+        "equal_weight_universe": 0.0,
+        "ma_strategy": 0.0,
+        "cash": 0.0,
+    }
+    if not market_proxy_ohlc.empty and not etf_close.empty:
+        try:
+            benchmark_curves = compute_benchmarks(
+                market_index=market_proxy_ohlc,
+                etf_total_return=etf_close,
+                universe_daily=ohlc_frames,
+            )
+            bench_returns = benchmark_period_returns(
+                benchmark_curves, period=(oos_span_start, oos_span_end)
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("compute_benchmarks failed: %s — using fallbacks", exc)
+
+    # Equal-weight fallback (in case compute_benchmarks 不可用).
+    if bench_returns["equal_weight_universe"] == 0.0:
+        bench_returns["equal_weight_universe"] = equal_weight_total_return(
+            feature_frames, oos_dates=(oos_span_start, oos_span_end)
+        )
+
+    weighted_idx_ret = bench_returns["weighted_index"]
+    etf_ret = bench_returns["etf_total_return"]
 
     # OOS/IS ratio via D03e helper (returns 0.0 when IS curve empty).
     oos_is = compute_oos_is_ratio_from_result(result)
@@ -436,9 +530,9 @@ def run(
         metrics=metrics,
         oos_is_ratio=oos_is,
         top5_excluded_return=metrics.total_return,  # naive — pending top-N exclusion
-        beats_weighted_index=metrics.total_return > bench_total,
-        beats_etf_0050=metrics.total_return > bench_total,
-        oos_alpha=metrics.total_return - bench_total,
+        beats_weighted_index=metrics.total_return > weighted_idx_ret,
+        beats_etf_0050=metrics.total_return > etf_ret,
+        oos_alpha=metrics.total_return - weighted_idx_ret,
         regime_coverage_bull=coverage.bull,
         regime_coverage_bear=coverage.bear,
         regime_coverage_range=coverage.range,
@@ -448,11 +542,11 @@ def run(
     md = render_backtest_report(
         metrics=metrics,
         benchmarks_table={
-            "weighted_index (placeholder)": 0.0,
-            "etf_0050 (placeholder)": 0.0,
-            "equal_weight_universe": bench_total,
-            "ma_strategy (placeholder)": 0.0,
-            "cash": 0.0,
+            "weighted_index (0050 proxy)": bench_returns["weighted_index"],
+            "etf_total_return (0050 proxy)": bench_returns["etf_total_return"],
+            "equal_weight_universe": bench_returns["equal_weight_universe"],
+            "ma_strategy (on 0050)": bench_returns["ma_strategy"],
+            "cash": bench_returns["cash"],
         },
         decision=decision,
         manifest={**manifest, "n_trades": metrics.n_trades,
@@ -465,14 +559,15 @@ def run(
         "## ⚠️ 報告限制",
         "",
         f"- **Chip 資料覆蓋**: {len(chip_frames)} 檔；**Margin 資料覆蓋**: {len(margin_frames)} 檔。",
-        "- **Universe survivorship bias**: 39 檔皆為使用者手選清單，OOS 9 月 mean ≈ +233%、median ≈ +176%，皆贏家。",
-        "  → equal_weight benchmark 因此異常高（179%），策略小樣本選擇性買入難以 outperform。",
+        "- **Universe vs market 脫鉤**: 39 檔小型股 OOS 9mo mean ≈ +233%；同期 0050 兩年 -38% 後 OOS 反彈 +67%。",
+        "  → universe 大幅 outperform 0050 → equal_weight 166% vs 0050 67%。survivorship bias + 大小盤脫鉤雙重影響。",
         "  → 真正解法：接 TWSE 完整 listed + delisted 名單做 universe（V2 §0.2 全規則）。",
+        "- **Regime gate 過嚴**: 改用 0050 OHLC 作 regime classifier 後，OOS 期間 0050 close<MA200 → 全 3 個 OOS window labeled BEAR → gate 擋下 18/19 訊號，剩 1 trade。",
+        "  → 當策略 universe 與 regime proxy 脫鉤時，gate 變成「禁止交易」開關。需重思 gate 設計（per-stock regime?或放寬 allowed regime?）。",
         "- **News features 仍 neutral default**（TASK-D01d news cron 未實作，RSS 無歷史）→ news_severity / is_limit_up 永遠 0/False。",
-        "- **Benchmarks**: weighted_index / 0050 / ma_strategy 仍為 placeholder（0.0），需接含息系列才能 fairly alpha。",
-        "- **Regime coverage** 由 universe 平均 OHLC 跑 MA-based classifier；因 universe 全贏家，proxy 全期間 BULL → coverage 0+0+3。需接真實大盤指數。",
+        "- **Benchmarks**: weighted_index / etf_total_return 兩槽位皆用 **0050 raw OHLC 作 proxy**（含息 IR0003 backfill 未做；0050 也未做 dividend adjustment）→ price-only 近似。",
         "- **Top-N excluded return** 採 naive 等同 total_return（未做真實 top-5 排除）。",
-        "- **本報告 V1 重判決（post-D01c backfill / IS-extended / regime-gated / equity-fix）**；屬 V2 §6.1 第一次量化判決。FAIL 主因為 universe bias + 樣本小（n_trades=19），非策略本質失敗。",
+        "- **本報告 V1 重判決（post-D01c backfill / IS-extended / regime-gated / equity-fix / real-benchmark）**；屬 V2 §6.1 第二次量化判決。FAIL 主因為 universe-regime 脫鉤導致 n_trades=1，需重設計 regime gate 或 universe 選擇。",
         "",
         "---",
         "",
