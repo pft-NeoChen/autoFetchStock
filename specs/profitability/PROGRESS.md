@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | Phase 5 J02 SignalLog — 7 tests GREEN；完整 pytest 528/528 GREEN |
-| 當前 phase | **Phase 5 進行中**（J01 + J02 DONE，下一步 J03 Performance metrics） |
+| 上次 session | Phase 5 J03 Performance metrics — 25 tests GREEN；完整 pytest 535/535 GREEN |
+| 當前 phase | **Phase 5 完成 ✅**（J01 TradeJournal + J02 SignalLog + J03 Performance metrics） |
 | 當前 task | — |
-| 下一個建議 task | **TASK-J03 Performance metrics** **或** 先補 chip/news data backfill 再做 V1 正式判決 |
+| 下一個建議 task | **TASK-R03 Correlation Filter** **或** 先補 chip/news data backfill 再做 V1 正式判決 |
 | 全域 blocked | 無 |
-| Pytest 狀態 | J02 7/7 GREEN；journal+portfolio+signals related 79/79 GREEN；完整 pytest 528/528 GREEN（12 warnings） |
+| Pytest 狀態 | J03 25/25 GREEN；journal+backtest related 80/80 GREEN；完整 pytest 535/535 GREEN（12 warnings） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer}.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
-| Repo 是否乾淨 | main：J02 已 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
+| Repo 是否乾淨 | main：J03 已 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
 ---
 
@@ -30,13 +30,13 @@
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
 | 3 — Backtester | 8 | 8 | 0 | 0 | 1 |
 | 4 — Risk + Sizing | 2 | 2 | 0 | 0 | 0 |
-| 5 — Journal + Perf | 3 | 2 | 0 | 1 | 0 |
+| 5 — Journal + Perf | 3 | 3 | 0 | 0 | 0 |
 | 6 — Portfolio | 2 | 0 | 0 | 2 | 0 |
 | 7 — UI | 1 | 0 | 0 | 1 | 0 |
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **41** | **29** | **0** | **11** | **1** |
+| **總計** | **41** | **30** | **0** | **10** | **1** |
 
 ---
 
@@ -120,6 +120,7 @@
 - 2026-05-23 | full pytest fix | 1951947：安裝目前 pytest Python 環境的 scipy，補 `requirements.txt`；修 MarketStrip className 與 ShioajiFetcher lightweight test instance lazy state；完整 pytest 514/514 GREEN。
 - 2026-05-23 | TASK-J01 | 13585a6 (RED) + c1c7563 (GREEN)：`src/journal/trade_journal.py` + 7 unit tests。實作 append-only JSONL TradeJournal、TradeJournalEntry、FillSnapshot、CostBreakdown、CashLedgerEntry、from_backtest_trade、list/filter/summary；完整 pytest 521/521 GREEN。下一 session 接 TASK-J02。
 - 2026-05-23 | TASK-J02 | e90df41 (RED) + c4a4f60 (GREEN)：`src/journal/signal_log.py` + 7 unit tests。實作 append-only JSONL SignalLog、SignalLogEntry、from_signal、entered/filtered 狀態、filter reasons、RiskDecision snapshot、list filter、summary；完整 pytest 528/528 GREEN。下一 session 接 TASK-J03。
+- 2026-05-23 | TASK-J03 | 7b241ae (RED) + b4e1f95 (GREEN)：`src/journal/performance.py` + tests/test_journal/test_performance.py 擴充至 25 tests。補平均盈虧比、OOS/IS ratio、Top-N excluded return、benchmark alpha、render_performance_report；完整 pytest 535/535 GREEN。Phase 5 完成，下一 session 接 TASK-R03。
 
 ---
 
@@ -774,16 +775,23 @@
 
 - **Name**: Performance metrics
 - **Source**: V2 §5.3
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: TASK-J01
-- **Files (planned)**:
-  - `src/journal/performance.py`
-  - `tests/test_journal/test_performance.py`
-- **Acceptance**: 全指標 + benchmark alpha + turnover
-- **Tests (RED list)**: ≥ 10 項
-- **DoD**: 輸出 markdown 報告
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Files**:
+  - `src/journal/performance.py` ✅
+  - `tests/test_journal/test_performance.py` ✅（25 tests）
+- **Acceptance**: 全指標 + benchmark alpha + turnover ✅；輸出 markdown 報告 ✅
+- **Tests (RED list)**: 25 項 全 GREEN
+  - total_return / sharpe / sortino / max_drawdown ✅
+  - win_rate / profit_factor / expectancy_bp / turnover ✅
+  - average_win_loss_ratio / oos_is_ratio / top_n_excluded_return / benchmark_alpha ✅
+  - summarize_performance extended metrics ✅
+  - render_performance_report markdown ✅
+- **DoD**: J03 25/25 GREEN；journal+backtest related 80/80 GREEN；完整 pytest 535/535 GREEN
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 7b241ae | RED：補 J03 擴充指標 + markdown report 測試，缺 performance API 而 fail | 接 GREEN
+  - 2026-05-23 b4e1f95 | GREEN：補平均盈虧比、OOS/IS、Top-N excluded return、benchmark alpha、performance report；完整 pytest 535/535 GREEN | Phase 5 DONE，接 TASK-R03
 
 ---
 
