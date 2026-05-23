@@ -10,12 +10,12 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | V1 §6.1 第三次判決（Plan D per-stock regime gate）— `make_per_stock_regime_gated_entry_factory` 新 helper（每股自己 OHLC 做 regime classifier）+ `make_regime_gated_entry_factory` 加 config kwarg + `run()` 切到 per-stock + allowed={BULL,RANGE}；5 new tests (3 widened-config + 2 per-stock)；完整 pytest 648/648 GREEN。重跑：n_trades 1→17、total_return -0.09%→+0.28%、max_dd 0.74%→1.06%、expectancy_bp PASS；regime_gate 設計問題解決，策略可正常運作；剩餘 FAIL 為 n_trades<50 + universe bias + 0050 OOS 全 BEAR（regime_coverage 1+1+1 仍缺）|
-| 當前 phase | **V1 §6.1 第三次判決完成（❌ FAIL）** — gate 設計修正；剩餘問題屬資料 / universe 範疇 |
+| 上次 session | V1 §6.1 第四次判決（Plan E 4yr backfill）+ benchmark warnings cleanup + top5 真實計算 — 完成 daily+chip 4yr backfill chain（02:00→04:00，補 487 t86 / 486 margin / 1032 月 / 19337 records）；V1 重跑 11 windows，OOS 43 trades / IS 139 trades；**5/10 checks PASS**（首次 beats_benchmarks ✅ + oos_alpha ✅）；剩餘 FAIL 屬策略品質範疇（sharpe -0.11 / oos_is_ratio -0.28 / top5_excluded -0.47% / regime_coverage 7+4+0 缺 RANGE / n_trades 43 < 50）。需 V2 spec drift 才能繼續突破，待 user 批准。 |
+| 當前 phase | **V1 §6.1 第四次判決完成（❌ FAIL，但 5/10 PASS）** — 自動推進階段告一段落，等 user 對 V2 修訂候選決定 |
 | 當前 task | — |
-| 下一個建議 task | 兩方向擇一：(B) 解 universe survivorship bias — TWSE 完整 listed + delisted 名單（V2 §0.2 全規則），需找歷史下市資料源；(E) 擴 data span 至 ≥ 3 年覆蓋 BULL+BEAR+RANGE 三段（需 D01b 再跑 2 年）|
-| 全域 blocked | 無 |
-| Pytest 狀態 | Plan D config + per-stock 5/5 GREEN；完整 pytest 648/648 GREEN（12 warnings） |
+| 下一個建議 task | 等 user 批准下列 V2 修訂候選之一：(R1) 移除 long_entry rule `market_above_ma60` 冗餘條件（per-stock regime gate 已 cover）(R2) RegimeGateConfig default 改 `{BULL, RANGE}`（V 字底 BULL 嚴格定義易誤判）(R3) 加入 sideways/range universe（非贏家集中）解 survivorship bias|
+| 全域 blocked | 等 user 批准 V2 修訂候選後續推進 |
+| Pytest 狀態 | 完整 pytest 648/648 GREEN（FutureWarnings cleaned，剩 env-level urllib3/scipy） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/execution/order_router.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
 | Repo 是否乾淨 | main：X01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
@@ -43,6 +43,22 @@
 ## V2 修訂候選
 
 > 在實作中發現的 V2 微調建議。一律先列在此，session 結束彙整，下一 session 開始或用戶確認後才改 V2。
+
+### 2026-05-24 — 待 user 批准（V1 §6.1 第四次判決後揭露）
+
+- [ ] **R1**: 移除 `src/signals/rules/long_entry.py` 的 `market_above_ma60` 條件
+  - **理由**: Plan D 已導入 per-stock regime gate（每股自己 MA200/MA50），long_entry rule 內保留的 `market_close > market_ma_60`（universe-mean）變成第二層 market filter，且用「universe 平均」邏輯與 regime gate（per-stock）不一致 → 雙層市場過濾互相阻擋。
+  - **影響**: 預期 n_trades 上升，更易達 ≥ 50；oos_is_ratio 可能改善（樣本變大）。
+  - **風險**: 失去 market-trend safety net；但 per-stock gate 已涵蓋。
+
+- [ ] **R2**: `RegimeGateConfig` default `allowed` 從 `{BULL}` 改 `{BULL, RANGE}`
+  - **理由**: V1 §6.1 第二次判決 Plan A 暴露 — `{BULL}` 嚴格定義（close>MA200 AND MA50>MA200）在 V 字底時 close<MA200 仍為 BEAR 標籤，過早封死。當前 V1 已在 script 端 override；改 default 讓 import 即用更穩。
+  - **影響**: 預設行為與 V1 結果對齊；BULL+RANGE 仍排除明確下跌 BEAR。
+
+- [ ] **R3**: V2 §0.2 universe filter 應強制 listed+delisted **全名單**（含下市/減資/停止交易）
+  - **理由**: V1 §6.1 第四次判決顯示 39 檔 hand-picked universe survivorship bias 嚴重（OOS 4yr equal_weight +408% vs 0050 -23%）。
+  - **影響**: 加 universe loader 由 TWSE 公開的 listed+delisted CSV，可能需新 backfill task。
+  - **風險**: 大型工作，預估 2d+。
 
 ### 2026-05-22 — 用戶批准，已全部套用至 V2
 
@@ -1030,6 +1046,22 @@
   - 2026-05-23 98838b3 | GREEN：DataFreshnessGuard 全實作；16/16 GREEN，完整 pytest 604/604 GREEN | 接 chore mark done
   - 2026-05-23 5285959 | chore：PROGRESS Phase 9 +1 DONE / 總計 35/44 | Phase 9 起步，下一步：等 backfill 完跑 V1 OR 做 X01
 - 2026-05-23 | TASK-X01 | `src/execution/order_router.py` + `src/execution/__init__.py` + 15 unit tests。OrderID/OrderState enum + LiveOrder dataclass (__post_init__ 驗 shares>0 / market 禁 limit_price / limit 要 price) + OrderStatus / Position dataclasses + `OrderRouter` runtime-checkable Protocol + `DryRunRouter` (log-only：submit → unique id `<prefix>-NNNNNN` 並記 _DryRunLogEntry；cancel → terminal state raise；query → UnknownOrderError；positions → 永遠 []) + OrderRouterError / UnknownOrderError。完整 pytest 619/619 GREEN。下一步：等 backfill 完跑 V1 OR 做 X02 (ShioajiSimRouter 需 mock Shioaji)。
+- 2026-05-24 | Plan E 4yr backfill + V1 §6.1 第四次判決 + cleanup |
+  - **Backfill chain** 自動執行：daily 4yr（00:55→01:48，39/39 ok，1032 月，19337 records）→ chip 4yr 自動接（01:49→04:00，560 days，487 t86，486 margin，failed=0，empty=73）。最終 chips 484→971 / margin 484→970 檔。
+  - **Cleanup commits** 並行做：
+    - `a534eba` fix(D03): top5_excluded_return 改用真實 `top_n_excluded_return(trades, n=5)`，取代 naive copy of total_return
+    - `3caa26a` chore(benchmark): pandas FutureWarnings（pct_change `fill_method=None` + fillna boolean cast chain）
+  - **V1 第四次判決重跑**：data span 2022-07-26 ~ 2026-05-22（4 yr）/ 11 walk-forward windows / OOS 43 trades / IS 139 trades
+  - **結果**: 5/10 checks PASS（首次 ✅ beats_benchmarks + ✅ oos_alpha；3rd 同時 PASS expectancy_bp / profit_factor / max_drawdown）
+  - **仍 FAIL**:
+    - sharpe -0.11（total_return -0.88% → 為負）
+    - oos_is_ratio -0.28（IS positive, OOS negative → overfit signal）
+    - top5_excluded -0.47%（top5 才撐住總報酬）
+    - regime_coverage 7+4+0（缺 RANGE，4yr 仍不足讓 0050 出 RANGE 期）
+    - n_trades 43 < 50（差 7 筆）
+  - **關鍵新訊息**: 0050 4yr 整體 -23.10% → strategy -0.88% **真的贏 benchmark**；oos_alpha +22.22%
+  - **下一步無法自動推進**: 三項 V2 修訂候選（R1 移除 redundant market_above_ma60 / R2 RegimeGate default → {BULL, RANGE} / R3 universe survivorship 全名單）皆屬 spec drift，須 user 批准。記入「V2 修訂候選」section 等待 user 決定。
+  - 完整 pytest 648/648 GREEN（FutureWarnings 清零）
 - 2026-05-24 | V1 §6.1 第三次判決（Plan D per-stock regime gate）|
   - 診斷 Plan A 後 n_trades=1 根因：0050 close<MA200 全 OOS → market-wide regime_gate 變禁止交易開關
   - 試 (D-1) 廣 allowed 至 {BULL, RANGE}：因 0050 全 BEAR（無 RANGE）→ n_trades 仍 1，無效
