@@ -10,12 +10,12 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | TASK-S05 Regime gate — 12 tests GREEN；完整 pytest 581/581 GREEN；D01c backfill 背景跑中 (PID 11925, 14min/~100min) |
-| 當前 phase | **Phase 0 補件中**（Phase 6 全 DONE；等 backfill 完接 walk_orchestrator 整合 + V1 重判決） |
+| 上次 session | TASK-D03e walk-forward IS extension — 7 tests GREEN；完整 pytest 588/588 GREEN；D01c backfill 背景跑中 (PID 11925, 21min/~100min, 95 chip files) |
+| 當前 phase | **Phase 0 補件中**（Phase 6 全 DONE，D03d/S05/D03e 三個 V1 重判決前置 DONE；等 backfill 完一次跑 V1） |
 | 當前 task | — |
-| 下一個建議 task | 等 backfill 完成 → 接 walk_orchestrator 串入 count_regime_coverage + regime_gate → 重跑 `scripts/run_backtest_v1.py` → V1 正式 V2 §6.1 判決 |
+| 下一個建議 task | 等 backfill 完成 → 改 `scripts/run_backtest_v1.py` 加 include_is=True + 接 compute_oos_is_ratio_from_result + count_regime_coverage + regime_gate → 重跑 → V1 正式 V2 §6.1 判決；或先做 TASK-D01d (news 即時累積 cron) 0.5 session |
 | 全域 blocked | 無 |
-| Pytest 狀態 | S05 12/12 GREEN；完整 pytest 581/581 GREEN（12 warnings） |
+| Pytest 狀態 | D03e 7/7 GREEN + 9 既有 orchestrator GREEN；完整 pytest 588/588 GREEN（12 warnings） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
 | Repo 是否乾淨 | main：D01c RED+GREEN 已 commit (ahead origin/main by 2)；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
@@ -28,7 +28,7 @@
 | 0 — Universe + Feature Store | 13 | 12 | 1 | 0 | 0 |
 | 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
-| 3 — Backtester | 9 | 9 | 0 | 0 | 1 |
+| 3 — Backtester | 10 | 10 | 0 | 0 | 1 |
 | 4 — Risk + Sizing | 2 | 2 | 0 | 0 | 0 |
 | 5 — Journal + Perf | 3 | 3 | 0 | 0 | 0 |
 | 6 — Portfolio | 2 | 2 | 0 | 0 | 0 |
@@ -36,7 +36,7 @@
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **43** | **33** | **1** | **8** | **1** |
+| **總計** | **44** | **34** | **1** | **8** | **1** |
 
 ---
 
@@ -126,6 +126,7 @@
 - 2026-05-23 | TASK-D01c real-run | nohup PID 11925 啟動於 19:57，log `/tmp/backfill_chips.log`，背景跑 ~100 min。9 min 已寫 36 chip files，順利。
 - 2026-05-23 | TASK-D03d | 7802934 (RED) + cff8f70 (GREEN)：`src/backtest/regime_classifier.py` + 13 unit tests。MA-based labeller (BULL=close>MA200 AND MA50>MA200；BEAR 反向；RANGE 含 flat) + classify_window Counter.most_common + count_regime_coverage 餵 DecisionInput.regime_coverage_*；解 backtest_v1_report caveats #3。完整 pytest 569/569 GREEN。S05 可直接吃 classify_regime。
 - 2026-05-23 | TASK-S05 | c4526f8 (RED) + c258cef (GREEN)：`src/signals/rules/regime_gate.py` + 12 unit tests。RegimeGateConfig + gate_by_regime + evaluate_regime_for_signal；預設 allowed={BULL} → bear/range/unknown 全擋；reason 含 regime label 方便 journal lookup。**Phase 6 全 DONE**。完整 pytest 581/581 GREEN。下一步：等 backfill 跑完整合 walk_orchestrator + 重跑 V1。
+- 2026-05-23 | TASK-D03e | fe70880 (RED) + 2d6e3ce (GREEN)：`src/backtest/walk_orchestrator.py` 擴 `include_is=True` flag + WindowResult/OrchestratorResult IS aggregate fields + `compute_oos_is_ratio_from_result` helper；7 new tests + 9 既有 regression GREEN。解 backtest_v1_report caveats #4。完整 pytest 588/588 GREEN。下一步：等 backfill 完 → 改 run_backtest_v1 加 include_is=True + 接 oos_is_ratio + regime_coverage。
 
 ---
 
@@ -721,6 +722,31 @@
 - **Session log**:
   - 2026-05-23 7802934 | RED：13 tests，12 fail (stubs) + 1 enum GREEN | 接 GREEN
   - 2026-05-23 cff8f70 | GREEN：MA-based classifier 三函式 + flat-market range test fix；13/13 GREEN，完整 pytest 569/569 GREEN | 接 S05 OR backfill 跑完整合 walk_orchestrator
+
+### TASK-D03e
+
+- **Name**: Walk-forward IS extension + oos_is_ratio helper（D03 caveats #4）
+- **Source**: V2 §6.1（oos_is_ratio decision check）+ backtest_v1_report caveats (4)
+- **Status**: `DONE`
+- **Depends**: TASK-D03b ✅, TASK-D03c performance.oos_is_ratio ✅
+- **Files**:
+  - `src/backtest/walk_orchestrator.py` ✅（extended）
+  - `tests/test_backtest/test_walk_orchestrator_is_extension.py` ✅（7 tests）
+- **Acceptance**:
+  - WindowResult / OrchestratorResult 加 is_trades / is_per_stock_equity / is_combined_equity / is_all_trades（safe defaults，9 個既有 orchestrator test 不破）✅
+  - `include_is=False` 預設保留舊行為 ✅
+  - `include_is=True` 對每個 window 切 IS slice，跑同樣 decider factories，獨立 engine run ✅
+  - Experiment manifest summary 在 include_is=True 時加 `is_trade_count` / `is_total_pnl` ✅
+  - `compute_oos_is_ratio_from_result(result)` 接 performance.total_return + oos_is_ratio，empty / zero IS return → 0.0 ✅
+  - 抽 `_run_slice` 共用 engine-driving loop，IS / OOS bit-identical ✅
+- **Tests (RED list)**: 7 項 全 GREEN（+ 9 個既有 orchestrator test 不變）
+  - default include_is False fields empty / IS slice engine call / aggregate fields populated / OOS not polluted regression / ratio helper math / zero IS handle / empty curve → 0
+- **DoD**: 16/16 (7 new + 9 existing) GREEN，完整 pytest 588/588 GREEN
+- **Next**: scripts/run_backtest_v1 加 `include_is=True` + 把 `compute_oos_is_ratio_from_result` 接到 DecisionInput.oos_is_ratio；待 backfill 跑完一起做
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 fe70880 | RED：7 tests，6 fail (IS extension + ratio helper) + 1 default-behaviour GREEN | 接 GREEN
+  - 2026-05-23 2d6e3ce | GREEN：include_is flag + _run_slice + IS aggregate fields + ratio helper；7/7 + 9 既有 GREEN，完整 pytest 588/588 GREEN | 接 D01d news cron OR 等 backfill 完跑 V1
 
 ---
 
