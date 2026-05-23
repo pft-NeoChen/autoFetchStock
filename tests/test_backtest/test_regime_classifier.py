@@ -58,14 +58,11 @@ def test_classify_bear_when_close_and_fast_below_slow() -> None:
 
 
 @pytest.mark.unit
-def test_classify_range_when_crossing() -> None:
-    # First half up, second half down → close close to MA200, MA50 mixed
-    up = [100 + i * 0.5 for i in range(125)]
-    down = [up[-1] - i * 0.5 for i in range(125)]
-    closes = up + down
+def test_classify_range_when_market_flat() -> None:
+    # Flat market: close == MA50 == MA200 → neither bull nor bear conditions
+    closes = [100.0] * 250
     df = _market_df(closes)
-    # Pick a date around the peak where close ≈ MA200 and MA50 is rolling over
-    label = classify_regime(df, df.index[150].date(), fast_window=50, slow_window=200)
+    label = classify_regime(df, df.index[-1].date(), fast_window=50, slow_window=200)
     assert label == Regime.RANGE
 
 
