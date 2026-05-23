@@ -53,7 +53,7 @@ from src.features.volume_features import (
 from src.journal.backtest_report import render_backtest_report
 from src.journal.decision import DecisionInput, evaluate_v2_thresholds
 from src.journal.experiment_registry import ExperimentRegistry
-from src.journal.performance import summarize_performance
+from src.journal.performance import summarize_performance, top_n_excluded_return
 from src.signals.rules.regime_gate import RegimeGateConfig, evaluate_regime_for_signal
 
 logger = logging.getLogger("autofetchstock.scripts.backtest_v1")
@@ -576,10 +576,14 @@ def run(
     oos_ranges = [(w.oos_start, w.oos_end) for w in windows]
     coverage = count_regime_coverage(oos_ranges, market_ohlc)
 
+    top5_excl = top_n_excluded_return(
+        result.all_trades, initial_capital=initial_capital, n=5
+    )
+
     decision_input = DecisionInput(
         metrics=metrics,
         oos_is_ratio=oos_is,
-        top5_excluded_return=metrics.total_return,  # naive — pending top-N exclusion
+        top5_excluded_return=top5_excl,
         beats_weighted_index=metrics.total_return > weighted_idx_ret,
         beats_etf_0050=metrics.total_return > etf_ret,
         oos_alpha=metrics.total_return - weighted_idx_ret,
@@ -616,7 +620,7 @@ def run(
         "  → market-wide regime_coverage 仍取 0050 OHLC（V2 §6.1 是評估 backtest 跨 regime 多樣性，與 trade 開閘無關）。",
         "- **News features 仍 neutral default**（TASK-D01d news cron 未實作，RSS 無歷史）→ news_severity / is_limit_up 永遠 0/False。",
         "- **Benchmarks**: weighted_index / etf_total_return 兩槽位皆用 **0050 raw OHLC 作 proxy**（含息 IR0003 backfill 未做；0050 也未做 dividend adjustment）→ price-only 近似。",
-        "- **Top-N excluded return** 採 naive 等同 total_return（未做真實 top-5 排除）。",
+        "- **Top-N excluded return** 已採真實計算（sort by pnl 排除最賺 5 筆後 / initial_capital）。",
         "- **本報告 V1 §6.1 第三次量化判決（post equity-fix / real-benchmark / per-stock regime gate）**。剩餘 FAIL 主因：(1) n_trades 仍 < 50（資料 span 僅 2 年 × 39 檔，OOS 9mo 內訊號自然有限）(2) universe survivorship bias 推高 benchmark (3) 0050 OOS 全 BEAR → regime_coverage 不滿足 1+1+1。",
         "",
         "---",
