@@ -1074,8 +1074,9 @@
 - **DoD**: 15/15 GREEN + 完整 pytest 619/619 GREEN
 - **Last updated**: 2026-05-23
 - **Session log**:
-  - 2026-05-23 (pending sha) | RED：15 tests，11 fail (DryRunRouter NotImplementedError) + 4 LiveOrder validation pass on skeleton dataclass | 接 GREEN
-  - 2026-05-23 (pending sha) | GREEN：DryRunRouter 全實作 + docstring；15/15 GREEN，完整 pytest 619/619 GREEN | Phase 10 起步，下一步：X02 (ShioajiSimRouter) OR 等 backfill 完跑 V1
+  - 2026-05-23 e989047 | RED：15 tests，11 fail (DryRunRouter NotImplementedError) + 4 LiveOrder validation pass on skeleton dataclass | 接 GREEN
+  - 2026-05-23 d56466a | GREEN：DryRunRouter 全實作 + docstring；15/15 GREEN，完整 pytest 619/619 GREEN | 接 chore mark done
+  - 2026-05-23 283ea1f | chore：PROGRESS Phase 10 +1 DONE / 總計 36/44 | Phase 10 起步，下一步：X02 (ShioajiSimRouter) OR 等 backfill 完跑 V1
 
 ### TASK-X02
 
