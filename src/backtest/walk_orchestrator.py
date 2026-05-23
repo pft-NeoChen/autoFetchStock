@@ -20,8 +20,13 @@ from src.journal.experiment_registry import ExperimentRegistry
 __all__ = [
     "OrchestratorResult",
     "WindowResult",
+    "compute_oos_is_ratio_from_result",
     "run_walk_forward_backtest",
 ]
+
+
+def _empty_equity(name: str) -> pd.Series:
+    return pd.Series(dtype=float, name=name)
 
 
 @dataclass
@@ -30,6 +35,11 @@ class WindowResult:
     trades: list[Trade]
     per_stock_equity: dict[str, pd.Series]
     combined_equity: pd.Series
+    is_trades: list[Trade] = field(default_factory=list)
+    is_per_stock_equity: dict[str, pd.Series] = field(default_factory=dict)
+    is_combined_equity: pd.Series = field(
+        default_factory=lambda: _empty_equity("is_combined_equity")
+    )
 
 
 @dataclass
@@ -38,6 +48,14 @@ class OrchestratorResult:
     all_trades: list[Trade]
     combined_equity: pd.Series
     experiment_id: Optional[str]
+    is_all_trades: list[Trade] = field(default_factory=list)
+    is_combined_equity: pd.Series = field(
+        default_factory=lambda: _empty_equity("is_combined_equity")
+    )
+
+
+def compute_oos_is_ratio_from_result(result: OrchestratorResult) -> float:  # noqa: ARG001
+    raise NotImplementedError("RED stub")
 
 
 def _slice_oos(frame: pd.DataFrame, window: WalkForwardWindow) -> pd.DataFrame:
