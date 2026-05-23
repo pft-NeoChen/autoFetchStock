@@ -117,7 +117,60 @@ def run_chips_backfill(
     """Walk weekdays in [target_start, today]; persist any missing T86 /
     margin snapshot per market with TWSE+TPEX merged.
     """
-    raise NotImplementedError("RED stub — implement in GREEN step")
+    report = ChipsBackfillReport()
+
+    missing = compute_missing_dates(
+        target_start=target_start,
+        today=today,
+        has_t86=lambda d: bool(storage.load_t86_day(d)),
+        has_margin=lambda d: bool(storage.load_margin_day(d)),
+    )
+
+    first_request = True
+
+    def _sleep_if_needed() -> None:
+        nonlocal first_request
+        if not first_request and sleep_seconds > 0:
+            sleep_fn(sleep_seconds)
+        first_request = False
+
+    for d in missing:
+        report.fetched_days += 1
+
+        _sleep_if_needed()
+        twse_t86 = _safe_call(fetcher.fetch_t86, d, label="TWSE T86", d=d) or {}
+        _sleep_if_needed()
+        tpex_t86 = _safe_call(fetcher.fetch_tpex_t86, d, label="TPEX T86", d=d) or {}
+        _sleep_if_needed()
+        twse_margin = _safe_call(fetcher.fetch_margin, d, label="TWSE MARGIN", d=d) or {}
+        _sleep_if_needed()
+        tpex_margin = _safe_call(fetcher.fetch_tpex_margin, d, label="TPEX MARGIN", d=d) or {}
+
+        merged_t86 = {**twse_t86, **tpex_t86}
+        merged_margin = {**twse_margin, **tpex_margin}
+
+        if merged_t86:
+            try:
+                storage.save_t86_snapshot(d, merged_t86)
+                report.saved_t86_days += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("save_t86_snapshot failed for %s: %s", d, exc)
+                report.failed_days.append(d)
+                continue
+
+        if merged_margin:
+            try:
+                storage.save_margin_snapshot(d, merged_margin)
+                report.saved_margin_days += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("save_margin_snapshot failed for %s: %s", d, exc)
+                report.failed_days.append(d)
+                continue
+
+        if not merged_t86 and not merged_margin:
+            report.skipped_empty_days.append(d)
+
+    return report
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
