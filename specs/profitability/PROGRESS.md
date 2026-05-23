@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | TASK-D03e walk-forward IS extension — 7 tests GREEN；完整 pytest 588/588 GREEN；D01c backfill 背景跑中 (PID 11925, 21min/~100min, 95 chip files) |
-| 當前 phase | **Phase 0 補件中**（Phase 6 全 DONE，D03d/S05/D03e 三個 V1 重判決前置 DONE；等 backfill 完一次跑 V1） |
+| 上次 session | TASK-M01 Data Freshness Guard — 16 tests GREEN（6 pure + 10 stateful）；完整 pytest 604/604 GREEN；D01c backfill 仍背景跑中 |
+| 當前 phase | **Phase 9 起步**（Phase 6 全 DONE，M01 DONE；等 backfill 完一次跑 V1 重判決） |
 | 當前 task | — |
-| 下一個建議 task | 等 backfill 完成 → 改 `scripts/run_backtest_v1.py` 加 include_is=True + 接 compute_oos_is_ratio_from_result + count_regime_coverage + regime_gate → 重跑 → V1 正式 V2 §6.1 判決；或先做 TASK-D01d (news 即時累積 cron) 0.5 session |
+| 下一個建議 task | 等 backfill 完成 → 改 `scripts/run_backtest_v1.py` 加 include_is=True + 接 compute_oos_is_ratio_from_result + count_regime_coverage + regime_gate → 重跑 → V1 正式 V2 §6.1 判決；或續 Phase 9 做 TASK-M02（Consistency Check，依 P01+B04，B04 已 ✅ 但 P01 未 DONE）→ 退而求其次先 TASK-X01（OrderRouter Protocol+DryRunRouter，無依賴 0.5d）|
 | 全域 blocked | 無 |
-| Pytest 狀態 | D03e 7/7 GREEN + 9 既有 orchestrator GREEN；完整 pytest 588/588 GREEN（12 warnings） |
-| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
-| Repo 是否乾淨 | main：D01c RED+GREEN 已 commit (ahead origin/main by 2)；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
+| Pytest 狀態 | M01 16/16 GREEN；完整 pytest 604/604 GREEN（12 warnings） |
+| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
+| Repo 是否乾淨 | main：M01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
 ---
 
@@ -34,9 +34,9 @@
 | 6 — Portfolio | 2 | 2 | 0 | 0 | 0 |
 | 7 — UI | 1 | 0 | 0 | 1 | 0 |
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
-| 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
+| 9 — Monitor | 2 | 1 | 0 | 1 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **44** | **34** | **1** | **8** | **1** |
+| **總計** | **44** | **35** | **1** | **7** | **1** |
 
 ---
 
@@ -127,6 +127,7 @@
 - 2026-05-23 | TASK-D03d | 7802934 (RED) + cff8f70 (GREEN)：`src/backtest/regime_classifier.py` + 13 unit tests。MA-based labeller (BULL=close>MA200 AND MA50>MA200；BEAR 反向；RANGE 含 flat) + classify_window Counter.most_common + count_regime_coverage 餵 DecisionInput.regime_coverage_*；解 backtest_v1_report caveats #3。完整 pytest 569/569 GREEN。S05 可直接吃 classify_regime。
 - 2026-05-23 | TASK-S05 | c4526f8 (RED) + c258cef (GREEN)：`src/signals/rules/regime_gate.py` + 12 unit tests。RegimeGateConfig + gate_by_regime + evaluate_regime_for_signal；預設 allowed={BULL} → bear/range/unknown 全擋；reason 含 regime label 方便 journal lookup。**Phase 6 全 DONE**。完整 pytest 581/581 GREEN。下一步：等 backfill 跑完整合 walk_orchestrator + 重跑 V1。
 - 2026-05-23 | TASK-D03e | fe70880 (RED) + 2d6e3ce (GREEN)：`src/backtest/walk_orchestrator.py` 擴 `include_is=True` flag + WindowResult/OrchestratorResult IS aggregate fields + `compute_oos_is_ratio_from_result` helper；7 new tests + 9 既有 regression GREEN。解 backtest_v1_report caveats #4。完整 pytest 588/588 GREEN。下一步：等 backfill 完 → 改 run_backtest_v1 加 include_is=True + 接 oos_is_ratio + regime_coverage。
+- 2026-05-23 | TASK-M01 | `src/monitor/data_freshness_guard.py` + `src/monitor/__init__.py` + 16 unit tests。DataSource/HaltReason/FreshnessConfig/FreshnessStatus dataclasses + `check_staleness` + `detect_gaps` pure helpers + `DataFreshnessGuard` 狀態化（record_tick / check / should_halt）；偵測 NO_DATA / STALE / STREAM_STOP / GAP 四種 halt reason，per-source 獨立，out-of-order tick 取最新作 staleness，bounded `gap_history_window` deque。完整 pytest 604/604 GREEN。**Phase 9 起步**，下一步：等 backfill 完跑 V1 重判決，或續做 X01 (OrderRouter, 0.5d, 無依賴)。
 
 ---
 
@@ -1005,16 +1006,28 @@
 
 - **Name**: Data Freshness Guard
 - **Source**: V2 §9.1
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: —
-- **Files (planned)**:
-  - `src/monitor/data_freshness_guard.py`
-  - `tests/test_monitor/test_data_freshness_guard.py`
-- **Acceptance**: 延遲 / 跳點 / 斷流 → 停訊號
-- **Tests (RED list)**: ≥ 5 項
-- **DoD**: GREEN
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Files**:
+  - `src/monitor/__init__.py` ✅
+  - `src/monitor/data_freshness_guard.py` ✅
+  - `tests/test_monitor/__init__.py` ✅
+  - `tests/test_monitor/test_data_freshness_guard.py` ✅（16 tests）
+- **Acceptance**:
+  - `DataSource` enum (TWSE/SHIOAJI) ✅
+  - `HaltReason` enum (NO_DATA / STALE / GAP / STREAM_STOP) ✅
+  - `FreshnessConfig` (max_staleness_sec / max_gap_sec / stream_timeout_sec / gap_history_window) ✅
+  - `check_staleness(last_ts, now, max_sec)` pure ✅（None → False；negative age clamp 0）
+  - `detect_gaps(ts_series, max_gap_sec)` pure ✅（< 2 entries → []）
+  - `DataFreshnessGuard.record_tick / check / should_halt` ✅（per-source bounded deque；out-of-order tick 取最新作 staleness；should_halt 無註冊來源也回 True）
+- **Tests (RED list)**: 16 項 全 GREEN
+  - pure 6：staleness fresh/stale/None / detect_gaps uniform/gap/short
+  - guard 10：no_data / record-then-check fresh / stale / stream_stop / gap / per-source independent / should_halt true/false / out-of-order latest wins / history window trim
+- **DoD**: 16/16 GREEN + 完整 pytest 604/604 GREEN
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 (pending sha) | RED：16 failing tests + skeleton（NotImplementedError） | 接 GREEN
+  - 2026-05-23 (pending sha) | GREEN：DataFreshnessGuard 全實作；16/16 GREEN，完整 pytest 604/604 GREEN | Phase 9 起步，下一步：等 backfill 完跑 V1 OR 做 X01
 
 ### TASK-M02
 
