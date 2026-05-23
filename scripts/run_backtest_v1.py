@@ -36,8 +36,13 @@ from src.backtest.adapters.signal_adapter import (
     make_entry_decider,
     make_exit_decider,
 )
+from src.backtest.regime_classifier import count_regime_coverage
 from src.backtest.walk_forward import walk_forward_windows
-from src.backtest.walk_orchestrator import run_walk_forward_backtest
+from src.backtest.walk_orchestrator import (
+    compute_oos_is_ratio_from_result,
+    run_walk_forward_backtest,
+)
+from src.features.chip_features import foreign_net_streak, margin_n_day_change
 from src.features.price_features import atr, moving_average, rolling_volatility
 from src.features.volume_features import (
     classify_volume_severity,
@@ -48,6 +53,7 @@ from src.journal.backtest_report import render_backtest_report
 from src.journal.decision import DecisionInput, evaluate_v2_thresholds
 from src.journal.experiment_registry import ExperimentRegistry
 from src.journal.performance import summarize_performance
+from src.signals.rules.regime_gate import evaluate_regime_for_signal
 
 logger = logging.getLogger("autofetchstock.scripts.backtest_v1")
 
@@ -80,10 +86,95 @@ def load_daily_ohlc_frames(data_dir: Path) -> dict[str, pd.DataFrame]:
     return frames
 
 
+# ── chip / margin loaders ───────────────────────────────────────────────────
+
+
+def _parse_yyyymmdd(stem: str) -> pd.Timestamp | None:
+    try:
+        return pd.Timestamp(f"{stem[:4]}-{stem[4:6]}-{stem[6:8]}")
+    except ValueError:
+        return None
+
+
+def load_chip_frames(data_dir: Path) -> dict[str, pd.DataFrame]:
+    """Walk ``data_dir/chips/*.json`` and assemble a per-stock time series.
+
+    Returns ``{stock_id: DataFrame[date, foreign_net|trust_net|dealer_net|all_net]}``.
+    Missing/invalid files are skipped silently.
+    """
+    chips_dir = data_dir / "chips"
+    if not chips_dir.exists():
+        return {}
+    rows_by_stock: dict[str, list[dict]] = {}
+    for path in sorted(chips_dir.glob("*.json")):
+        ts = _parse_yyyymmdd(path.stem)
+        if ts is None:
+            continue
+        try:
+            payload = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            continue
+        t86 = payload.get("t86") or {}
+        if not isinstance(t86, dict):
+            continue
+        for stock_id, entry in t86.items():
+            if not isinstance(entry, dict):
+                continue
+            row = {"date": ts}
+            for key in ("foreign_net", "trust_net", "dealer_net", "all_net"):
+                if key in entry:
+                    row[key] = entry[key]
+            rows_by_stock.setdefault(stock_id, []).append(row)
+
+    frames: dict[str, pd.DataFrame] = {}
+    for stock_id, rows in rows_by_stock.items():
+        df = pd.DataFrame(rows).set_index("date").sort_index()
+        frames[stock_id] = df
+    return frames
+
+
+def load_margin_frames(data_dir: Path) -> dict[str, pd.DataFrame]:
+    """Walk ``data_dir/margin/*.json`` and assemble per-stock margin time series."""
+    margin_dir = data_dir / "margin"
+    if not margin_dir.exists():
+        return {}
+    rows_by_stock: dict[str, list[dict]] = {}
+    for path in sorted(margin_dir.glob("*.json")):
+        ts = _parse_yyyymmdd(path.stem)
+        if ts is None:
+            continue
+        try:
+            payload = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            continue
+        margin = payload.get("margin") or {}
+        if not isinstance(margin, dict):
+            continue
+        for stock_id, entry in margin.items():
+            if not isinstance(entry, dict):
+                continue
+            row = {"date": ts}
+            for key in ("margin_balance", "short_balance"):
+                if key in entry:
+                    row[key] = entry[key]
+            rows_by_stock.setdefault(stock_id, []).append(row)
+
+    frames: dict[str, pd.DataFrame] = {}
+    for stock_id, rows in rows_by_stock.items():
+        df = pd.DataFrame(rows).set_index("date").sort_index()
+        frames[stock_id] = df
+    return frames
+
+
 # ── feature engineering ─────────────────────────────────────────────────────
 
 
-def build_feature_frame(ohlc: pd.DataFrame) -> pd.DataFrame:
+def build_feature_frame(
+    ohlc: pd.DataFrame,
+    *,
+    chip_df: pd.DataFrame | None = None,
+    margin_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     df = ohlc.copy()
     df["ma_5"] = moving_average(df["close"], window=5)
     df["ma_10"] = moving_average(df["close"], window=10)
@@ -102,9 +193,24 @@ def build_feature_frame(ohlc: pd.DataFrame) -> pd.DataFrame:
         lambda r: classify_volume_severity(r).value if pd.notna(r) else "normal"
     )
 
-    # Safe defaults (sparse data → neutral)
-    df["foreign_net_streak"] = 0
-    df["margin_balance_5d_change"] = 0.0
+    # Chip-derived features: real data when available, neutral fallback otherwise.
+    if chip_df is not None and not chip_df.empty and "foreign_net" in chip_df.columns:
+        streak = foreign_net_streak(chip_df["foreign_net"].astype(float))
+        df["foreign_net_streak"] = streak.reindex(df.index, method="ffill").fillna(0).astype(int)
+    else:
+        df["foreign_net_streak"] = 0
+
+    if (
+        margin_df is not None
+        and not margin_df.empty
+        and "margin_balance" in margin_df.columns
+    ):
+        change = margin_n_day_change(margin_df["margin_balance"].astype(float), n=5)
+        df["margin_balance_5d_change"] = change.reindex(df.index, method="ffill")
+    else:
+        df["margin_balance_5d_change"] = 0.0
+
+    # News / limit-up still defaulted (news backfill = TASK-D01d, not in this prep).
     df["news_severity"] = 0.0
     df["is_limit_up"] = False
     return df.dropna(subset=["ma_60", "atr_14"])
@@ -123,6 +229,55 @@ def build_market_state(
             "market_ma_60": float(ma_60.loc[ts]) if pd.notna(ma_60.loc[ts]) else 0.0,
         }
     return state
+
+
+def build_market_ohlc_proxy(
+    feature_frames: Mapping[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """Cross-section mean of universe OHLC → proxy market index.
+
+    Used by regime classifier (needs full OHLC, not just close) when no
+    real weighted_index series is loaded.
+    """
+    if not feature_frames:
+        return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+    parts: dict[str, list[pd.Series]] = {c: [] for c in
+                                          ("open", "high", "low", "close", "volume")}
+    for f in feature_frames.values():
+        for col in parts:
+            if col in f.columns:
+                parts[col].append(f[col])
+    proxy = pd.DataFrame(
+        {col: pd.concat(parts[col], axis=1).mean(axis=1) for col in parts}
+    )
+    return proxy.sort_index()
+
+
+# ── regime-gated entry ──────────────────────────────────────────────────────
+
+
+def make_regime_gated_entry_factory(
+    *,
+    inner_factory: callable,
+    market_ohlc: pd.DataFrame,
+):
+    """Wrap an entry-decider factory so each decision first checks regime.
+
+    BEAR / RANGE / unknown → short-circuit return (no signal) without
+    invoking the inner decider. BULL → delegate to inner.
+    """
+    def factory(stock_id: str, frame: pd.DataFrame):
+        inner = inner_factory(stock_id, frame)
+
+        def decider(stock_id_, ref_date, position, ohlc_row):
+            passes, _reason = evaluate_regime_for_signal(market_ohlc, ref_date)
+            if not passes:
+                return None
+            return inner(stock_id_, ref_date, position, ohlc_row)
+
+        return decider
+
+    return factory
 
 
 # ── benchmarks (lightweight) ────────────────────────────────────────────────
@@ -154,9 +309,21 @@ def run(
         raise RuntimeError(f"no OHLC frames under {data_dir}/stocks")
 
     logger.info("loaded %d stocks", len(ohlc_frames))
-    feature_frames = {sid: build_feature_frame(f) for sid, f in ohlc_frames.items()}
+    chip_frames = load_chip_frames(data_dir)
+    margin_frames = load_margin_frames(data_dir)
+    logger.info(
+        "loaded chips for %d stocks, margin for %d stocks",
+        len(chip_frames), len(margin_frames),
+    )
+    feature_frames = {
+        sid: build_feature_frame(
+            f, chip_df=chip_frames.get(sid), margin_df=margin_frames.get(sid)
+        )
+        for sid, f in ohlc_frames.items()
+    }
     feature_frames = {sid: f for sid, f in feature_frames.items() if not f.empty}
     market_state = build_market_state(feature_frames)
+    market_ohlc = build_market_ohlc_proxy(feature_frames)
 
     all_idx = sorted({ts for f in feature_frames.values() for ts in f.index})
     if not all_idx:
@@ -179,12 +346,17 @@ def run(
     logger.info("generated %d walk-forward windows (IS=%dmo OOS=%dmo)",
                 len(windows), is_months, oos_months)
 
-    def entry_factory(stock_id: str, frame: pd.DataFrame):
+    def base_entry_factory(stock_id: str, frame: pd.DataFrame):
         return make_entry_decider(
             feature_df=frame,
             market_state=market_state,
             target_shares=target_shares,
         )
+
+    entry_factory = make_regime_gated_entry_factory(
+        inner_factory=base_entry_factory,
+        market_ohlc=market_ohlc,
+    )
 
     def exit_factory(stock_id: str, frame: pd.DataFrame):
         return make_exit_decider(feature_df=frame)
@@ -212,8 +384,12 @@ def run(
         exit_decider_factory=exit_factory,
         registry=registry,
         manifest=manifest,
+        include_is=True,
     )
-    logger.info("backtest done: trades=%d", len(result.all_trades))
+    logger.info(
+        "backtest done: OOS trades=%d, IS trades=%d",
+        len(result.all_trades), len(result.is_all_trades),
+    )
 
     initial_capital = initial_cash_per_stock * len(feature_frames)
     metrics = summarize_performance(
@@ -226,16 +402,23 @@ def run(
     # Benchmark proxy
     bench_total = equal_weight_total_return(feature_frames)
 
+    # OOS/IS ratio via D03e helper (returns 0.0 when IS curve empty).
+    oos_is = compute_oos_is_ratio_from_result(result)
+
+    # Regime coverage across all OOS windows.
+    oos_ranges = [(w.oos_start, w.oos_end) for w in windows]
+    coverage = count_regime_coverage(oos_ranges, market_ohlc)
+
     decision_input = DecisionInput(
         metrics=metrics,
-        oos_is_ratio=0.0,  # placeholder — needs IS run pass
-        top5_excluded_return=metrics.total_return,  # naive
+        oos_is_ratio=oos_is,
+        top5_excluded_return=metrics.total_return,  # naive — pending top-N exclusion
         beats_weighted_index=metrics.total_return > bench_total,
         beats_etf_0050=metrics.total_return > bench_total,
         oos_alpha=metrics.total_return - bench_total,
-        regime_coverage_bull=0,
-        regime_coverage_bear=0,
-        regime_coverage_range=0,
+        regime_coverage_bull=coverage.bull,
+        regime_coverage_bear=coverage.bear,
+        regime_coverage_range=coverage.range,
     )
     decision = evaluate_v2_thresholds(decision_input)
 
@@ -254,16 +437,18 @@ def run(
                   "experiment_id": result.experiment_id or "(none)"},
     )
 
-    # Caveats block prepended
+    # Caveats block prepended — updated for V1 重判決 (post-backfill, post-IS).
     caveats = [
         "## ⚠️ 報告限制",
         "",
-        "- **Chip / news / margin features 沿用 neutral defaults**（local data ≤ 15 天 vs. 2 年 OHLC）",
-        "  → entry chip filter (foreign_net_streak ≥ 3 OR margin_5d_change < 0) 幾乎全失敗",
-        "  → 預期極少甚至零訊號。**這是已知資料缺口,非策略本身失敗**.",
-        "- **Benchmarks**: weighted_index / 0050 / ma_strategy 為 placeholder（0.0），equal_weight 為 universe 平均報酬",
-        "- **OOS/IS ratio / regime coverage / alpha**: 均為 placeholder（0），需 V2 §6.1 二輪實跑（含 IS 評估、regime 標記、含息 benchmark 接入）才能 fairly 評估",
-        "- **本報告為 D03c gating logic 端對端 smoke + Phase 3 結案artifact**,非 V2 §6.1 正式判決",
+        f"- **Chip 資料覆蓋**: {len(chip_frames)} 檔；**Margin 資料覆蓋**: {len(margin_frames)} 檔。",
+        "  若仍為 0 trades，請確認 D01c backfill 已完成且 chips/margin JSON 已生成。",
+        "- **News features 仍 neutral default**（TASK-D01d news cron 未實作，RSS 無歷史）→ news_severity / is_limit_up 永遠 0/False。",
+        "- **Benchmarks**: weighted_index / 0050 / ma_strategy 仍為 placeholder（0.0）",
+        "  → equal_weight_universe 為 universe 平均報酬，作 alpha 對照基準。",
+        "- **Regime coverage** 由 universe 平均 OHLC 跑 MA-based classifier，非真實大盤指數。",
+        "- **Top-N excluded return** 採 naive 等同 total_return（未做真實 top-5 排除）。",
+        "- **本報告 V1 重判決（post-D01c backfill / IS-extended / regime-gated）**；屬 V2 §6.1 第一次正式量化判決，但 weighted_index 含息 series 尚未接入。",
         "",
         "---",
         "",
