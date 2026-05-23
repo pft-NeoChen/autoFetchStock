@@ -1026,8 +1026,9 @@
 - **DoD**: 16/16 GREEN + 完整 pytest 604/604 GREEN
 - **Last updated**: 2026-05-23
 - **Session log**:
-  - 2026-05-23 (pending sha) | RED：16 failing tests + skeleton（NotImplementedError） | 接 GREEN
-  - 2026-05-23 (pending sha) | GREEN：DataFreshnessGuard 全實作；16/16 GREEN，完整 pytest 604/604 GREEN | Phase 9 起步，下一步：等 backfill 完跑 V1 OR 做 X01
+  - 2026-05-23 93722b7 | RED：16 failing tests + skeleton（NotImplementedError） | 接 GREEN
+  - 2026-05-23 98838b3 | GREEN：DataFreshnessGuard 全實作；16/16 GREEN，完整 pytest 604/604 GREEN | 接 chore mark done
+  - 2026-05-23 5285959 | chore：PROGRESS Phase 9 +1 DONE / 總計 35/44 | Phase 9 起步，下一步：等 backfill 完跑 V1 OR 做 X01
 
 ### TASK-M02
 
