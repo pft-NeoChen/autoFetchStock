@@ -9,13 +9,13 @@
 
 | 欄位 | 值 |
 |------|----|
-| 上次更新 | 2026-05-23 |
-| 上次 session | V1 重判決 plumbing prep — `scripts/run_backtest_v1.py` 加 chip/margin loaders + market_ohlc proxy + regime-gated entry factory + build_feature_frame 接真實 chip_df/margin_df + run() wire include_is=True + compute_oos_is_ratio_from_result + count_regime_coverage；10 unit tests GREEN；完整 pytest 629/629 GREEN；D01c backfill ~85%（408 chips，processing 2025-12-31，ETA ~20min） |
-| 當前 phase | **V1 重判決 ready**（Phase 6/9/10 起步皆 DONE，plumbing 完成；等 backfill 完一鍵跑 `python -m scripts.run_backtest_v1`） |
+| 上次更新 | 2026-05-24 |
+| 上次 session | V1 重判決首跑 + equity-fix — backfill 完成（22:01，t86=478 / margin=478）；首跑 OOS 19 trades / IS 21 trades 但 max_dd 97% + equal_weight 300% 顯異常；診斷 + 修兩 bug：(1) `_combine_equity` 未 pad inactive stocks (2) 跨 window concat 製造邊界跳變；新增 `_pad_per_stock_equity` + `_chain_window_equities_dollar` helpers；`equal_weight_total_return` 接 `oos_dates` 對齊 OOS 跨期；10 new tests GREEN（7 padding/chain + 3 benchmark）；完整 pytest 639/639 GREEN。重跑後 max_dd 97%→1.52%、equal_weight 300%→179%、oos_is_ratio 0→0.43 — 數字真實化但 verdict 仍 ❌ FAIL（n=19 太小 + universe survivorship bias）|
+| 當前 phase | **V1 §6.1 判決完成（❌ FAIL）** — 數字真實，verdict 反映 universe 偏誤而非策略本質；待下一輪改進 |
 | 當前 task | — |
-| 下一個建議 task | backfill 完成 → 跑 `python -m scripts.run_backtest_v1` 產 V1 正式 V2 §6.1 判決報告；若 0 trades 或 FAIL → 檢視 caveats（chip 覆蓋 / news 仍 neutral / weighted_index 含息接入）|
+| 下一個建議 task | 三方向擇一：(A) 接含息 weighted_index / 0050 系列 + 真實大盤 OHLC 做 regime proxy（V2 §3.5）(B) 解 universe survivorship bias — 加入 delisted 名單（V2 §0.2 全規則）(C) 放寬 entry 規則或調 chip 門檻以增 n_trades 至 ≥50 |
 | 全域 blocked | 無 |
-| Pytest 狀態 | V1 prep 10/10 GREEN；完整 pytest 629/629 GREEN（12 warnings） |
+| Pytest 狀態 | equity-fix 10/10 GREEN + 16 既有 orchestrator GREEN；完整 pytest 639/639 GREEN（12 warnings） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/execution/order_router.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
 | Repo 是否乾淨 | main：X01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
@@ -1030,6 +1030,26 @@
   - 2026-05-23 98838b3 | GREEN：DataFreshnessGuard 全實作；16/16 GREEN，完整 pytest 604/604 GREEN | 接 chore mark done
   - 2026-05-23 5285959 | chore：PROGRESS Phase 9 +1 DONE / 總計 35/44 | Phase 9 起步，下一步：等 backfill 完跑 V1 OR 做 X01
 - 2026-05-23 | TASK-X01 | `src/execution/order_router.py` + `src/execution/__init__.py` + 15 unit tests。OrderID/OrderState enum + LiveOrder dataclass (__post_init__ 驗 shares>0 / market 禁 limit_price / limit 要 price) + OrderStatus / Position dataclasses + `OrderRouter` runtime-checkable Protocol + `DryRunRouter` (log-only：submit → unique id `<prefix>-NNNNNN` 並記 _DryRunLogEntry；cancel → terminal state raise；query → UnknownOrderError；positions → 永遠 []) + OrderRouterError / UnknownOrderError。完整 pytest 619/619 GREEN。下一步：等 backfill 完跑 V1 OR 做 X02 (ShioajiSimRouter 需 mock Shioaji)。
+- 2026-05-24 | V1 §6.1 首次正式判決 + equity-fix | backfill 完 + V1 run + 修兩 equity bug：
+  - **Backfill 完成**（19:57→22:01，2h04m）：t86=478 / margin=478 / failed=0 / empty=38；3 次 timeout per-endpoint isolation 處理。
+  - **V1 首跑** OOS 19 trades / IS 21 trades，**max_dd 97.38% + equal_weight_universe 300% 異常**。診斷出兩 bug：
+    1. `_combine_equity = df.sum(axis=1)` 沒 pad inactive stocks → universe baseline 缺失 → 假性大跌
+    2. `pd.concat([wr.combined_equity ...])` 跨 window concat → 每窗 engine 重置 cash 產生邊界跳變
+    3. `equal_weight_total_return` 用 full 2yr span vs 策略 9mo OOS span → 對等性失準
+  - **修法 (TDD)**：
+    - `src/backtest/walk_orchestrator.py` 加 `_pad_per_stock_equity(per_stock, universe, date_index, initial_cash)`：reindex 到 window 日期、inactive stocks fill initial_cash、active stocks ffill 最後已知值
+    - 加 `_chain_window_equities_dollar(segments)`：每後續 segment 平移使首值對齊前 segment 末值（dollar scale preserved）
+    - `run_walk_forward_backtest` 內 `_padded_combined` closure 替換原 `_combine_equity` 呼叫；跨 window 用 `_chain_window_equities_dollar` 替換 `pd.concat`
+    - `scripts/run_backtest_v1.equal_weight_total_return` 加 `oos_dates=(start, end)` kwarg；`run()` 用 `(min oos_start, max oos_end)` 限制 benchmark 範圍
+  - **Tests**：
+    - `tests/test_backtest/test_walk_orchestrator_equity_fix.py` 7 GREEN（pad inactive / pad partial / pad empty / chain single / chain two no-jump / chain skip empty / chain empty list）
+    - `tests/test_scripts/test_run_backtest_v1_benchmark_fix.py` 3 GREEN（default full span / restricted oos / empty slice）
+    - 9 既有 walk_orchestrator tests + 7 既有 IS extension tests **全 regression PASS**
+    - 完整 pytest 639/639 GREEN
+  - **重跑結果**：max_dd 1.52%、total_return -0.42%、equal_weight 179%、oos_is_ratio 0.43、verdict 仍 ❌ FAIL（6/10 checks failed），但數字**真實**。
+  - **診斷 universe**：39 檔 OOS 9mo mean=+233% median=+176% top 5 皆 500-700% — **嚴重 survivorship bias**。FAIL 主因 universe 偏誤 + n_trades=19 太少，非策略本質失敗。
+  - `analysis/backtest_v1_report.md` 更新含完整 caveats，標明 V1 §6.1 第一次正式量化判決。
+  - 下一步三選一：(A) 含息 weighted_index/0050 benchmark + 真實大盤 regime proxy (B) 解 universe survivorship bias (C) 放寬 entry 增 n_trades。
 - 2026-05-23 | V1 重判決 plumbing prep | `scripts/run_backtest_v1.py` 大改 + 10 unit tests：
   - 新增 `load_chip_frames(data_dir)` / `load_margin_frames(data_dir)`：走 `data/chips/*.json` `data/margin/*.json` 組成 per-stock time series（容錯 invalid JSON / missing dir）
   - 新增 `build_market_ohlc_proxy(feature_frames)`：cross-section mean → OHLC DataFrame，供 regime classifier 用
