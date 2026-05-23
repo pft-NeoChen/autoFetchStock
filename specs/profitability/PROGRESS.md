@@ -10,14 +10,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-23 |
-| 上次 session | Phase 5 J03 Performance metrics — 25 tests GREEN；完整 pytest 535/535 GREEN |
-| 當前 phase | **Phase 5 完成 ✅**（J01 TradeJournal + J02 SignalLog + J03 Performance metrics） |
+| 上次 session | Phase 6 R03 Correlation Filter — 7 tests GREEN；完整 pytest 542/542 GREEN |
+| 當前 phase | **Phase 6 進行中**（R03 DONE，下一步 S05 Regime gating） |
 | 當前 task | — |
-| 下一個建議 task | **TASK-R03 Correlation Filter** **或** 先補 chip/news data backfill 再做 V1 正式判決 |
+| 下一個建議 task | **TASK-S05 Regime gating 接入 SignalEngine** **或** 先補 chip/news data backfill 再做 V1 正式判決 |
 | 全域 blocked | 無 |
-| Pytest 狀態 | J03 25/25 GREEN；journal+backtest related 80/80 GREEN；完整 pytest 535/535 GREEN（12 warnings） |
-| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer}.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
-| Repo 是否乾淨 | main：J03 已 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
+| Pytest 狀態 | R03 7/7 GREEN；portfolio+features related 40/40 GREEN；完整 pytest 542/542 GREEN（12 warnings） |
+| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,run_ic_analysis}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
+| Repo 是否乾淨 | main：R03 已 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
 
 ---
 
@@ -31,12 +31,12 @@
 | 3 — Backtester | 8 | 8 | 0 | 0 | 1 |
 | 4 — Risk + Sizing | 2 | 2 | 0 | 0 | 0 |
 | 5 — Journal + Perf | 3 | 3 | 0 | 0 | 0 |
-| 6 — Portfolio | 2 | 0 | 0 | 2 | 0 |
+| 6 — Portfolio | 2 | 1 | 0 | 1 | 0 |
 | 7 — UI | 1 | 0 | 0 | 1 | 0 |
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 0 | 0 | 2 | 0 |
 | 10 — OrderExecutor | 3 | 0 | 0 | 3 | 0 |
-| **總計** | **41** | **30** | **0** | **10** | **1** |
+| **總計** | **41** | **31** | **0** | **9** | **1** |
 
 ---
 
@@ -121,6 +121,7 @@
 - 2026-05-23 | TASK-J01 | 13585a6 (RED) + c1c7563 (GREEN)：`src/journal/trade_journal.py` + 7 unit tests。實作 append-only JSONL TradeJournal、TradeJournalEntry、FillSnapshot、CostBreakdown、CashLedgerEntry、from_backtest_trade、list/filter/summary；完整 pytest 521/521 GREEN。下一 session 接 TASK-J02。
 - 2026-05-23 | TASK-J02 | e90df41 (RED) + c4a4f60 (GREEN)：`src/journal/signal_log.py` + 7 unit tests。實作 append-only JSONL SignalLog、SignalLogEntry、from_signal、entered/filtered 狀態、filter reasons、RiskDecision snapshot、list filter、summary；完整 pytest 528/528 GREEN。下一 session 接 TASK-J03。
 - 2026-05-23 | TASK-J03 | 7b241ae (RED) + b4e1f95 (GREEN)：`src/journal/performance.py` + tests/test_journal/test_performance.py 擴充至 25 tests。補平均盈虧比、OOS/IS ratio、Top-N excluded return、benchmark alpha、render_performance_report；完整 pytest 535/535 GREEN。Phase 5 完成，下一 session 接 TASK-R03。
+- 2026-05-23 | TASK-R03 | 1f31cfb (RED) + a52b47d (GREEN)：`src/portfolio/correlation_filter.py` + 7 unit tests。實作 sector + 60d return correlation clustering、同 cluster ≤2 檔限制、portfolio beta ≤1.2 gate、public exports；完整 pytest 542/542 GREEN。下一 session 接 TASK-S05。
 
 ---
 
@@ -801,16 +802,26 @@
 
 - **Name**: Correlation Filter
 - **Source**: V2 §6.2
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: TASK-F04, TASK-R02
-- **Files (planned)**:
-  - `src/portfolio/correlation_filter.py`
-  - `tests/test_portfolio/test_correlation_filter.py`
-- **Acceptance**: 產業 + 相關性聚類；同 cluster ≤ 2 檔
-- **Tests (RED list)**: ≥ 5 項
-- **DoD**: GREEN
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Files**:
+  - `src/portfolio/correlation_filter.py` ✅
+  - `tests/test_portfolio/test_correlation_filter.py` ✅（7 tests）
+  - `src/portfolio/__init__.py` ✅（public exports）
+- **Acceptance**: 產業 + 相關性聚類 ✅；同 cluster ≤ 2 檔 ✅；portfolio beta ≤ 1.2 ✅
+- **Tests (RED list)**: 7 項 全 GREEN
+  - 同 sector 高相關分群 ✅
+  - 同 sector 低相關分離 ✅
+  - cluster limit 擋單 ✅
+  - 不同 cluster 放行 ✅
+  - beta market-value weighted ✅
+  - projected beta 超限擋單 ✅
+  - unknown candidate 自成 cluster ✅
+- **DoD**: R03 7/7 GREEN；portfolio+features related 40/40 GREEN；完整 pytest 542/542 GREEN
+- **Last updated**: 2026-05-23
+- **Session log**:
+  - 2026-05-23 1f31cfb | RED：新增 7 個 CorrelationFilter 測試，因 `src.portfolio.correlation_filter` 尚未存在而 fail | 接 GREEN
+  - 2026-05-23 a52b47d | GREEN：實作 CorrelationFilter / build_correlation_clusters / portfolio_beta_after_add；完整 pytest 542/542 GREEN | 接 TASK-S05
 
 ### TASK-S05
 
