@@ -11,14 +11,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | V1 §6.1 第六次判決（R3-sample 100 新檔）— 100 隨機 listed 2yr backfill 完成（10:41，100/100 ok，2500 月，47440 records，總 39+100=139 stocks）；V1 重跑：n_trades 47→**59** ✅、equal_weight 166%→110%、max_dd 2.60%→0.77%；**但 expectancy_bp +33→-41** 翻負；5/10 PASS 同（n_trades ↔ expectancy_bp 對調）；**核心 finding：原 39 檔 hand-picked 全贏家造成 expectancy 假陽性，broader universe 揭露 strategy 缺真實 edge**。R3-full backfill 35h 已無意義（sample 已證 strategy 在 average universe 不賺）。完整 pytest 658/658 GREEN |
-| 當前 phase | **S2 + UI01 + P01 + M02 DONE** — Phase 9 全 DONE；infra 接近完整 |
-| 當前 task | 下一: TASK-P02 ShioajiSimRouter (依 P01+X01 ✅) — 需 mock Shioaji，1.5d |
-| 下一個建議 task | TASK-M02 consistency check (Phase 9，依 P01+B04 都 ✅)；或 TASK-P02 ShioajiSimRouter (依 P01+X01 都 ✅)；之後 D04 paper 60d 報告 → S1 strategy redesign |
-| 全域 blocked | 無；S1 (strategy redesign) 留至 advisor 累積 3-6 月後再做，infra (UI/paper/monitor) 先 |
-| Pytest 狀態 | 完整 pytest 649/649 GREEN（5 warnings env-level） |
-| 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/execution/order_router.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
-| Repo 是否乾淨 | main：X01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
+| 上次 session | UX iterate + PROGRESS reconcile — strategy page 三次重寫（中文 labels → user-centric 6 sections → scroll fix 解 `.main-container overflow:hidden` 鎖死）+ PROGRESS task block 3 處（UI01/P01/M02）從 NOT_STARTED 補完 DONE + Phase Summary 總計 NOT_STARTED 3 → 4 更正 + Global Session Log 補 reconcile entry。完整 pytest 701/701 GREEN |
+| 當前 phase | **infra 已備（Phase 0-7/9 全 DONE，Phase 8 P01 ✅、Phase 10 X01 ✅），等使用者開新 session 啟動 S1 strategy 研究**（V1 已 6 次判決 FAIL；retrospective 完整入 `STRATEGY_REVIEW.md`）|
+| 當前 task | — |
+| 下一個建議 task | **新 session 啟動 S1 strategy 研究**：依 `STRATEGY_REVIEW.md` A.5 從候選 C1 mean reversion / C3 volatility breakout / C4 LLM advisor signal（C4 須等 advisor 累積 3-6 月）中擇一做 IC 分析 + 新 entry rule 模組 + 重跑 V1 第 7 次判決。剩餘 4 task (P02/X02/X03/D04) 屬實單前置或時間累積型，**現在不該做**（理由見 `STRATEGY_REVIEW.md` B 段）|
+| 全域 blocked | 無（S1 屬研究型任務，可開始；P02/X02/X03/D04 等先決條件）|
+| Pytest 狀態 | 完整 pytest **701/701 GREEN**（5 warnings env-level urllib3/scipy） |
+| 檔案位置 | `specs/profitability/{README,PROFITABILITY_PLAN_V2,IMPLEMENTATION_PLAN,STRATEGY_REVIEW,PROGRESS}.md` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/{data_freshness_guard,consistency_check}.py` + `src/execution/order_router.py` + `src/paper/memory_router.py` + `src/universe/{filter,api_loader}.py` + `src/app/pages/strategy.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1,build_sampled_universe,snapshot_advisor_scores}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
+| Repo 是否乾淨 | main：所有 commits 完成，working tree clean；ahead of origin/main 多 commits 未 push；pre-existing untracked：`.antigravitycli/` / `.claude/settings.json` / `.claude/worktrees/` / `analysis/feature_store_cache/` 與本工作流無關 |
 
 ---
 
