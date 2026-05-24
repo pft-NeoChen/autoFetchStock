@@ -74,14 +74,71 @@ specs/
 
 > 本段每次大里程碑時手動同步。**真實狀態以 `PROGRESS.md` Quick Status 表為準。**
 
-- **Phase**: Phase 0 + 1 + 2 + 3 + 4 + 5 ✅；Phase 6 R03 DONE，總計 **31/41**
-- **Spec 狀態**: V2 已含 8 項微調建議（已套用）；B04 走自製 backtester 取代 vectorbt（spec drift 記在 PROGRESS）
-- **下一 task**: **TASK-S05 Regime gating 接入 SignalEngine**；或先補 chip/news/margin 至 ≥2 年再回頭做 V1 正式 V2 §6.1 判決
-- **Blocked**: 無
-- **Pytest**: R03 7/7 GREEN；完整 pytest 542/542 GREEN（12 warnings）
-- **IC 決策摘要**: 5d/20d 多 feature 過門檻；1d 全敗 → 第一版策略只做 5d~20d holding，不做日內
-- **Phase 2 訊號邏輯**: Signal dataclass (無 risk) + evaluate_long_entry (V2 §2 6 條件) + evaluate_exit (V2 §2 出場 5 條件)，皆為 pure evaluator
-- **Phase 3 V1 實跑**: 39 stocks × 3 walk-forward windows → 0 trades（chip filter 被 neutral default 卡住，已知 chip/news 本地資料 ≤15 天）→ verdict ❌ FAIL，但報告 caveats 已明列為「結案 smoke artifact,非正式 V2 §6.1 判決」。正式判決前須補：(1) chip/news/margin backfill (2) 含息 weighted_index/0050 benchmark (3) regime classifier (4) IS pass for oos_is_ratio
+### 3.1 目前 phase
+
+**🎯 V1 §6.1 判決已 6 次完成（皆 ❌ FAIL，但 5/10 PASS）→ 進入 S1 strategy 研究階段**
+
+- **總進度**: **41/45** tasks DONE，0 IN_PROGRESS，0 BLOCKED，3 NOT_STARTED（P02 / X02 / X03 / D04 須時間累積）
+- **Phase 完成度**: Phase 0/1/2/3/4/5/6/7/9 全 ✅；Phase 8 部分（P01 ✅）；Phase 10 部分（X01 ✅）
+- **Pytest**: 完整 **688/688 GREEN**（5 env-level warnings）
+
+### 3.2 V1 第六次判決 verdict 摘要
+
+- **數據**: 4yr data（2022-07 ~ 2026-05）/ 139 stocks（39 hand-picked + 100 random sample）/ 11 walk-forward windows / OOS 59 trades / IS 169 trades
+- **PASS 5/10**: profit_factor 1.41 / max_drawdown 0.77% / beats_benchmarks（−0.29% vs 0050 −23.10%）/ oos_alpha +22.81% / n_trades 59
+- **FAIL 5/10**: expectancy_bp **−41.58 bp** / sharpe −0.14 / oos_is_ratio −0.31 / top5_excluded −0.16% / regime_coverage 7+4+0（缺 RANGE）
+- **核心 finding**: 原 39 檔 hand-picked 全贏家造成 expectancy 假陽性；broader universe 揭露 `long_entry_v1` **缺真實 edge**
+
+### 3.3 為何進入 S1 strategy 研究
+
+`long_entry_v1` 屬 **trend-following + volume breakout + chip confirmation 混合**（類 CAN SLIM / SEPA / Turtle / 台股籌碼派 family）。技術修補（Plan A/D/E + R1/R2/R3 + D-investigate + top5 真實計算）全部到位，但 strategy 本質在 broader universe 上不賺。
+
+**V1 框架內優化 ROI 低 → 換 strategy class**：
+
+| 候選 | 學名 / 藍本 | 推薦序 |
+|------|-------------|--------|
+| C1 Mean Reversion | AQR 短期反轉 / Lo contrarian | ★★★ |
+| C3 Volatility Breakout | Turtle / Keltner / Bollinger | ★★ |
+| C4 LLM Advisor Signal | NLP sentiment factor | ★（等 S2 累積 3-6 月）|
+| C2 52w Momentum | Jegadeesh & Titman 1993 | × 與 V1 重疊 |
+| C5 Pair Trading | StatArb / Avellaneda & Lee | × 留作未來 |
+
+**完整 retrospective**：見 [`STRATEGY_REVIEW.md`](STRATEGY_REVIEW.md)（A 段策略問題 / B 段未完成 task / C 段行動建議）。
+
+### 3.4 並行已部署 infrastructure
+
+- **S2 advisor cron**: `scripts/snapshot_advisor_scores.py` — 每日 heuristic Advisor 評分寫 `data/advisor_snapshots/<YYYYMMDD>.jsonl`，3-6 月後可做 IC 分析支援 C4
+- **S3 UI 策略頁**: `/strategy` 路徑顯示最新 V1 verdict + summary + manifest
+- **P01 memory paper router**: `src/paper/memory_router.py` — 接 SignalEngine 即時模擬成交（D04 60-day 評估前置）
+- **M01 + M02 monitor**: data freshness guard + live-vs-backtest consistency check
+
+### 3.5 剩餘 4 個未完成 task（皆等先決條件，**不建議現在做**）
+
+| Task | 為何沒做 | 完成路徑 |
+|------|---------|---------|
+| **P02** ShioajiSimRouter (paper layer) | 需真實 Shioaji API knowledge + mock；無 cert 環境難測 | 學 `src/fetcher/shioaji_fetcher.py` + mock 寫 router + 有 cert 環境 smoke test |
+| **X02** ShioajiSimRouter (execution layer) | 與 P02 名稱重疊 | **建議併入 P02**（同一個 router 兩處引用）|
+| **X03** ShioajiLiveRouter (實單) | V2 §10 強制等 D04 PASS 才可開做 | **不該做** — 先 D04 PASS |
+| **D04** paper 60d 報告 | 須 paper 跑滿 60 trading days + 100 trades | P01 接 cron 即時跑 → 等 ~12 週 → 評估 V2 §8.3 升級門檻 |
+
+**結論**：S1 strategy 研究是當前**唯一推進方向**。其他 task 屬時間累積型或實單前置（不該提早）。
+
+### 3.6 進入 S1 session 應做什麼
+
+1. **必讀**:
+   - `STRATEGY_REVIEW.md` A.0 策略類別 + A.5 候選 C1-C5（含學名 / 藍本 / 學術 paper reference）
+   - `PROGRESS.md` Global Session Log 末段（看 V1 六次判決演進）
+   - `analysis/backtest_v1_report.md` 詳細指標 + OOS-IS Window Diagnostic 表
+2. **先做**: 挑 C1 / C3 / C4 一個（建議 **C1 mean reversion**）做 IC 分析 → 過門檻才進 SignalEngine
+3. **新規格**: 應在 V2 §2 加 amendment 區寫 C1 / C3 / C4 策略定義，新建 `src/signals/rules/<strategy_name>.py`，比照 `long_entry_v1` 結構（pure evaluator + EntryConditions dataclass）
+4. **複用 infra**: backtest engine / orchestrator / regime gate / risk gates / journal / report 全部 **不必重做**，只換 entry rule
+
+### 3.7 不應再做的事
+
+- ❌ V1 內 grid search / 微調 entry 參數（已邊際遞減，會 overfit IS）
+- ❌ R3-full universe 全名單 35h backfill（sample 已證無 edge，ROI 低）
+- ❌ X02/X03 / P02（屬實單前置，現在做沒意義）
+- ❌ 收集更多 data（chip/margin 都已 4yr，universe sample 已驗證）
 
 若實際狀態與此段不符 → 以 PROGRESS 為準，並順手更新本段。
 
@@ -306,3 +363,4 @@ python scripts/test_shioaji_login.py
 ## 12. 變更歷史（本檔自身）
 
 - 2026-05-22：初版建立。Bootstrap session 完成 V2 spec + IMPLEMENTATION_PLAN + PROGRESS + 本 README。
+- 2026-05-24：§3 大改 — V1 §6.1 第 6 次判決完成（皆 FAIL，5/10 PASS）；總進度 41/45；新增 §3.1-3.7（V1 verdict 摘要 / 為何進入 S1 / 並行 infra / 剩餘 task / 進入 S1 session 應做什麼 / 不應做的事）；連結 STRATEGY_REVIEW.md。
