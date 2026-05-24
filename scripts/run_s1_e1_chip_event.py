@@ -21,7 +21,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Mapping
+from typing import Collection, Mapping
 
 import pandas as pd
 
@@ -74,19 +74,29 @@ def load_daily_ohlc_panel(data_dir: Path) -> pd.DataFrame:
     return panel[["open", "high", "low", "close", "volume"]]
 
 
-def load_chip_frames(data_dir: Path) -> dict[str, pd.DataFrame]:
+def load_chip_frames(
+    data_dir: Path,
+    *,
+    stock_ids: Collection[str] | None = None,
+) -> dict[str, pd.DataFrame]:
     return _load_daily_snapshot_frames(
         data_dir / "chips",
         payload_key="t86",
         columns=("foreign_net", "trust_net", "dealer_net", "all_net"),
+        stock_ids=stock_ids,
     )
 
 
-def load_margin_frames(data_dir: Path) -> dict[str, pd.DataFrame]:
+def load_margin_frames(
+    data_dir: Path,
+    *,
+    stock_ids: Collection[str] | None = None,
+) -> dict[str, pd.DataFrame]:
     return _load_daily_snapshot_frames(
         data_dir / "margin",
         payload_key="margin",
         columns=("margin_balance", "short_balance"),
+        stock_ids=stock_ids,
     )
 
 
@@ -189,8 +199,9 @@ def run_chip_event_experiment(
     horizons: tuple[int, ...] = (1, 3, 5),
 ) -> dict[str, TriggerExperiment]:
     ohlc = load_daily_ohlc_panel(data_dir)
-    chip_frames = load_chip_frames(data_dir)
-    margin_frames = load_margin_frames(data_dir)
+    stock_ids = set(ohlc.index.get_level_values("stock_id").unique()) if not ohlc.empty else set()
+    chip_frames = load_chip_frames(data_dir, stock_ids=stock_ids)
+    margin_frames = load_margin_frames(data_dir, stock_ids=stock_ids)
     panel = build_chip_event_panel(chip_frames, margin_frames)
 
     if ohlc.empty or panel.empty:
@@ -304,9 +315,11 @@ def _load_daily_snapshot_frames(
     *,
     payload_key: str,
     columns: tuple[str, ...],
+    stock_ids: Collection[str] | None = None,
 ) -> dict[str, pd.DataFrame]:
     if not snapshot_dir.exists():
         return {}
+    allowed = set(stock_ids) if stock_ids is not None else None
     rows_by_stock: dict[str, list[dict]] = {}
     for path in sorted(snapshot_dir.glob("*.json")):
         try:
@@ -319,13 +332,16 @@ def _load_daily_snapshot_frames(
         if not isinstance(rows, dict):
             continue
         for stock_id, raw in rows.items():
+            stock_id = str(stock_id)
+            if allowed is not None and stock_id not in allowed:
+                continue
             if not isinstance(raw, dict):
                 continue
             row = {"date": day}
             for col in columns:
                 if col in raw:
                     row[col] = float(raw[col])
-            rows_by_stock.setdefault(str(stock_id), []).append(row)
+            rows_by_stock.setdefault(stock_id, []).append(row)
 
     frames: dict[str, pd.DataFrame] = {}
     for stock_id, rows in rows_by_stock.items():
@@ -374,11 +390,11 @@ def _group_transform(series: pd.Series, fn) -> pd.Series:
         .apply(lambda s: fn(s.droplevel("stock_id")).astype(bool))
     )
     result.index = series.index
-    return result.map(bool).astype(object)
+    return result.astype(bool)
 
 
 def _false_mask(panel: pd.DataFrame) -> pd.Series:
-    return pd.Series([False] * len(panel.index), index=panel.index, dtype=object)
+    return pd.Series(False, index=panel.index)
 
 
 def _fmt_bp(value: float | None) -> str:

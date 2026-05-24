@@ -60,7 +60,7 @@ def test_foreign_anomaly_buy_uses_prior_rolling_mean_and_std() -> None:
     mask = foreign_anomaly_buy(panel, window=60, sigma=2.0)
 
     assert mask.iloc[:-1].sum() == 0
-    assert mask.iloc[-1] is True
+    assert bool(mask.iloc[-1]) is True
 
 
 def test_invtrust_anomaly_buy_uses_trust_net_column() -> None:
@@ -68,7 +68,7 @@ def test_invtrust_anomaly_buy_uses_trust_net_column() -> None:
 
     mask = invtrust_anomaly_buy(panel, window=60, sigma=2.0)
 
-    assert mask.iloc[-1] is True
+    assert bool(mask.iloc[-1]) is True
 
 
 def test_foreign_reverse_to_buy_requires_previous_five_days_negative() -> None:
@@ -76,8 +76,8 @@ def test_foreign_reverse_to_buy_requires_previous_five_days_negative() -> None:
 
     mask = foreign_reverse_to_buy(panel, lookback=5)
 
-    assert mask.iloc[5] is True
-    assert mask.iloc[6] is False
+    assert bool(mask.iloc[5]) is True
+    assert bool(mask.iloc[6]) is False
 
 
 def test_margin_rapid_drop_triggers_when_5d_change_is_below_prior_minus_2sigma() -> None:
@@ -88,7 +88,7 @@ def test_margin_rapid_drop_triggers_when_5d_change_is_below_prior_minus_2sigma()
 
     mask = margin_rapid_drop(panel, change_days=5, window=60, sigma=2.0)
 
-    assert mask.iloc[-1] is True
+    assert bool(mask.iloc[-1]) is True
 
 
 def test_build_chip_event_panel_merges_chip_and_margin_frames() -> None:
