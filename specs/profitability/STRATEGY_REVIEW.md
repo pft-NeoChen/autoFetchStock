@@ -440,6 +440,86 @@ E0 V1 bootstrap CI 上界 < 0
 
 ---
 
+## §F S3 Sprint 3 Plan（縮版 universe 擴充 → E3 重判）
+
+### F.1 為何 sprint 3 走縮版 universe expansion
+
+Sprint 2 verdict UNCERTAIN（OOS sector-neutral ic_mean 0.0320 / t-stat 0.77）— alpha 不夠強但也未死。Sprint 1/2 結果都受 **39 hand-picked 倖存者偏差** 影響（sprint 1 universe 含 39 檔事後贏家 + 100 隨機）。在投資 PORTFOLIO/RANK-SE 等週級 infra 前，**先擴大 universe 觀察 E3 sector-neutral 是否仍存活**：
+- 若擴大到 ~1900 上市/上櫃 universe 後 OOS ic_mean ≥ 0.04 → 真有 alpha，sprint 4 開始建 PORTFOLIO
+- 若仍 UNCERTAIN/DEAD → E3 確認 marginal/artifact，sprint 4 改方向（advisor IC / C0b / 補 infra）
+
+**縮版**：暫不抓已下市股（完整 survivorship-aware 多 2-3d 開發 + 50-80h backfill）。原 universe 已含 100 隨機抽，再擴到 1900 後 random sample 比例 ~95%，倖存者偏差大幅緩解。
+
+### F.2 三 task 規格
+
+#### TASK-S3-BACKFILL — Resumable wide-universe OHLC backfill
+
+- **目標**: 從 `analysis/sector_map.json` 的 1967 mappings 抓出 universe，剔除 0050/9110/非個股、再剔除已在 `data/stocks/` 的 139 檔，**對剩餘 ~1800 檔做 4yr daily OHLC backfill**
+- **Resume 要求**:
+  - 狀態檔 `analysis/backfill_state_wide.json` 記錄：
+    - `started_at` / `last_update` timestamps
+    - 完整 `stock_ids` list（run start 時 frozen）
+    - `completed` map: `{stock_id: status}`，status ∈ {ok, failed, skipped}
+    - `current` 進行中的 stock_id
+    - 失敗詳情 `errors` dict
+  - 重跑時 `--resume` flag → 跳過 `completed` 狀態的股票；無 flag 從頭
+  - 中斷安全：per-stock save 後 flush state；SIGINT 結束前再 flush 一次
+- **沿用既有 month-level idempotent**: `scripts.backfill_historical_daily.run_backfill` 已支援 per-month skip；只要再加 stock-list-level 狀態追蹤
+- **API**:
+  ```python
+  # scripts/backfill_wide_universe.py
+  @dataclass
+  class WideBackfillState:
+      started_at: str
+      last_update: str
+      stock_ids: list[str]
+      completed: dict[str, str]   # stock_id -> "ok" | "failed" | "skipped"
+      current: str | None
+      errors: dict[str, str]
+
+  def select_wide_universe(sector_map_path: Path, data_dir: Path) -> list[str]: ...
+  def load_state(state_path: Path) -> WideBackfillState | None: ...
+  def save_state(state_path: Path, state: WideBackfillState) -> None: ...
+  def run_wide_backfill(*, fetcher, storage, state_path, resume, ...) -> WideBackfillState: ...
+  ```
+- **Tests (RED list)**: ≥ 5 項
+  - `select_wide_universe` 去除已有 + 非個股
+  - `WideBackfillState` round-trip (save → load)
+  - `--resume` 跳過已 ok 股票
+  - SIGINT-equivalent：模擬中斷後狀態檔可恢復
+  - smoke：mock fetcher 跑 3 檔通透
+- **DoD**: 1800 檔 backfill 完成（或可分多次跑完）；新 universe 全 `data/stocks/*.json` 含 2022-05 起 4yr OHLC
+
+#### TASK-S3-WALKFWD-WIDE — E3 walk-forward on expanded universe
+
+- **目標**: 沿用 `scripts/run_s2_walkfwd_momentum.py`（不需重寫 orchestrator）在新 ~1900 universe 上重跑，產 `analysis/s3_walkfwd_wide_report.md`
+- **預期工作**:
+  - 確認 `load_daily_ohlc_panel` 在 1900 檔上 RAM 可容受（~50MB pandas frame；OK）
+  - 輸出格式同 s2 但加 universe size + 與 s2 對照表
+- **DoD**: report 產出；套 §E.3 gate verdict；PROGRESS 記錄
+- **預估**: 0.5d（含跑 walk-forward ~10-20 min）
+
+### F.3 Sprint 3 出口 gate（沿用 §E.3 但 universe 已擴大）
+
+| OOS sector-neutral ic_mean | 動作 |
+|---|---|
+| **≥ 0.04** | **UNLOCK**：E3 有 robust alpha → sprint 4 啟動 PORTFOLIO/RANK-SE/BACKTEST |
+| 0.02 - 0.04 | UNCERTAIN：universe 擴大也救不回 → E3 列 marginal，sprint 4 不投 portfolio infra |
+| < 0.02 | DEAD：E3 in-sample artifact 確定 → 結束 E3，sprint 4 改 C4 advisor / C0b / 補 infra |
+
+### F.4 Resume 操作協定（與 user 約定）
+
+User 在新 session 用「繼續 backfill」一句指令 → Claude:
+1. 跑 `python -m scripts.backfill_wide_universe --resume --background`
+2. 回報已完成 / 剩餘股票數
+3. 若 backfill 全部結束 → 自動接 TASK-S3-WALKFWD-WIDE
+
+### F.5 修改歷史（§F 自身）
+
+- 2026-05-25：建立 — sprint 2 UNCERTAIN 後規劃；用 resumable backfill 解 user 電腦不能一次跑 50h 限制。
+
+---
+
 ## §E S2 Sprint 2 Plan（縮版兩 task validation）
 
 ### E.1 為何縮版
@@ -532,3 +612,4 @@ Sprint 1 唯一過 gate 的 E3（C2 cross-sectional momentum）有四項致命 c
 - 2026-05-24：補 A.0「策略類別與經典脈絡」（CAN SLIM / SEPA / Darvas Box / Turtle / 籌碼派 lineage）+ C1-C5 學名與藍本 references。澄清 S1 是 task 代號非策略名稱。
 - 2026-05-24：新增 §D「S1 Research Plan」— 收斂 `STRATEGY_RESEARCH_CONVERSATION.md` 六輪討論結論，定義 7 個 S1 task / event-study helper API / gate threshold / 各 experiment 規格 / 出口決策樹。作為新 session 的 single source of truth。
 - 2026-05-24：S1 sprint 1 完成（7/7），新增 §E「S2 Sprint 2 Plan（縮版兩 task validation）」— SECTOR + WALKFWD 兩 task 先驗證 E3 alpha 在 walk-forward + 真實 sector 下是否仍存在，過 gate 才解鎖 PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST 四個 follow-up。
+- 2026-05-25：S2 sprint 2 完成（2/2），verdict UNCERTAIN（OOS sector-neutral ic_mean 0.0320），新增 §F「S3 Sprint 3 Plan（縮版 universe 擴充 → E3 重判）」— resumable backfill + walk-forward 重跑，解 user 電腦不能一次跑 50h 限制；過 §F.3 gate 才解鎖 portfolio infra。

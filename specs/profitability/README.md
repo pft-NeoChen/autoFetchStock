@@ -86,14 +86,14 @@ specs/
 
 ### 3.1 目前 phase
 
-**🎯 S2 sprint 2 完成（2/2）→ Verdict UNCERTAIN（不解鎖 4 follow-up）→ 等 user 決定 sprint 3 方向**
+**🎯 S3 sprint 3 啟動 — 縮版 universe 擴充 (~1800 新檔) + resumable backfill + E3 walk-forward 重判**
 
-- **總進度**: **50/54** tasks DONE（base 41/45 + S1 7/7 + S2 2/2）；0 IN_PROGRESS / 0 BLOCKED / 4 NOT_STARTED（全為 infra defer：P02/X02/X03/D04）
-- **Phase 完成度**: Phase 0-7/9 全 ✅；Phase 8（P01 ✅，P02/D04 defer）；Phase 10（X01 ✅，X02/X03 defer）；**Phase S1 + S2 全部 DONE**
+- **總進度**: **50/56** tasks DONE（base 41/45 + S1 7/7 + S2 2/2；S3 新增 2 NOT_STARTED）；0 IN_PROGRESS / 0 BLOCKED / 6 NOT_STARTED（2 S3 + 4 infra defer）
+- **Phase 完成度**: Phase 0-7/9 全 ✅；Phase 8/10 partial（4 infra defer）；**Phase S1 + S2 全部 DONE**；**Phase S3 啟動**（BACKFILL/WALKFWD-WIDE NOT_STARTED）
 - **Pytest**: 完整 **762/762 GREEN**（9 warnings：scipy precision + urllib3 LibreSSL env）
-- **Sprint 1 結論**: 見 `analysis/s1_sprint1_comparison_report.md`；E0 UNCERTAIN / E1 FAIL / E2 FAIL / E3 PASS（in-sample heuristic）
-- **Sprint 2 結論**: 見 `analysis/s2_walkfwd_momentum_report.md`；**11 windows walk-forward + 真實 27 industries sector-neutral OOS ic_mean = 0.0320**（落 §E.3 UNCERTAIN）；E3 alpha 大部分為 sector beta（縮水 64%）；t-stat 0.77 不顯著；**不解鎖** PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST 4 follow-up
-- **Sprint 3 候選**（待 user 決定）：(a) 擴 universe + survivorship-bias-aware（**建議優先**）、(b) C4 advisor IC（等 advisor 累積 3-6 月）、(c) 補 infra（P02/X02/D04）
+- **Sprint 1 結論**: `analysis/s1_sprint1_comparison_report.md`；E0 UNCERTAIN / E1 FAIL / E2 FAIL / E3 PASS（in-sample heuristic）
+- **Sprint 2 結論**: `analysis/s2_walkfwd_momentum_report.md`；walk-forward + 真實 27 industries sector-neutral OOS ic_mean = 0.0320 → UNCERTAIN；alpha 大部分為 sector beta
+- **Sprint 3 規劃**: `STRATEGY_REVIEW.md §F`；縮版 (a) — 擴 universe 至 ~1900 currently-listed (不含已下市)；resumable backfill 解電腦不能跑 50h 限制；§F.4 約定 user 說「繼續 backfill」即 Claude 跑 `--resume`
 
 ### 3.2 V1 第六次判決 verdict 摘要
 
@@ -146,13 +146,11 @@ specs/
    - `PROGRESS.md` Quick Status + S1 phase 對應 task block
    - `analysis/backtest_v1_report.md` V1 第六次判決細節（背景）
 2. **下一個動作**（依 PROGRESS Quick Status）：
-   - S1 + S2 sprint 全部 DONE；Sprint 2 verdict UNCERTAIN（sector-neutral OOS ic_mean 0.0320，未過 §E.3 0.04 解鎖門檻）
-   - **不解鎖** 4 個 follow-up task（PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST）— 避免在 marginal alpha 上投資週級 task
-   - **等 user 決定 sprint 3 方向**。三個候選（建議優先 (a)）：
-     - (a) 擴 universe + survivorship-bias-aware（解原 39 hand-picked 偏差，再戰 E3 sector-neutral）
-     - (b) C4 advisor IC（等 advisor 累積 3-6 月後跑 IC 分析）
-     - (c) 補 infra（P02 ShioajiSimRouter / X02 / D04 paper trading 前置）
-   - 詳見 `analysis/s2_walkfwd_momentum_report.md` + `STRATEGY_REVIEW.md §E.3`
+   - S1 + S2 sprint 全部 DONE；user 批准 sprint 3 縮版 (a) — universe 擴充 + resumable backfill
+   - 當前 active task = **TASK-S3-BACKFILL**（RED 階段）— resumable wide-universe OHLC backfill
+   - 完成 BACKFILL 後（可分多次 resume 累積）接 **TASK-S3-WALKFWD-WIDE**
+   - **§F.4 Resume 協定**：user 在新 session 說「繼續 backfill」→ Claude 跑 `python -m scripts.backfill_wide_universe --resume`，回報進度
+   - 詳見 `STRATEGY_REVIEW.md §F`
 3. **不要直接做**: 完整 SignalEngine implementation（除非該策略已過 §D.3 gate）/ paper runner / multi-strategy allocator
 4. **複用 infra**: backtest engine / orchestrator / regime gate / risk gates / journal / report / cost_model 全部 **不必重做**
 

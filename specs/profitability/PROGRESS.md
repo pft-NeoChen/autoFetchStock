@@ -11,11 +11,11 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | **TASK-S2-WALKFWD 完成 → Sprint 2 verdict: UNCERTAIN**：新增 `scripts/run_s2_walkfwd_momentum.py` + 4 unit tests + `analysis/s2_walkfwd_momentum_report.md`。沿用 V1 walk-forward 切分（IS 12mo / OOS 3mo / 15bd embargo）共 11 windows，跑真實 27 industries sector-neutral：**Raw OOS ic_mean 0.0887 / std 0.1418；Sector-neutral OOS ic_mean 0.0320 / std 0.1378**。Sector-neutral 比 raw 縮水 ~64% 進一步證實 alpha 多為 sector beta。0.0320 落 §E.3 UNCERTAIN 區（0.02-0.04 灰區），**不解鎖** PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST 4 個 follow-up task。t-stat ~0.77 統計上不顯著。Commits: RED `a2e4daf` / GREEN `1c43b9c` / REPORT (pending)。完整 pytest **762/762 GREEN**。 |
-| 當前 phase | **Phase S2 sprint 2 完成（2/2）** — validation 結果 UNCERTAIN，不解鎖 4 follow-up task；等 user 決定 sprint 3 方向 |
-| 當前 task | — (Sprint 2 全部 DONE) |
-| 下一個建議 task | **由 user 決定 sprint 3 方向**。三個主要候選：(a) 擴 universe + survivorship-bias-aware（解 39 hand-picked 偏差，再戰 E3 sector-neutral）；(b) C4 advisor IC（等 advisor 累積到 3-6 月後跑）；(c) 補 infra（P02/X02/D04 paper trading 前置）。**建議 (a)**：sprint 1 E3 PASS / sprint 2 UNCERTAIN 兩個結果都受 universe survivorship bias 影響，先擴大 universe 是 highest-info-value 動作。 |
-| 全域 blocked | 無；Sprint 2 結束，等 sprint 3 方向確認 |
+| 上次 session | **S2 sprint 2 結束（UNCERTAIN）→ Sprint 3 縮版 universe 擴充規劃寫入 §F**：user 批准縮版 (a)（不含已下市股），加 resumable backfill 解電腦不能一次跑 50h 限制。STRATEGY_REVIEW 新增 §F（§F.1 為何縮版 / §F.2 兩 task 規格：BACKFILL+WALKFWD-WIDE / §F.3 出口 gate / §F.4 resume 操作協定：user 說「繼續 backfill」即由 Claude 跑 `--resume`）。PROGRESS 新增 S3 phase row（2 task NOT_STARTED）。Sprint 2 commit hashes：§E `e8684ea` / SECTOR `1f710c9` / WALKFWD `5bf08fb`。 |
+| 當前 phase | **Phase S3 sprint 3 啟動** — 縮版 universe expansion + E3 重判。先 BACKFILL（resumable，可分多次跑 ~35-50h 累積）→ WALKFWD-WIDE 重評 §F.3 gate |
+| 當前 task | — (準備開動 TASK-S3-BACKFILL RED 階段) |
+| 下一個建議 task | **TASK-S3-BACKFILL** — resumable wide-universe backfill。從 `analysis/sector_map.json` 1967 mappings 選出 ~1800 新檔（去 0050/9110/已有 139 檔），對 ~1800 檔做 4yr daily OHLC backfill；狀態檔 `analysis/backfill_state_wide.json` 支援 `--resume` 跳過已 ok 股票。Resume 協定見 `STRATEGY_REVIEW.md §F.4`。 |
+| 全域 blocked | 無；Sprint 3 backfill 進行中時可分多 session resume |
 | Pytest 狀態 | 完整 pytest **751/751 GREEN**（6 warnings：scipy precision + urllib3 LibreSSL env） |
 | 檔案位置 | `specs/profitability/{README,PROFITABILITY_PLAN_V2,IMPLEMENTATION_PLAN,STRATEGY_REVIEW,PROGRESS,STRATEGY_RESEARCH_CONVERSATION}.md` + `src/research/{event_study,trade_bootstrap}.py` + `src/features/{rsi,*}.py` + `src/signals/{ic_analysis,sector_neutral,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/{data_freshness_guard,consistency_check}.py` + `src/execution/order_router.py` + `src/paper/memory_router.py` + `src/universe/{filter,api_loader}.py` + `src/app/pages/strategy.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1,run_s1_e0_v1_bootstrap,run_s1_e1_chip_event,run_s1_e2_mean_reversion,run_s1_e3_momentum_ic,build_sampled_universe,snapshot_advisor_scores}.py` + `analysis/v1_trades.json` + `analysis/{local_data_audit,ic_report,backtest_v1_report,s1_e0_v1_bootstrap_report,s1_e1_chip_event_report,s1_e2_mean_reversion_report,s1_e3_momentum_ic_report,s1_sprint1_comparison_report}.md` |
 | Repo 是否乾淨 | main：S1 全部 task 完成；working tree 仍有 pre-existing modified/untracked files。本 session 新增 sprint 1 comparison report，PROGRESS 與 README 同步更新 |
@@ -40,7 +40,8 @@
 | 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
 | **S1 — Strategy Research Sprint 1**（spec `STRATEGY_REVIEW.md §D`）| 7 | 7 | 0 | 0 | 0 |
 | **S2 — Sprint 2 validation**（spec `STRATEGY_REVIEW.md §E`，縮版 2 task）| 2 | 2 | 0 | 0 | 0 |
-| **總計** | **54** | **50** | **0** | **4** | **0** |
+| **S3 — Sprint 3 universe expansion**（spec `STRATEGY_REVIEW.md §F`，縮版 2 task）| 2 | 0 | 0 | 2 | 0 |
+| **總計** | **56** | **50** | **0** | **6** | **0** |
 
 ---
 
@@ -1602,7 +1603,52 @@
 - **Session log**:
   - 2026-05-25 RED `a2e4daf`：4 tests（compute_window_ic / classify_walkfwd_verdict gate / empty / 4 stocks × 600 bd smoke）
   - 2026-05-25 GREEN `1c43b9c`：實作 orchestrator，沿用 V1 walk-forward + ic_analysis.compute_ic + sector_neutralize；完整 pytest **762/762 GREEN**
-  - 2026-05-25 REPORT (pending commit)：跑 139 universe 4yr → 11 windows OOS：raw 0.0887 / SN 0.0320 → **UNCERTAIN**；sprint 2 結束，不解鎖 4 follow-up
+  - 2026-05-25 REPORT `5bf08fb`：跑 139 universe 4yr → 11 windows OOS：raw 0.0887 / SN 0.0320 → **UNCERTAIN**；sprint 2 結束，不解鎖 4 follow-up
+
+### TASK-S3-BACKFILL
+
+- **Name**: Resumable wide-universe OHLC backfill
+- **Source**: `STRATEGY_REVIEW.md §F.2`
+- **Status**: `NOT_STARTED`
+- **Depends**: TASK-S2-SECTOR ✅ (provides `analysis/sector_map.json`)
+- **Files (planned)**:
+  - `scripts/backfill_wide_universe.py` — `select_wide_universe` + `WideBackfillState` (load/save) + `run_wide_backfill` 沿用 `scripts.backfill_historical_daily.run_backfill` per-month idempotency + stock-list-level state
+  - `tests/test_scripts/test_backfill_wide_universe.py` — ≥ 5 tests
+  - `analysis/backfill_state_wide.json` — 持久化進度 artifact（會更新 .gitignore 加例外或放 analysis/）
+- **Acceptance**:
+  - 從 `analysis/sector_map.json` 抓 1967 mappings 去 ETF/TDR + 已有 139 → ~1800 新 universe
+  - State 檔 round-trip 完整（stock_ids list + completed map + current + errors）
+  - `--resume` 跳過已 `ok` 股票
+  - SIGINT 中斷後狀態檔可恢復（per-stock flush）
+  - 沿用 `data/stocks/{sid}.json` 月級 idempotent（不重抓已有月份）
+- **Tests (RED list)**: ≥ 5 項
+  - `select_wide_universe` filtering（exclude ETF/TDR/already-have）
+  - state 序列化 round-trip
+  - resume 跳過已 ok
+  - SIGINT-equivalent：模擬中斷後狀態檔可恢復
+  - smoke：mock fetcher 跑 3 檔通透
+- **DoD**: state 檔可 resume；mock test 全綠；real backfill 可由 user 分多次「繼續 backfill」累積到完成
+- **Last updated**: 2026-05-25
+- **Session log**: _尚無_
+
+### TASK-S3-WALKFWD-WIDE
+
+- **Name**: E3 walk-forward IC on expanded ~1900 universe
+- **Source**: `STRATEGY_REVIEW.md §F.2`
+- **Status**: `NOT_STARTED`
+- **Depends**: TASK-S3-BACKFILL ✅ (universe extended to ~1900)
+- **Files (planned)**:
+  - 重用 `scripts/run_s2_walkfwd_momentum.py`（無需 fork；可加 `--label s3-wide` arg）
+  - `analysis/s3_walkfwd_wide_report.md` — 比較 s2 vs s3，套 §F.3 gate
+- **Acceptance**:
+  - 在 ~1900 universe 上重跑 11 windows OOS
+  - 同時呈現 raw + real sector-neutral
+  - 與 sprint 2 OOS 結果並列對照
+  - 套 §F.3 verdict：≥ 0.04 UNLOCK / 0.02-0.04 UNCERTAIN / < 0.02 DEAD
+- **Tests**: 不需新增（既有 walk-forward orchestrator unit tests 4 個已覆蓋邏輯；只是換 universe）
+- **DoD**: report 產出 + PROGRESS 記錄 verdict
+- **Last updated**: 2026-05-25
+- **Session log**: _尚無_
 
 ---
 
