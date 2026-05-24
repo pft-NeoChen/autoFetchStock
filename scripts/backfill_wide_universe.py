@@ -248,13 +248,11 @@ def main() -> int:  # pragma: no cover — CLI glue
         return 0
 
     # Late imports to keep test surface clean
-    from src.config import AppConfig
     from src.fetcher.data_fetcher import DataFetcher
     from src.storage.data_storage import DataStorage
 
-    config = AppConfig.from_env()
-    fetcher = DataFetcher(config)
-    storage = DataStorage(config)
+    storage = DataStorage(str(args.data_dir))
+    fetcher = DataFetcher(storage=storage)
     today = date.today()
     target_start = date(today.year - args.years, today.month, 1)
 

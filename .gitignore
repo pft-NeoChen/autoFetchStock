@@ -105,3 +105,6 @@ config.env
 cert/
 
 design_handoff_autoFetchStock/
+
+# TASK-S3-BACKFILL — mutable resume state; data persists on disk for cross-session resume
+analysis/backfill_state_wide.json
