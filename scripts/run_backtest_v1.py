@@ -37,7 +37,7 @@ from src.backtest.adapters.signal_adapter import (
     make_exit_decider,
 )
 from src.backtest.benchmark import compute_benchmarks
-from src.backtest.regime_classifier import Regime, count_regime_coverage
+from src.backtest.regime_classifier import Regime, classify_window, count_regime_coverage
 from src.backtest.walk_forward import walk_forward_windows
 from src.backtest.walk_orchestrator import (
     compute_oos_is_ratio_from_result,
@@ -126,6 +126,67 @@ def load_market_proxy_from_disk(
             df[col] = float("nan")
     df = df[empty_cols].astype(float)
     return df, df["close"].copy()
+
+
+def _segment_return(equity: pd.Series) -> float:
+    if equity is None or equity.empty or len(equity) < 2:
+        return 0.0
+    start = float(equity.iloc[0])
+    end = float(equity.iloc[-1])
+    return (end / start - 1.0) if start != 0 else 0.0
+
+
+def _render_window_diagnostic(
+    result, market_ohlc: pd.DataFrame
+) -> str:
+    """Markdown table of per-window IS vs OOS returns + trade counts.
+
+    Surfaces overfitting (IS positive but OOS negative) and sample-size
+    asymmetry. ``regime`` column uses the market-wide classifier on
+    ``market_ohlc`` (0050 proxy in current setup).
+    """
+    if not result.window_results:
+        return "\n## OOS-IS Window Diagnostic\n\n_(no windows ran)_\n"
+
+    lines = [
+        "\n## OOS-IS Window Diagnostic",
+        "",
+        "| # | OOS span | regime | IS trades | OOS trades | IS return | OOS return | ratio |",
+        "|---|----------|--------|-----------|-----------|-----------|-----------|-------|",
+    ]
+    for i, wr in enumerate(result.window_results, start=1):
+        is_ret = _segment_return(wr.is_combined_equity)
+        oos_ret = _segment_return(wr.combined_equity)
+        ratio = (oos_ret / is_ret) if is_ret != 0 else 0.0
+        try:
+            regime = classify_window(market_ohlc, wr.window.oos_start, wr.window.oos_end)
+            regime_str = regime.value if regime is not None else "n/a"
+        except Exception:  # noqa: BLE001
+            regime_str = "n/a"
+        lines.append(
+            f"| {i} | {wr.window.oos_start} ~ {wr.window.oos_end} | {regime_str} | "
+            f"{len(wr.is_trades)} | {len(wr.trades)} | "
+            f"{is_ret * 100:.2f}% | {oos_ret * 100:.2f}% | {ratio:.2f} |"
+        )
+
+    # Aggregate stats
+    is_positive_windows = sum(
+        1 for wr in result.window_results
+        if _segment_return(wr.is_combined_equity) > 0
+    )
+    oos_positive_windows = sum(
+        1 for wr in result.window_results
+        if _segment_return(wr.combined_equity) > 0
+    )
+    lines += [
+        "",
+        f"**IS positive windows**: {is_positive_windows} / {len(result.window_results)}",
+        f"**OOS positive windows**: {oos_positive_windows} / {len(result.window_results)}",
+        "",
+        "_Interpretation: large gap between IS+ and OOS+ counts → likely overfitting "
+        "or regime mismatch. Equal counts with negative average ratio → consistent loss._",
+    ]
+    return "\n".join(lines)
 
 
 def benchmark_period_returns(
@@ -626,6 +687,10 @@ def run(
         "---",
         "",
     ]
+    # Per-window IS vs OOS diagnostic — surfaces overfit / sample-size issues.
+    window_diag = _render_window_diagnostic(result, market_ohlc)
+    md = md + "\n" + window_diag
+
     md = md.replace("# Backtest Report\n", "# Backtest Report\n\n" + "\n".join(caveats), 1)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
