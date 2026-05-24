@@ -10,11 +10,11 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | V1 §6.1 第五次判決（R1+R2 applied） — R1 移除 long_entry 的 `market_above_ma60` 冗餘 check + R2 `RegimeGateConfig` default 改 `{BULL, RANGE}`；V2 §2 / §6.1 doc 對齊修訂；tests 全 GREEN 649/649；重跑 V1：n_trades 43→**47**，total_return -0.91%、sharpe -0.11、Profit Factor 1.50；仍 ❌ FAIL（5/10 PASS 不變，n_trades 仍差 3）。R1 效果遞減顯示繼續放寬 entry rule 已邊際遞減，建議轉攻 R3 (universe survivorship 根本解) 或檢視策略本質（oos_is_ratio -0.25 暗示 overfit）|
-| 當前 phase | **V1 §6.1 第五次判決完成（❌ FAIL，5/10 PASS）** — entry-rule tweak 已到邊際，下一步需根本性改變 |
-| 當前 task | — |
-| 下一個建議 task | (R3) universe survivorship 解 — TWSE listed+delisted 全名單，2d+；或 (D-investigate) 診斷 oos_is_ratio 為何負（IS positive, OOS negative） — 1-2hr 報告型工作 |
-| 全域 blocked | 無（R3 是大型工作，autonomous 內可分多 session 推進） |
+| 上次 session | V1 §6.1 第五次判決（R1+R2 applied）+ D-investigate (window diagnostic) — R1 移除 long_entry `market_above_ma60` + R2 `RegimeGateConfig` default `{BULL,RANGE}` → n_trades 43→47 (-0.91% / Sharpe -0.11)；加 `_render_window_diagnostic` 表 11 windows IS vs OOS／regime/trade count → 揭露非典型 overfit：IS+ 5/11 vs OOS+ 4/11（接近），但 BEAR windows (7-10) IS+ 而 OOS- 顯示 bear cherry-pick 不延續；OOS 每窗 1-9 trades 統計噪音為主 → 根因：**樣本量 / regime 集中問題，非策略缺陷**。R3 (universe 全名單) 確定是正解。完整 pytest 649/649 GREEN |
+| 當前 phase | **V1 §6.1 第五次判決完成（❌ FAIL，5/10 PASS）+ D-investigate DONE** — 確認 R3 為下一步正解 |
+| 當前 task | R3 啟動候選 — TWSE listed+delisted universe 全名單 |
+| 下一個建議 task | (R3) 拆 sub-tasks：(R3a) 找 TWSE 公開上市/上櫃名單 API + 載入；(R3b) 找 delisted/減資/停止交易歷史名單；(R3c) 改 `src/universe/filter.py` 接全名單；(R3d) D01b backfill 擴 universe；(R3e) 重跑 V1 第 6 次判決 |
+| 全域 blocked | 無（R3 大型工作，autonomous burst 起步階段做 R3a-c 設計與探勘，backfill 留待用戶決定執行時機） |
 | Pytest 狀態 | 完整 pytest 649/649 GREEN（5 warnings env-level） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/execution/order_router.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
 | Repo 是否乾淨 | main：X01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
@@ -1059,6 +1059,16 @@
   - 完整 pytest 649/649 GREEN（從 648 加 1，分裂 range test）
   - **V1 重跑**: n_trades 43 → 47（仍差 3），total_return -0.91%、Sharpe -0.11、PF 1.50、max_dd 2.60%、beats_benchmarks ✅ + oos_alpha ✅ 仍 PASS、regime_coverage 7+4+0 不變
   - **結論**: R1 效果遞減（+4 trades）。繼續放寬 entry rule 已邊際；策略本質仍 break-even。建議：(R3) universe 解 survivorship / (D-investigate) 診斷 OOS-IS 反向
+- 2026-05-24 | D-investigate window diagnostic |
+  - `scripts/run_backtest_v1.py` 加 `_render_window_diagnostic(result, market_ohlc)` + `_segment_return`：產 markdown 表 11 windows IS vs OOS、regime label、trade counts、ratio
+  - V1 報告末段新增 「OOS-IS Window Diagnostic」 section
+  - **發現**:
+    - IS positive 5/11 vs OOS positive 4/11（接近 → 非典型 overfit）
+    - **regime 集中現象**: window 1-6, 11 (bull) 多正；7-10 (bear) IS+ 而 OOS-
+    - OOS 每窗 1-9 trades，平均 4.3 trades → 統計噪音主導
+    - Bull 期 IS+2.97% / OOS+0.28%（#11）顯示策略在多頭可運作
+    - Bear 期最壞 #10 IS+0.99% / OOS-0.74%，bear cherry-pick 不延續
+  - **結論**: 非典型 overfit，根因為 **universe 過小 + survivorship bias + bear 窗統計噪音**。R3 (universe 全名單) 確定是下一步正解。
 - 2026-05-24 | Plan E 4yr backfill + V1 §6.1 第四次判決 + cleanup |
   - **Backfill chain** 自動執行：daily 4yr（00:55→01:48，39/39 ok，1032 月，19337 records）→ chip 4yr 自動接（01:49→04:00，560 days，487 t86，486 margin，failed=0，empty=73）。最終 chips 484→971 / margin 484→970 檔。
   - **Cleanup commits** 並行做：
