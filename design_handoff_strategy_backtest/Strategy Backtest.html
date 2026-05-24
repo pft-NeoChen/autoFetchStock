@@ -1,0 +1,1087 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<title>策略回測結果 — autoFetchStock</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ===========================================================
+     Tokens — spec-aligned dark theme
+     =========================================================== */
+  :root {
+    --bg:           #1a1a1a;
+    --bg-2:         #1f1f1f;
+    --surface:      #222222;
+    --surface-2:    #2a2a2a;
+    --line:         #2e2e2e;
+    --line-2:       #3a3a3a;
+
+    --ink:          #f5f5f5;
+    --ink-2:        #c8c8c8;
+    --ink-3:        #8a8a8a;
+    --ink-4:        #5a5a5a;
+
+    --accent:       #6c8eff;
+    --accent-bg:    rgba(108,142,255,0.10);
+    --accent-line:  rgba(108,142,255,0.30);
+
+    --pass:         #4ade80;
+    --pass-bg:      rgba(74,222,128,0.10);
+    --pass-line:    rgba(74,222,128,0.28);
+
+    --fail:         #f87171;
+    --fail-bg:      rgba(248,113,113,0.10);
+    --fail-line:    rgba(248,113,113,0.30);
+
+    --warn:         #facc15;
+    --warn-bg:      rgba(250,204,21,0.10);
+    --warn-line:    rgba(250,204,21,0.30);
+
+    --radius:       10px;
+    --radius-sm:    6px;
+    --gap:          20px;
+
+    color-scheme: dark;
+    font-family: "Noto Sans TC", "Microsoft JhengHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    min-height: 100vh;
+    font-size: 14px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+  /* ===========================================================
+     Page shell
+     =========================================================== */
+  .topbar {
+    border-bottom: 1px solid var(--line);
+    background: #161616;
+  }
+  .topbar-inner {
+    max-width: 1100px; margin: 0 auto;
+    padding: 14px 28px;
+    display: flex; align-items: center; gap: 18px;
+    font-size: 13px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--ink); font-weight: 600;
+    text-decoration: none;
+  }
+  .brand .dot {
+    width: 8px; height: 8px; border-radius: 2px;
+    background: var(--accent);
+  }
+  .crumb {
+    color: var(--ink-3);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .crumb a { color: var(--ink-3); text-decoration: none; }
+  .crumb a:hover { color: var(--ink-2); }
+  .crumb .sep { color: var(--ink-4); }
+  .crumb .here { color: var(--ink); }
+  .topbar-right {
+    margin-left: auto;
+    color: var(--ink-3);
+    font-size: 12px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .topbar-right .run-id {
+    font-family: "IBM Plex Mono", monospace;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 3px 8px; border-radius: 4px;
+    color: var(--ink-2);
+  }
+
+  #strategy-page {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 28px 28px 80px;
+    display: flex; flex-direction: column;
+    gap: var(--gap);
+  }
+
+  /* ===========================================================
+     Page heading
+     =========================================================== */
+  .page-head {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 4px 0 2px;
+  }
+  .page-eyebrow {
+    font-size: 11px; color: var(--ink-3);
+    letter-spacing: 0.16em; text-transform: uppercase;
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .page-title {
+    font-size: 26px; font-weight: 700;
+    letter-spacing: 0.005em;
+  }
+  .page-sub {
+    color: var(--ink-3); font-size: 13px;
+  }
+
+  /* ===========================================================
+     Generic card
+     =========================================================== */
+  .card {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .card:hover { border-color: var(--line-2); }
+  .card-pad { padding: 22px 24px; }
+  .card-head {
+    padding: 18px 24px 0;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .card-head h2 {
+    font-size: 13px; font-weight: 600;
+    color: var(--ink-2);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .card-head .h-sub {
+    font-size: 12px; color: var(--ink-3);
+    min-width: 0;
+  }
+  .card-body { padding: 14px 24px 22px; }
+
+  /* ===========================================================
+     Verdict (the hero) — 5px left bar, larger, blue accent
+     =========================================================== */
+  #strategy-page-verdict {
+    background: var(--surface);
+    border: 1px solid var(--line-2);
+    border-left: 5px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 28px 30px 30px;
+    transition: border-color .15s ease;
+  }
+  #strategy-page-verdict:hover {
+    border-color: var(--line-2);
+    border-left-color: var(--accent);
+  }
+  .verdict-tag {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-line);
+    padding: 3px 9px;
+    border-radius: 4px;
+    font-family: "IBM Plex Mono", monospace;
+    margin-bottom: 14px;
+    white-space: nowrap;
+  }
+  .verdict-headline {
+    font-size: 30px; font-weight: 700;
+    line-height: 1.25;
+    color: var(--ink);
+    letter-spacing: 0.005em;
+  }
+  .verdict-headline .v-icon {
+    display: inline-block;
+    margin-right: 6px;
+  }
+  .verdict-headline.v-fail .v-icon { color: var(--fail); }
+  .verdict-headline.v-pass .v-icon { color: var(--pass); }
+  .verdict-headline.v-warn .v-icon { color: var(--warn); }
+
+  .verdict-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-top: 22px;
+  }
+  .verdict-block {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px 16px;
+  }
+  .verdict-block h4 {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 500;
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .verdict-block h4 .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+  }
+  .verdict-block.reason h4 .dot   { background: var(--warn); }
+  .verdict-block.action h4 .dot   { background: var(--accent); }
+  .verdict-block p {
+    font-size: 14.5px;
+    color: var(--ink-2);
+    line-height: 1.7;
+  }
+  .verdict-block .num { color: var(--ink); }
+
+  /* ===========================================================
+     "What is this page" explainer
+     =========================================================== */
+  #strategy-page-explainer .card-body {
+    padding-top: 6px;
+  }
+  #strategy-page-explainer p {
+    color: var(--ink-2);
+    font-size: 14px;
+    line-height: 1.75;
+  }
+  #strategy-page-explainer p + p { margin-top: 8px; }
+  #strategy-page-explainer .em {
+    color: var(--ink);
+    border-bottom: 1px dashed var(--ink-4);
+  }
+
+  /* ===========================================================
+     "What we tested" — spec grid
+     =========================================================== */
+  #strategy-page-what-we-tested .spec-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .spec {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px 15px;
+    transition: border-color .15s ease;
+  }
+  .spec:hover { border-color: var(--line-2); }
+  .spec .spec-label {
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-3);
+    font-family: "IBM Plex Mono", monospace;
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .spec .spec-label .ic {
+    color: var(--accent); font-size: 13px; line-height: 1;
+  }
+  .spec .spec-value {
+    font-size: 16px; font-weight: 600; color: var(--ink);
+    line-height: 1.35;
+  }
+  .spec .spec-detail {
+    font-size: 13px; color: var(--ink-3);
+    margin-top: 6px;
+    line-height: 1.6;
+  }
+  .spec.wide { grid-column: 1 / -1; }
+  .rule-list {
+    display: flex; flex-direction: column;
+    gap: 6px; margin-top: 8px;
+  }
+  .rule-row {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 12px;
+    align-items: baseline;
+  }
+  .rule-tag {
+    font-size: 11px;
+    color: var(--accent);
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-line);
+    padding: 2px 7px;
+    border-radius: 4px;
+    text-align: center;
+    font-family: "IBM Plex Mono", monospace;
+    letter-spacing: 0.05em;
+  }
+  .rule-tag.exit { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-line); }
+  .rule-text {
+    color: var(--ink-2); font-size: 14px; line-height: 1.6;
+  }
+
+  /* Walk-forward analogy diagram */
+  .wf-explainer {
+    margin-top: 12px;
+    padding: 14px 14px 16px;
+    background: var(--bg-2);
+    border: 1px dashed var(--line-2);
+    border-radius: var(--radius-sm);
+  }
+  .wf-explainer p {
+    font-size: 13px; color: var(--ink-2); line-height: 1.65;
+  }
+  .wf-diagram {
+    display: flex; flex-direction: column;
+    gap: 4px;
+    margin-top: 12px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+  }
+  .wf-row { display: flex; align-items: center; gap: 4px; }
+  .wf-label {
+    width: 56px; color: var(--ink-3);
+    font-size: 11px;
+  }
+  .wf-bar {
+    display: flex; flex: 1;
+    height: 18px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .wf-seg {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: rgba(0,0,0,0.55);
+    font-weight: 600;
+  }
+  .wf-seg.train  { background: rgba(108,142,255,0.45); color: #cfdcff; }
+  .wf-seg.test   { background: rgba(74,222,128,0.45);  color: #c2f5d4; }
+  .wf-seg.empty  { background: transparent; }
+  .wf-legend {
+    display: flex; gap: 16px; margin-top: 10px;
+    font-size: 12px; color: var(--ink-3);
+  }
+  .wf-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .wf-legend .sw {
+    width: 10px; height: 10px; border-radius: 2px;
+  }
+  .wf-legend .sw.train { background: rgba(108,142,255,0.55); }
+  .wf-legend .sw.test  { background: rgba(74,222,128,0.55); }
+
+  /* ===========================================================
+     Metrics
+     =========================================================== */
+  .metric-list {
+    display: flex; flex-direction: column;
+    gap: 0;
+  }
+  .metric {
+    display: grid;
+    grid-template-columns: 18px 1fr 200px 1.4fr;
+    align-items: center;
+    gap: 18px;
+    padding: 14px 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .metric:last-child { border-bottom: 0; }
+  .metric-status {
+    width: 10px; height: 10px; border-radius: 50%;
+    justify-self: center;
+  }
+  .metric-status.pass { background: var(--pass); box-shadow: 0 0 8px rgba(74,222,128,0.5); }
+  .metric-status.warn { background: var(--warn); box-shadow: 0 0 8px rgba(250,204,21,0.5); }
+  .metric-status.fail { background: var(--fail); box-shadow: 0 0 8px rgba(248,113,113,0.5); }
+  .metric-name {
+    color: var(--ink);
+    font-size: 14.5px;
+    font-weight: 500;
+  }
+  .metric-name .hint {
+    display: block;
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 400;
+    margin-top: 1px;
+  }
+  .metric-value {
+    text-align: right;
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .metric-value .v {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -0.005em;
+  }
+  .metric-value .u {
+    font-size: 12px;
+    color: var(--ink-3);
+    margin-left: 4px;
+  }
+  .metric-value.pos .v { color: var(--pass); }
+  .metric-value.neg .v { color: var(--fail); }
+  .metric-meaning {
+    color: var(--ink-2);
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  .metric-meaning .pill {
+    display: inline-block;
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-right: 6px;
+    font-family: "IBM Plex Mono", monospace;
+    vertical-align: 2px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .pill.pass { color: var(--pass); background: var(--pass-bg); border: 1px solid var(--pass-line); }
+  .pill.warn { color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-line); }
+  .pill.fail { color: var(--fail); background: var(--fail-bg); border: 1px solid var(--fail-line); }
+
+  /* ===========================================================
+     Recommendation
+     =========================================================== */
+  #strategy-page-recommendation .reco-list {
+    display: flex; flex-direction: column;
+    gap: 12px;
+  }
+  .reco {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 14px;
+    align-items: start;
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .reco:hover { border-color: var(--line-2); background: var(--surface-2); }
+  .reco-num {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent-bg);
+    color: var(--accent);
+    border: 1px solid var(--accent-line);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px; font-weight: 600;
+  }
+  .reco-body {
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .reco-title {
+    font-size: 15px; font-weight: 600; color: var(--ink);
+  }
+  .reco-desc {
+    font-size: 13.5px; color: var(--ink-2); line-height: 1.65;
+  }
+  .reco-desc code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    color: var(--accent);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* ===========================================================
+     Advanced details — collapsible
+     =========================================================== */
+  #strategy-page-details {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color .15s ease;
+  }
+  #strategy-page-details:hover { border-color: var(--line-2); }
+  #strategy-page-details > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 18px 24px;
+    display: flex; align-items: center; gap: 12px;
+    user-select: none;
+  }
+  #strategy-page-details > summary::-webkit-details-marker { display: none; }
+  #strategy-page-details > summary .caret {
+    display: inline-block;
+    transition: transform .2s ease;
+    color: var(--ink-3);
+  }
+  #strategy-page-details[open] > summary .caret { transform: rotate(90deg); }
+  #strategy-page-details > summary .lbl {
+    font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-2); font-weight: 600;
+    white-space: nowrap;
+  }
+  #strategy-page-details > summary .sub {
+    color: var(--ink-3); font-size: 12px;
+  }
+  #strategy-page-details > summary .spacer { flex: 1; }
+  #strategy-page-details > summary .hint {
+    color: var(--ink-4); font-size: 12px;
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .details-body {
+    padding: 4px 24px 24px;
+    display: flex; flex-direction: column;
+    gap: 22px;
+  }
+  .details-section h3 {
+    font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 500;
+    margin-bottom: 10px;
+    font-family: "IBM Plex Mono", monospace;
+  }
+
+  /* manifest table */
+  .manifest {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .manifest th, .manifest td {
+    padding: 9px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+  }
+  .manifest tr:last-child td { border-bottom: 0; }
+  .manifest th {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+    background: var(--bg-2);
+  }
+  .manifest td.key {
+    color: var(--ink-2);
+    width: 32%;
+  }
+  .manifest td.val {
+    color: var(--ink);
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .manifest td .note {
+    color: var(--ink-3); font-size: 12px;
+    font-family: "Noto Sans TC", sans-serif;
+    margin-left: 6px;
+  }
+
+  /* embedded markdown-style report */
+  .report {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 16px 20px 20px;
+    font-size: 13px;
+    line-height: 1.75;
+    color: var(--ink-2);
+  }
+  .report h4 {
+    color: var(--ink);
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 14px;
+    margin-bottom: 6px;
+  }
+  .report h4:first-child { margin-top: 0; }
+  .report ul { padding-left: 20px; }
+  .report li { margin-bottom: 2px; }
+  .report code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    color: var(--ink-2);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .report .quote {
+    border-left: 3px solid var(--line-2);
+    padding: 4px 12px;
+    color: var(--ink-3);
+    margin: 8px 0;
+    font-style: normal;
+  }
+
+  /* ===========================================================
+     Empty state (kept in DOM for tests; hidden when verdict present)
+     =========================================================== */
+  #strategy-page-empty {
+    display: none;
+    text-align: center;
+    padding: 60px 20px;
+    background: var(--bg-2);
+    border: 1px dashed var(--line-2);
+    border-radius: var(--radius);
+    color: var(--ink-3);
+  }
+  #strategy-page-empty h3 { color: var(--ink-2); margin-bottom: 6px; }
+
+  /* ===========================================================
+     Responsive — collapse grids to single column on phones
+     =========================================================== */
+  @media (max-width: 760px) {
+    #strategy-page { padding: 18px 16px 60px; }
+    .topbar-inner { padding: 12px 16px; }
+    .page-title { font-size: 22px; }
+    .verdict-headline { font-size: 22px; }
+    #strategy-page-verdict { padding: 22px 20px; }
+    .verdict-grid { grid-template-columns: 1fr; gap: 12px; }
+    #strategy-page-what-we-tested .spec-grid { grid-template-columns: 1fr; }
+    .metric {
+      grid-template-columns: 18px 1fr;
+      grid-template-areas:
+        "dot name"
+        ".   value"
+        ".   meaning";
+      gap: 6px 12px;
+      padding: 14px 4px;
+    }
+    .metric-status { grid-area: dot; align-self: start; margin-top: 8px; }
+    .metric-name   { grid-area: name; }
+    .metric-value  { grid-area: value; text-align: left; }
+    .metric-value .v { font-size: 22px; }
+    .metric-meaning{ grid-area: meaning; }
+    .rule-row { grid-template-columns: 50px 1fr; }
+    .topbar-right .run-id { display: none; }
+  }
+</style>
+</head>
+<body data-screen-label="Strategy Backtest">
+
+<!-- ============================================================
+     TOP — slim crumb back to dashboard
+     ============================================================ -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="Dashboard Relayout.html">
+      <span class="dot"></span>
+      <span>autoFetchStock</span>
+    </a>
+    <nav class="crumb" aria-label="breadcrumb">
+      <span class="sep">/</span>
+      <a href="Dashboard Relayout.html">即時看板</a>
+      <span class="sep">/</span>
+      <span class="here">策略回測</span>
+    </nav>
+    <div class="topbar-right">
+      <span>跑完於 2026/05/19 23:08</span>
+      <span class="run-id">run · 0519-trend-v3</span>
+    </div>
+  </div>
+</header>
+
+<!-- ============================================================
+     PAGE
+     ============================================================ -->
+<main id="strategy-page">
+
+  <div class="page-head">
+    <span class="page-eyebrow">/strategy · backtest report</span>
+    <h1 class="page-title">策略回測結果</h1>
+    <p class="page-sub">用歷史資料模擬一套交易策略，幫你決定要不要拿它去下實單。</p>
+  </div>
+
+  <!-- ============================================================
+       1. VERDICT — the biggest, most obvious thing on the page
+       ============================================================ -->
+  <section id="strategy-page-verdict" aria-label="回測結論">
+    <span class="verdict-tag">● 回測結論</span>
+    <div class="verdict-headline v-fail">
+      <span class="v-icon">❌</span>策略目前沒有穩定獲利能力
+    </div>
+
+    <div class="verdict-grid">
+      <div class="verdict-block reason">
+        <h4><span class="dot"></span>為什麼這樣判斷</h4>
+        <p>
+          在驗證期 <span class="num">59</span> 筆成交中，整體賺了
+          <span class="num">10.5 萬</span> 元 — 但如果把<strong>最賺的 5 筆</strong>拿掉，
+          就立刻變成虧損。利潤幾乎全壓在少數幾筆運氣好的交易上，<br>表示這套策略
+          <strong>沒有可重複的獲利能力</strong>。
+        </p>
+      </div>
+      <div class="verdict-block action">
+        <h4><span class="dot"></span>建議下一步</h4>
+        <p>
+          <strong>不建議直接拿來下實單。</strong>
+          先回去調整進場規則、或縮小選股池只測高勝率的族群；
+          也可以把這次的設定存起來，等資料更新後再跑一次。
+          詳細建議見下方<a href="#strategy-page-recommendation" style="color:var(--accent); text-decoration: none;">「接下來該怎麼做」</a>。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       2. WHAT IS THIS PAGE
+       ============================================================ -->
+  <section id="strategy-page-explainer" class="card" aria-label="這個頁面在做什麼">
+    <div class="card-head">
+      <h2>這個頁面在做什麼？</h2>
+    </div>
+    <div class="card-body">
+      <p>
+        <span class="em">「策略回測」</span>就是把一套買賣規則套到<span class="em">過去的真實股價</span>上，
+        模擬「如果幾年前就這樣交易，到今天會賺多少、賠多少」。
+      </p>
+      <p>
+        我們不是要證明策略「以前很賺」，而是要看它<span class="em">獲利穩不穩</span> —
+        是靠幾筆運氣好，還是有可重複的優勢。如果穩，才值得拿真錢去試。
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       3. WHAT WE TESTED
+       ============================================================ -->
+  <section id="strategy-page-what-we-tested" class="card" aria-label="我們測試了什麼">
+    <div class="card-head">
+      <h2>我們測試了什麼</h2>
+      <span class="h-sub">這次回測使用的策略設定</span>
+    </div>
+    <div class="card-body">
+      <div class="spec-grid">
+
+        <div class="spec">
+          <div class="spec-label"><span class="ic">◆</span>策略類型</div>
+          <div class="spec-value">趨勢追蹤</div>
+          <div class="spec-detail">看到股價往上「衝出來」就跟著買、跌破就賣 — 屬於順勢操作。</div>
+        </div>
+
+        <div class="spec">
+          <div class="spec-label"><span class="ic">◆</span>測試股票池</div>
+          <div class="spec-value"><span class="num">487</span> 檔上市櫃股票</div>
+          <div class="spec-detail">市值前 500 大、近一年日均成交量 ≥ 1,000 張。</div>
+        </div>
+
+        <div class="spec wide">
+          <div class="spec-label"><span class="ic">◆</span>進場 / 出場規則</div>
+          <div class="rule-list">
+            <div class="rule-row">
+              <span class="rule-tag">進場</span>
+              <span class="rule-text">收盤價突破最近 <span class="num">60</span> 個交易日的最高點，且當日成交量 ≥ 過去 20 日均量的 <span class="num">1.5</span> 倍。</span>
+            </div>
+            <div class="rule-row">
+              <span class="rule-tag exit">出場</span>
+              <span class="rule-text">當收盤價跌破 <span class="num">20</span> 日均線、或漲幅達 <span class="num">+25%</span>、或從進場後最高點回落 <span class="num">−10%</span>，三者擇一。</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="spec">
+          <div class="spec-label"><span class="ic">◆</span>測試時間範圍</div>
+          <div class="spec-value"><span class="num">2019/01</span> — <span class="num">2026/05</span></div>
+          <div class="spec-detail">約 7.5 年，涵蓋一次大空頭（2022）與兩段多頭。</div>
+        </div>
+
+        <div class="spec">
+          <div class="spec-label"><span class="ic">◆</span>測試方式</div>
+          <div class="spec-value">滾動式前向驗證</div>
+          <div class="spec-detail">不是把所有資料拿來自己看自己，而是「用過去學、用之後驗收」反覆推進 — 比較接近真實交易環境。</div>
+        </div>
+
+        <!-- Walk-forward analogy diagram -->
+        <div class="spec wide">
+          <div class="spec-label"><span class="ic">◆</span>「滾動驗證」是什麼？用走路來比喻</div>
+          <div class="wf-explainer">
+            <p>
+              把 7.5 年切成 <strong><span class="num">11</span> 段</strong>。每一段都用<strong>前 6 個月</strong>「學」這套策略該怎麼調參數，
+              再用<strong>接下來 3 個月</strong>「驗收」 — 像考前複習、考試分開。然後整段時間軸往前推一格，再來一次。
+            </p>
+            <p style="margin-top: 6px; color: var(--ink-3);">
+              這樣模型只能看「過去的資料」、結果只能看「沒看過的資料」 — 比較不會自欺欺人。
+            </p>
+
+            <div class="wf-diagram" id="wf-diagram"></div>
+
+            <div class="wf-legend">
+              <span><span class="sw train"></span>學習期（看過去）</span>
+              <span><span class="sw test"></span>驗證期（這段才算數）</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       4. MAIN METRICS
+       ============================================================ -->
+  <section id="strategy-page-metrics" class="card" aria-label="主要結果">
+    <div class="card-head">
+      <h2>主要結果</h2>
+      <span class="h-sub">每個數字後面都附上白話解讀</span>
+    </div>
+    <div class="card-body">
+      <div class="metric-list">
+
+        <div class="metric">
+          <span class="metric-status pass" title="樣本足夠"></span>
+          <div class="metric-name">
+            驗證期成交筆數
+            <span class="hint">策略在「沒看過」的時段裡實際成交了幾次</span>
+          </div>
+          <div class="metric-value"><span class="v">59</span><span class="u">筆</span></div>
+          <div class="metric-meaning"><span class="pill pass">PASS</span>樣本足夠（≥ 50 筆），結論有一定可信度。</div>
+        </div>
+
+        <div class="metric">
+          <span class="metric-status warn"></span>
+          <div class="metric-name">
+            驗證期累計損益
+            <span class="hint">所有交易加起來，到底賺還是賠</span>
+          </div>
+          <div class="metric-value pos"><span class="v">+105,159</span><span class="u">元</span></div>
+          <div class="metric-meaning"><span class="pill warn">注意</span>表面上有賺，但接下來幾項會說明這個賺是「集中在少數筆」。</div>
+        </div>
+
+        <div class="metric">
+          <span class="metric-status fail"></span>
+          <div class="metric-name">
+            獲利集中度
+            <span class="hint">去掉最賺的 5 筆後，總損益會變多少</span>
+          </div>
+          <div class="metric-value neg"><span class="v">−18,420</span><span class="u">元</span></div>
+          <div class="metric-meaning"><span class="pill fail">FAIL</span>去掉好運的 5 筆就由盈轉虧 — <strong>沒有穩定獲利能力</strong>，這是這次最關鍵的紅旗。</div>
+        </div>
+
+        <div class="metric">
+          <span class="metric-status warn"></span>
+          <div class="metric-name">
+            勝率
+            <span class="hint">59 筆裡面有幾筆是賺的</span>
+          </div>
+          <div class="metric-value"><span class="v">42</span><span class="u">%</span></div>
+          <div class="metric-meaning"><span class="pill warn">注意</span>低於一半。趨勢策略本來就會「賠多次、賺一次大」，但要搭配下一項一起看。</div>
+        </div>
+
+        <div class="metric">
+          <span class="metric-status warn"></span>
+          <div class="metric-name">
+            平均賺賠比
+            <span class="hint">「賺一筆平均賺多少」÷「賠一筆平均賠多少」</span>
+          </div>
+          <div class="metric-value"><span class="v">1.6</span><span class="u">× </span></div>
+          <div class="metric-meaning"><span class="pill warn">注意</span>賺的時候比賠的時候多 1.6 倍，看起來還行；但這個數字非常依賴前 5 筆大賺，去掉就只剩 0.9×。</div>
+        </div>
+
+        <div class="metric">
+          <span class="metric-status pass"></span>
+          <div class="metric-name">
+            驗證 / 學習績效比
+            <span class="hint">在「沒看過」的時段是不是還能維持績效</span>
+          </div>
+          <div class="metric-value"><span class="v">0.78</span></div>
+          <div class="metric-meaning"><span class="pill pass">PASS</span>沒有明顯的「自欺欺人」 — 策略在學習期跟驗證期表現相近，這點是健康的。</div>
+        </div>
+
+        <div class="metric">
+          <span class="metric-status pass"></span>
+          <div class="metric-name">
+            驗證段數
+            <span class="hint">把時間切成幾段獨立來驗</span>
+          </div>
+          <div class="metric-value"><span class="v">11</span><span class="u">段</span></div>
+          <div class="metric-meaning"><span class="pill pass">PASS</span>11 段獨立的「學 → 驗」流程，結論不是只靠某一段運氣。</div>
+        </div>
+
+        <div class="metric">
+          <span class="metric-status fail"></span>
+          <div class="metric-name">
+            最大連續回落
+            <span class="hint">帳上最慘的時候，從最高點縮水多少</span>
+          </div>
+          <div class="metric-value neg"><span class="v">−28.4</span><span class="u">%</span></div>
+          <div class="metric-meaning"><span class="pill fail">FAIL</span>實單時你的帳戶可能會一度縮水近 3 成 — 多數散戶在這個壓力下會中途砍掉，難以撐到回本。</div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       5. RECOMMENDATION
+       ============================================================ -->
+  <section id="strategy-page-recommendation" class="card" aria-label="接下來該怎麼做">
+    <div class="card-head">
+      <h2>接下來該怎麼做</h2>
+      <span class="h-sub">依本次結論動態產生</span>
+    </div>
+    <div class="card-body">
+      <div class="reco-list">
+
+        <div class="reco">
+          <div class="reco-num">1</div>
+          <div class="reco-body">
+            <div class="reco-title">先別下實單</div>
+            <div class="reco-desc">這次的紅旗（獲利集中度、回落幅度）足以否決上線。建議至少再迭代一輪再決定。</div>
+          </div>
+        </div>
+
+        <div class="reco">
+          <div class="reco-num">2</div>
+          <div class="reco-body">
+            <div class="reco-title">把進場條件再收緊一點</div>
+            <div class="reco-desc">勝率只有 42% 代表雜訊太多。試試加入趨勢過濾（例：股價要在年線之上），或把突破天期從 60 拉到 120。</div>
+          </div>
+        </div>
+
+        <div class="reco">
+          <div class="reco-num">3</div>
+          <div class="reco-body">
+            <div class="reco-title">縮小選股池，只測高勝率族群</div>
+            <div class="reco-desc">趨勢策略通常在中小型成長股表現較好。可以把股票池改成「電子 + 市值 100–500 億」再跑一次。</div>
+          </div>
+        </div>
+
+        <div class="reco">
+          <div class="reco-num">4</div>
+          <div class="reco-body">
+            <div class="reco-title">加入風控停損條件</div>
+            <div class="reco-desc">最大回落 28% 在實單上很難承受。可考慮「單筆停損 −7%」或「整體部位回落達 −15% 就暫停 1 個月」。</div>
+          </div>
+        </div>
+
+        <div class="reco">
+          <div class="reco-num">5</div>
+          <div class="reco-body">
+            <div class="reco-title">把這次設定存成基準，下次比較</div>
+            <div class="reco-desc">即使結果不理想，這份報告也是日後比較的基準線 — 之後改了規則，看數字有沒有真的變好。</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       6. ADVANCED DETAILS
+       ============================================================ -->
+  <details id="strategy-page-details">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="lbl">進階詳情</span>
+      <span class="sub">回測設定 · 完整報告</span>
+      <span class="spacer"></span>
+      <span class="hint">點擊展開</span>
+    </summary>
+    <div class="details-body">
+
+      <div class="details-section">
+        <h3>回測設定</h3>
+        <table class="manifest">
+          <thead>
+            <tr><th>項目</th><th>值</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="key">策略名稱</td><td class="val">趨勢突破 v3 <span class="note">— 加入量能過濾</span></td></tr>
+            <tr><td class="key">回測引擎版本</td><td class="val">2.4.1</td></tr>
+            <tr><td class="key">資料來源</td><td class="val">日線收盤、調整除權息</td></tr>
+            <tr><td class="key">起始資金</td><td class="val">1,000,000 元</td></tr>
+            <tr><td class="key">單筆部位</td><td class="val">總資金 × 5% <span class="note">（最多 20 檔同時持有）</span></td></tr>
+            <tr><td class="key">手續費 / 稅</td><td class="val">買進 0.1425% · 賣出 0.1425% + 0.3% 證交稅</td></tr>
+            <tr><td class="key">滑價假設</td><td class="val">隔日開盤 ± 0.2%</td></tr>
+            <tr><td class="key">學習 / 驗證 比例</td><td class="val">6 個月 / 3 個月</td></tr>
+            <tr><td class="key">總交易筆數</td><td class="val">412 筆 <span class="note">（學習期 353 + 驗證期 59）</span></td></tr>
+            <tr><td class="key">回測完成時間</td><td class="val">2026-05-19 23:08:42</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="details-section">
+        <h3>完整回測報告</h3>
+        <div class="report">
+          <h4>結論摘要</h4>
+          <p>
+            本次驗證期累計獲利 105,159 元，總交易 59 筆，勝率 42%。表面績效正向，但 <strong>top-5 交易貢獻佔比過高</strong>（去除後由盈轉虧），且
+            <strong>最大連續回落達 28.4%</strong>。整體判斷為：<strong>不具穩定獲利能力，不建議上線</strong>。
+          </p>
+
+          <h4>分段表現</h4>
+          <ul>
+            <li>11 段驗證期中，<strong>6 段為負</strong>，5 段為正；正績效中又以第 4、第 9 段貢獻最大。</li>
+            <li>驗證期績效對「市場大盤是否走多」非常敏感 — 多頭段勝率約 51%，空頭段僅 27%。</li>
+          </ul>
+
+          <h4>主要風險</h4>
+          <ul>
+            <li><strong>績效集中</strong>：top-5 交易合計貢獻 123,579 元，佔整體獲利 117%。</li>
+            <li><strong>連續虧損</strong>：曾連續 9 筆交易為負（2022 Q3）。</li>
+            <li><strong>回落深度</strong>：自 2022/04 起連續回落 28.4%，恢復期 5 個月。</li>
+          </ul>
+
+          <h4>觀察與建議</h4>
+          <div class="quote">「策略本身有捕捉趨勢的能力，但訊號雜訊比偏低；加入大盤趨勢過濾後可望提升整體穩定度。」</div>
+          <ul>
+            <li>建議加入大盤年線過濾（僅在大盤站上年線時進場）。</li>
+            <li>突破天期建議測試 90 / 120 / 180，比較勝率與賺賠比變化。</li>
+            <li>建議在實單上線前再進行一次涵蓋最新 6 個月資料的回測，並通過至少 3 段獨立驗證為正。</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+  </details>
+
+  <!-- Empty state (hidden when verdict present; kept for tests) -->
+  <div id="strategy-page-empty" role="status">
+    <h3>還沒有回測結果</h3>
+    <p>選擇一套策略並按「執行回測」之後，這裡就會出現結論與建議。</p>
+  </div>
+
+</main>
+
+<script>
+  /* -----------------------------------------------------------
+     Render walk-forward diagram — 11 windows, each "train" then "test",
+     visualised as a sliding window across the timeline.
+     ----------------------------------------------------------- */
+  (function renderWF(){
+    const host = document.getElementById('wf-diagram');
+    if (!host) return;
+    const TOTAL = 30;       // columns
+    const TRAIN_LEN = 6;    // approximate visual proportions
+    const TEST_LEN  = 3;
+    const STEP      = 3;
+    const ROWS = 11;
+
+    function pct(n){ return (n / TOTAL * 100).toFixed(2) + '%'; }
+
+    for (let r = 0; r < ROWS; r++) {
+      const offset = r * (STEP * (TOTAL / (ROWS * STEP + TRAIN_LEN + TEST_LEN))); // gentle slide
+      // simpler model: just push by r
+      const start  = r;
+      const trainEnd = start + TRAIN_LEN;
+      const testEnd  = trainEnd + TEST_LEN;
+      if (testEnd > TOTAL) break;
+
+      const row = document.createElement('div');
+      row.className = 'wf-row';
+      row.innerHTML = `
+        <span class="wf-label">第 ${String(r+1).padStart(2,' ')} 段</span>
+        <div class="wf-bar">
+          <div class="wf-seg empty" style="width:${pct(start)}"></div>
+          <div class="wf-seg train" style="width:${pct(TRAIN_LEN)}">${r===0?'學':''}</div>
+          <div class="wf-seg test"  style="width:${pct(TEST_LEN)}">${r===0?'驗':''}</div>
+          <div class="wf-seg empty" style="width:${pct(TOTAL - testEnd)}"></div>
+        </div>
+      `;
+      host.appendChild(row);
+    }
+  })();
+</script>
+
+</body>
+</html>
