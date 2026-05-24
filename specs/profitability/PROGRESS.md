@@ -11,14 +11,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | TASK-S1-E1 完成：新增 `scripts/run_s1_e1_chip_event.py` + 7 unit tests + `analysis/s1_e1_chip_event_report.md`。4 個 C0a chip triggers 全部跑完 event-study + §D.3 gate，結果 **全部 FAIL**；`invtrust_anomaly_buy` 最接近但 cost-adjusted median 與 hit-rate spread 未達標。Commits: RED `588e058` / GREEN `6a4cdca` / REFACTOR `fb25f4a` / REPORT `b3e6999`。完整 pytest **720/720 GREEN**。 |
-| 當前 phase | **Phase S1 sprint 1** — research gate 路徑（不直接 full implementation 單一策略）。S1-DOC ✅；S1-HELPER ✅；S1-E1 ✅；下個 task = S1-E2 |
-| 當前 task | — (S1-E1 DONE，等 next session 開動 S1-E2) |
-| 下一個建議 task | **TASK-S1-E2** — C1-safe Mean reversion experiment：RSI(14) + 5d oversold trigger + per-stock regime ∈ {BULL,RANGE} + event-study gate，輸出 `analysis/s1_e2_mean_reversion_report.md`。規格 `STRATEGY_REVIEW.md §D.4`。 |
+| 上次 session | TASK-S1-E2 完成：新增 `src/features/rsi.py` + `scripts/run_s1_e2_mean_reversion.py` + 13 unit tests + `analysis/s1_e2_mean_reversion_report.md`。Trigger（5d return < −1.5×20d vol + RSI<30 + per-stock regime ∈ {BULL,RANGE} + not limit-down + news_severity > −5）跑 139 檔 / 4yr → 1265 events、hit-rate 0.556 vs base 0.476（**spread 8 pp**）、cost_adj_mean_5d **55.77 bp**、cost_adj_median_5d **26.14 bp**、但 **top5pct_excluded_mean_5d = −4.40 bp** → **FAIL by single criterion**（同 V1 §6.1 fail mode：edge 靠 outliers 撐）。BEAR skip diagnostic = 1938。Commits: RED `deded63` / GREEN `9850a0a` / REFACTOR `4addba3` / REPORT (pending)。完整 pytest **733/733 GREEN**。 |
+| 當前 phase | **Phase S1 sprint 1** — research gate 路徑。S1-DOC ✅；S1-HELPER ✅；S1-E1 ✅；S1-E2 ✅；下個 task = S1-E3 |
+| 當前 task | — (S1-E2 DONE，等 next session 開動 S1-E3) |
+| 下一個建議 task | **TASK-S1-E3** — C2 Cross-sectional momentum IC：12-1m return feature + raw IC + sector-neutral IC + decile spread (cost-adj)，輸出 `analysis/s1_e3_momentum_ic_report.md`。規格 `STRATEGY_REVIEW.md §D.4`。**不依 S1-HELPER**，用既有 `src/signals/ic_analysis.py`。 |
 | 全域 blocked | 無（S1 sprint 1 可開動；P02/X02/X03/D04 等先決條件，sprint 1 結束前不該動）|
-| Pytest 狀態 | 完整 pytest **720/720 GREEN**（5 scipy precision warnings；另有 urllib3 LibreSSL env warning） |
-| 檔案位置 | `specs/profitability/{README,PROFITABILITY_PLAN_V2,IMPLEMENTATION_PLAN,STRATEGY_REVIEW,PROGRESS}.md` + `src/research/event_study.py` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/{data_freshness_guard,consistency_check}.py` + `src/execution/order_router.py` + `src/paper/memory_router.py` + `src/universe/{filter,api_loader}.py` + `src/app/pages/strategy.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1,run_s1_e1_chip_event,build_sampled_universe,snapshot_advisor_scores}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report,s1_e1_chip_event_report}.md` |
-| Repo 是否乾淨 | main：TASK-S1-HELPER code/test commits 完成；working tree 仍有 pre-existing modified/untracked files（見 `git status`），本 session 僅新增/修改 research helper 與 PROGRESS |
+| Pytest 狀態 | 完整 pytest **733/733 GREEN**（5 scipy precision warnings；另有 urllib3 LibreSSL env warning） |
+| 檔案位置 | `specs/profitability/{README,PROFITABILITY_PLAN_V2,IMPLEMENTATION_PLAN,STRATEGY_REVIEW,PROGRESS,STRATEGY_RESEARCH_CONVERSATION}.md` + `src/research/event_study.py` + `src/features/{rsi,*}.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/{data_freshness_guard,consistency_check}.py` + `src/execution/order_router.py` + `src/paper/memory_router.py` + `src/universe/{filter,api_loader}.py` + `src/app/pages/strategy.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1,run_s1_e1_chip_event,run_s1_e2_mean_reversion,build_sampled_universe,snapshot_advisor_scores}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report,s1_e1_chip_event_report,s1_e2_mean_reversion_report}.md` |
+| Repo 是否乾淨 | main：TASK-S1-E2 code/test commits 完成；working tree 仍有 pre-existing modified/untracked files（見 `git status`）。本 session 新增 `src/features/rsi.py` / `scripts/run_s1_e2_mean_reversion.py` / 兩個測試檔 / 一份 report，PROGRESS 與 README 同步更新 |
 
 ---
 
@@ -38,8 +38,8 @@
 | 8 — Paper | 3 | 1 | 0 | 2 | 0 |
 | 9 — Monitor | 2 | 2 | 0 | 0 | 0 |
 | 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
-| **S1 — Strategy Research Sprint 1**（spec `STRATEGY_REVIEW.md §D`）| 7 | 3 | 0 | 4 | 0 |
-| **總計** | **52** | **44** | **0** | **8** | **0** |
+| **S1 — Strategy Research Sprint 1**（spec `STRATEGY_REVIEW.md §D`）| 7 | 4 | 0 | 3 | 0 |
+| **總計** | **52** | **45** | **0** | **7** | **0** |
 
 ---
 
@@ -1253,6 +1253,8 @@
   - 下一 session：開 TASK-S1-HELPER RED 階段，依 `STRATEGY_REVIEW.md §D.3` 規格
 - 2026-05-24 | TASK-S1-HELPER | RED `dc56160` + GREEN `82e504c`：新增 research-only `src/research/event_study.py` helper + 12 unit tests。支援 forward returns、trigger event aggregation、cost model 注入 / default `round_trip_cost`、top5% excluded mean、base-rate/hit-rate、GateVerdict reasons、signals 不 import research lint。完整 pytest **713/713 GREEN**（5 scipy precision warnings；urllib3 LibreSSL env warning）。下一 session 接 TASK-S1-E1。
 - 2026-05-24 | TASK-S1-E1 | RED `588e058` + GREEN `6a4cdca` + REFACTOR `fb25f4a` + REPORT `b3e6999`：新增 `scripts/run_s1_e1_chip_event.py` + 7 unit tests + `analysis/s1_e1_chip_event_report.md`。4 triggers 全跑：foreign_anomaly_buy / invtrust_anomaly_buy / foreign_reverse_to_buy / margin_rapid_drop。結果全 FAIL；最接近的 invtrust_anomaly_buy cost_adj_mean_5d=84.71bp 但 cost_adj_median_5d=-13.73bp、hit-rate spread=3.17pp，不過 §D.3 gate。完整 pytest **720/720 GREEN**。下一 session 接 TASK-S1-E2。
+- 2026-05-24 | fold-in docs `a4aac3c` | docs(TASK-S1) commit：PROGRESS / README / STRATEGY_REVIEW / STRATEGY_RESEARCH_CONVERSATION 四檔同步 S1-E1 完成與 fold-in 配套。純文件 commit，無 code 改動。
+- 2026-05-24 | TASK-S1-E2 | RED `deded63` + GREEN `9850a0a` + REFACTOR `4addba3` + REPORT (pending)：新增 `src/features/rsi.py` (Wilder rolling SMA RSI) + `scripts/run_s1_e2_mean_reversion.py` + 13 unit tests + `analysis/s1_e2_mean_reversion_report.md`。Trigger 5 條件全到位（5d ret < −1.5×20d vol / RSI<30 / per-stock regime ∈ {BULL,RANGE} / not limit-down / news_severity > −5），跑 139 檔 4yr → 1265 events、hit-rate 0.556 vs base 0.476（spread 8pp）、cost_adj_mean_5d 55.77bp、cost_adj_median_5d 26.14bp、**top5pct_excluded_mean_5d −4.40bp** → **FAIL by single criterion**（與 V1 §6.1 同 fail mode：edge 靠 outliers）。BEAR skip diagnostic 1938。**不搬** `src/signals/rules/mean_reversion_v1.py`，C1-panic 也不開探索。完整 pytest **733/733 GREEN**。下一 session 接 TASK-S1-E3（C2 momentum IC，**不依 S1-HELPER**）。
 - 2026-05-23 | V1 重判決 plumbing prep | `scripts/run_backtest_v1.py` 大改 + 10 unit tests：
   - 新增 `load_chip_frames(data_dir)` / `load_margin_frames(data_dir)`：走 `data/chips/*.json` `data/margin/*.json` 組成 per-stock time series（容錯 invalid JSON / missing dir）
   - 新增 `build_market_ohlc_proxy(feature_frames)`：cross-section mean → OHLC DataFrame，供 regime classifier 用
@@ -1444,26 +1446,25 @@
 
 - **Name**: C1-safe Mean reversion experiment
 - **Source**: `STRATEGY_REVIEW.md §D.4` (S1-E2)
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: TASK-S1-HELPER
-- **Files (planned)**:
-  - `src/features/rsi.py` — RSI(14) 純函式 (~30 行)
-  - `tests/test_features/test_rsi.py`
-  - `scripts/run_s1_e2_mean_reversion.py`
-  - `analysis/s1_e2_mean_reversion_report.md`
-- **Acceptance**:
-  - RSI(14) 純函式，已知值測試 + NaN safe
-  - Trigger（依 §D.4）：5d return < −1.5 × 20d vol AND RSI<30 AND regime∈{BULL,RANGE} AND not limit-down AND news_severity > −5
-  - **強制** per-stock regime gate `{BULL, RANGE}` only（BEAR hard skip）
-  - 套 §D.3 gate
-  - 報告含 BEAR skip 前後對照（diagnostic only）
-- **Tests (RED list)**: ≥ 8 項
-  - RSI(14) 4 tests
-  - trigger 純函式 (regime BEAR 擋 / news 擋 / limit-down 擋 / all-pass)
-  - orchestrator smoke
-- **DoD**: 過 gate → 搬 `src/signals/rules/mean_reversion_v1.py`；C1-panic 在 C1-safe 過後才探索
+- **Files**:
+  - `src/features/rsi.py` — Wilder RSI(14) 純函式（rolling SMA, NaN-safe）
+  - `tests/test_features/test_rsi.py` — 4 tests
+  - `scripts/run_s1_e2_mean_reversion.py` — orchestrator + `classify_per_stock_regime` + `build_mean_reversion_panel` + `mean_reversion_oversold` trigger + report renderer
+  - `tests/test_scripts/test_run_s1_e2_mean_reversion.py` — 9 tests
+  - `analysis/s1_e2_mean_reversion_report.md` — 139 檔 / 4yr 實驗結果
+- **Verdict**: **FAIL** by single gate criterion
+  - n_events 1265 ✅、hit_rate 0.556 vs base 0.476（spread 8pp ✅）、cost_adj_mean_5d 55.77bp ✅、cost_adj_median_5d 26.14bp ✅
+  - **top5pct_excluded_mean_5d = −4.40bp ❌**（去 top 5% 後 mean 翻負 → edge 靠 outliers，與 V1 §6.1 同 fail mode）
+  - BEAR skip diagnostic = 1938（若放寬讓 BEAR 過 → 但 spec 強制 hard skip）
+- **DoD**: 過 gate → 搬 `src/signals/rules/mean_reversion_v1.py`；C1-panic 在 C1-safe 過後才探索 → **不搬，C1-panic 不探索**
 - **Last updated**: 2026-05-24
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-24 RED `deded63`：13 tests（RSI 4 + trigger 6 + regime classifier 1 + orchestrator smoke 2），collection ImportError 確認 RED
+  - 2026-05-24 GREEN `9850a0a`：實作 `src/features/rsi.py` + `scripts/run_s1_e2_mean_reversion.py`；首版 groupby/apply 重組 index bug 用 unstack/restack vectorize 修掉；13/13 GREEN，完整 pytest **733/733 GREEN**
+  - 2026-05-24 REFACTOR `4addba3`：提取 `_restack` helper，改用 pandas 2.x `stack(future_stack=True)`，warnings 12 → 5
+  - 2026-05-24 REPORT (pending commit)：跑 139 檔 4yr → FAIL by top5_excluded；orchestrator 順手加 `fill_method=None` 消 pct_change FutureWarning
 
 ### TASK-S1-E3
 

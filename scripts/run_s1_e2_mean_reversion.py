@@ -185,8 +185,10 @@ def build_mean_reversion_panel(
     log_close = np.log(closes)
 
     log_ret = _per_stock_transform(log_close, lambda w: w.diff())
-    ret_1d = _per_stock_transform(closes, lambda w: w.pct_change(1))
-    ret_5d = _per_stock_transform(closes, lambda w: w.pct_change(RETURN_WINDOW))
+    ret_1d = _per_stock_transform(closes, lambda w: w.pct_change(1, fill_method=None))
+    ret_5d = _per_stock_transform(
+        closes, lambda w: w.pct_change(RETURN_WINDOW, fill_method=None)
+    )
     vol_20d = _per_stock_transform(
         log_ret,
         lambda w: w.rolling(window=VOL_WINDOW, min_periods=VOL_WINDOW).std(ddof=0),
