@@ -99,35 +99,13 @@ def run_momentum_ic_experiment(
         name="sector",
     )
 
-    raw_ic = compute_ic(feature, forward)
-    raw_spread = decile_spread(feature, forward, n_buckets=10)
-    raw_spread_cost = cost_adjusted_decile_spread(
-        feature, forward, n_buckets=10, monthly_cost=monthly_cost
-    )
-
-    feat_neutral = sector_neutralize(feature, sectors)
-    sn_ic = compute_ic(feat_neutral, forward)
-    sn_spread = decile_spread(feat_neutral, forward, n_buckets=10)
-    sn_spread_cost = cost_adjusted_decile_spread(
-        feat_neutral, forward, n_buckets=10, monthly_cost=monthly_cost
-    )
-
-    raw_passes = _passes_gate(raw_ic["ic_mean"], raw_spread_cost)
-    sn_passes = _passes_gate(sn_ic["ic_mean"], sn_spread_cost)
-
+    variants = {
+        "raw": feature,
+        "sector_neutral": sector_neutralize(feature, sectors),
+    }
     payload: dict[str, dict[str, float]] = {
-        "raw": {
-            **raw_ic,
-            "decile_spread": raw_spread,
-            "decile_spread_cost_adj": raw_spread_cost,
-            "passes_gate": float(raw_passes),
-        },
-        "sector_neutral": {
-            **sn_ic,
-            "decile_spread": sn_spread,
-            "decile_spread_cost_adj": sn_spread_cost,
-            "passes_gate": float(sn_passes),
-        },
+        name: _evaluate_variant(feat, forward, monthly_cost=monthly_cost)
+        for name, feat in variants.items()
     }
 
     markdown = render_momentum_ic_report(
@@ -201,6 +179,25 @@ def render_momentum_ic_report(
 
 
 # ── internals ──────────────────────────────────────────────────────────────
+
+
+def _evaluate_variant(
+    feature: pd.Series,
+    forward: pd.Series,
+    *,
+    monthly_cost: float,
+) -> dict[str, float]:
+    ic = compute_ic(feature, forward)
+    spread = decile_spread(feature, forward, n_buckets=10)
+    spread_cost = cost_adjusted_decile_spread(
+        feature, forward, n_buckets=10, monthly_cost=monthly_cost
+    )
+    return {
+        **ic,
+        "decile_spread": spread,
+        "decile_spread_cost_adj": spread_cost,
+        "passes_gate": float(_passes_gate(ic["ic_mean"], spread_cost)),
+    }
 
 
 def _passes_gate(ic_mean: float, spread_cost_adj: float) -> bool:
