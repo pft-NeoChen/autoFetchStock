@@ -243,8 +243,9 @@ class Signal:
 2. 當日（或最新分鐘 K）`spike_severity ≥ MID`
 3. 爆量 K 線收紅（close > open）或突破 20 日高
 4. 三大法人連 3 日 net buy 至少一邊 > 0 或融資 5 日減幅 < 0
-5. 大盤（加權指數）站上 MA60
-6. **不**處於漲停板鎖死狀態
+5. **不**處於漲停板鎖死狀態
+
+> **2026-05-24 R1 amendment（autonomous 批准）**：原第 5 條「大盤（加權指數）站上 MA60」已移除，由 Plan D `make_per_stock_regime_gated_entry_factory`（per-stock MA50/MA200 regime gate）取代。原條件用 universe-mean 與 per-stock gate 雙層 market filter 且 proxy 不一致，造成 universe-market 脫鉤情境策略凍結。`EntryConditions.market_close` / `market_ma_60` 欄位暫保留（back-compat）。
 
 **避免進場**：
 - 爆量收黑或上影線 > K 線實體 1.5 倍
@@ -418,6 +419,10 @@ def slippage(price, side, tick_size, spread):
 - 大盤加權指數 MA60 + ADX(14) + 30 日波動分位。
 - 弱勢 regime（指數 < MA60 且 ADX < 20）→ 停做多。
 - 高波動 regime（vol 分位 > 0.8）→ 部位減半。
+
+> **2026-05-24 R2 amendment（autonomous 批准）**：`RegimeGateConfig.allowed` 預設由 `{BULL}` 改為 `{BULL, RANGE}`。理由：BULL 嚴格定義（close>MA200 AND MA50>MA200）在 V 字底時 close 雖已轉折但仍 < MA200，被誤標 BEAR 過早封鎖。RANGE 涵蓋「sideways consolidation」場景，BEAR（明確下跌趨勢）仍擋。
+>
+> **2026-05-24 R-Plan D amendment（已執行）**：實作層 regime gate 由 market-wide 改 per-stock —`make_per_stock_regime_gated_entry_factory(inner_factory, feature_frames, config)` 用各股自身 OHLC 做分類。當 universe 與 market_index proxy 脫鉤（e.g. 小型股 vs 0050）時，per-stock gate 不會把策略完全凍結。market-wide gate 仍可用（保留 `make_regime_gated_entry_factory`），但建議用於與大盤高度相關的 universe。
 
 #### 6.2 Correlation Filter
 - 候選池做產業聚類 + 60 日 return 相關性聚類。

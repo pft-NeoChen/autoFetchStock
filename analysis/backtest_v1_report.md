@@ -29,7 +29,7 @@
 - **initial_cash_per_stock**: 1000000.0
 - **target_shares**: 1000
 - **caveats**: chip/news/margin features defaulted (local data sparse)
-- **n_trades**: 43
+- **n_trades**: 47
 - **n_windows**: 11
 - **experiment_id**: 38a8ccc08dc451df
 
@@ -37,15 +37,15 @@
 
 | 指標 | 值 |
 |------|----|
-| 交易次數 | 43 |
-| 總報酬 | -0.88% |
+| 交易次數 | 47 |
+| 總報酬 | -0.91% |
 | Sharpe (年化) | -0.11 |
 | Sortino (年化) | -0.09 |
-| Max Drawdown | 2.58% |
-| 勝率 | 30.23% |
-| Profit Factor | 1.69 |
-| 每筆期望值 (bp) | 33.49 |
-| Turnover | 0.31 |
+| Max Drawdown | 2.60% |
+| 勝率 | 31.91% |
+| Profit Factor | 1.50 |
+| 每筆期望值 (bp) | 9.02 |
+| Turnover | 0.33 |
 
 ## Benchmark 對照
 
@@ -75,9 +75,9 @@
 ### 失敗原因
 
 - sharpe -0.11 < 1.0
-- oos_is_ratio -0.28 < 0.7
-- top5_excluded_return -0.47% ≤ 0
+- oos_is_ratio -0.25 < 0.7
+- top5_excluded_return -0.53% ≤ 0
 - regime coverage incomplete (bull=7, bear=4, range=0)
-- n_trades 43 < 50
+- n_trades 47 < 50
 
 **結論**: ❌ FAIL
