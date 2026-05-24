@@ -86,11 +86,11 @@ specs/
 
 ### 3.1 目前 phase
 
-**🎯 V1 §6.1 第六次判決完成（5/10 PASS）→ S1 Research Plan 收斂 → S1 sprint 1 進行中（E1 FAIL / E2 FAIL by top5_excluded / 接 E3）**
+**🎯 V1 §6.1 第六次判決完成（5/10 PASS）→ S1 Research Plan 收斂 → S1 sprint 1 進行中（E1 FAIL / E2 FAIL / **E3 PASS** / 待 E0+REPORT）**
 
-- **總進度**: **45/52** tasks DONE（base 41/45 + S1 phase 4/7：DOC ✅ / HELPER ✅ / E1 ✅ FAIL / E2 ✅ FAIL）；0 IN_PROGRESS / 0 BLOCKED / 7 NOT_STARTED（3 S1 sprint + 4 infra defer）
-- **Phase 完成度**: Phase 0-7/9 全 ✅；Phase 8（P01 ✅，P02/D04 等）；Phase 10（X01 ✅，X02/X03 等）；**Phase S1**（DOC/HELPER/E1/E2 ✅；E3/E0/REPORT 待做）
-- **Pytest**: 完整 **733/733 GREEN**（5 scipy precision warnings + urllib3 LibreSSL env warning）
+- **總進度**: **46/52** tasks DONE（base 41/45 + S1 phase 5/7：DOC ✅ / HELPER ✅ / E1 ✅ FAIL / E2 ✅ FAIL / **E3 ✅ PASS**）；0 IN_PROGRESS / 0 BLOCKED / 6 NOT_STARTED（2 S1 sprint + 4 infra defer）
+- **Phase 完成度**: Phase 0-7/9 全 ✅；Phase 8（P01 ✅，P02/D04 等）；Phase 10（X01 ✅，X02/X03 等）；**Phase S1**（DOC/HELPER/E1/E2/E3 ✅；E0/REPORT 待做）
+- **Pytest**: 完整 **741/741 GREEN**（6 warnings：scipy precision + urllib3 LibreSSL env）
 
 ### 3.2 V1 第六次判決 verdict 摘要
 
@@ -143,8 +143,8 @@ specs/
    - `PROGRESS.md` Quick Status + S1 phase 對應 task block
    - `analysis/backtest_v1_report.md` V1 第六次判決細節（背景）
 2. **下一個動作**（依 PROGRESS Quick Status）：
-   - 當前 active task = **TASK-S1-E3**（C2 cross-sectional momentum IC，**不依 S1-HELPER**，用既有 `src/signals/ic_analysis.py` + 新增 sector-neutralization helper）
-   - DOC / HELPER / E1（FAIL）/ E2（FAIL by top5_excluded）已 DONE
+   - 當前 active task = **TASK-S1-E0**（V1 bootstrap sanity，用 `analysis/experiment_registry/` 既有 V1 trades 跑 trade-level resample bootstrap → CI）
+   - DOC / HELPER / E1(FAIL) / E2(FAIL) / **E3(PASS)** 已 DONE — E3 過 gate，sprint 2 cross-sectional ranking pipeline 待規劃
 3. **不要直接做**: 完整 SignalEngine implementation（除非該策略已過 §D.3 gate）/ paper runner / multi-strategy allocator
 4. **複用 infra**: backtest engine / orchestrator / regime gate / risk gates / journal / report / cost_model 全部 **不必重做**
 

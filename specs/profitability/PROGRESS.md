@@ -11,14 +11,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | TASK-S1-E2 完成：新增 `src/features/rsi.py` + `scripts/run_s1_e2_mean_reversion.py` + 13 unit tests + `analysis/s1_e2_mean_reversion_report.md`。Trigger（5d return < −1.5×20d vol + RSI<30 + per-stock regime ∈ {BULL,RANGE} + not limit-down + news_severity > −5）跑 139 檔 / 4yr → 1265 events、hit-rate 0.556 vs base 0.476（**spread 8 pp**）、cost_adj_mean_5d **55.77 bp**、cost_adj_median_5d **26.14 bp**、但 **top5pct_excluded_mean_5d = −4.40 bp** → **FAIL by single criterion**（同 V1 §6.1 fail mode：edge 靠 outliers 撐）。BEAR skip diagnostic = 1938。Commits: RED `deded63` / GREEN `9850a0a` / REFACTOR `4addba3` / REPORT (pending)。完整 pytest **733/733 GREEN**。 |
-| 當前 phase | **Phase S1 sprint 1** — research gate 路徑。S1-DOC ✅；S1-HELPER ✅；S1-E1 ✅；S1-E2 ✅；下個 task = S1-E3 |
-| 當前 task | — (S1-E2 DONE，等 next session 開動 S1-E3) |
-| 下一個建議 task | **TASK-S1-E3** — C2 Cross-sectional momentum IC：12-1m return feature + raw IC + sector-neutral IC + decile spread (cost-adj)，輸出 `analysis/s1_e3_momentum_ic_report.md`。規格 `STRATEGY_REVIEW.md §D.4`。**不依 S1-HELPER**，用既有 `src/signals/ic_analysis.py`。 |
-| 全域 blocked | 無（S1 sprint 1 可開動；P02/X02/X03/D04 等先決條件，sprint 1 結束前不該動）|
-| Pytest 狀態 | 完整 pytest **733/733 GREEN**（5 scipy precision warnings；另有 urllib3 LibreSSL env warning） |
-| 檔案位置 | `specs/profitability/{README,PROFITABILITY_PLAN_V2,IMPLEMENTATION_PLAN,STRATEGY_REVIEW,PROGRESS,STRATEGY_RESEARCH_CONVERSATION}.md` + `src/research/event_study.py` + `src/features/{rsi,*}.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/{data_freshness_guard,consistency_check}.py` + `src/execution/order_router.py` + `src/paper/memory_router.py` + `src/universe/{filter,api_loader}.py` + `src/app/pages/strategy.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1,run_s1_e1_chip_event,run_s1_e2_mean_reversion,build_sampled_universe,snapshot_advisor_scores}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report,s1_e1_chip_event_report,s1_e2_mean_reversion_report}.md` |
-| Repo 是否乾淨 | main：TASK-S1-E2 code/test commits 完成；working tree 仍有 pre-existing modified/untracked files（見 `git status`）。本 session 新增 `src/features/rsi.py` / `scripts/run_s1_e2_mean_reversion.py` / 兩個測試檔 / 一份 report，PROGRESS 與 README 同步更新 |
+| 上次 session | TASK-S1-E3 完成（**首個過 gate 的 S1 候選**）：新增 `src/signals/sector_neutral.py` + `scripts/run_s1_e3_momentum_ic.py` + 8 unit tests + `analysis/s1_e3_momentum_ic_report.md`。J–T 12-1m momentum 跑 139 檔 4yr → raw ic_mean **0.0996** / decile_spread_cost_adj **3.93%**；sector-neutral ic_mean **0.0834** / decile_spread_cost_adj **4.69%** — 兩 variant 皆 **PASS gate**（|ic_mean| ≥ 0.04 AND cost-adj spread > 0）。Sector-neutral 高於 raw → alpha 非純 sector beta。Caveat：50 sector buckets / 139 檔（singleton buckets 弱化 neutral 效力）+ 39 檔 hand-picked 倖存者偏差 + in-sample only。Commits: RED `a69b201` / GREEN `0a1cd35` / REFACTOR `559b516` / REPORT (pending)。完整 pytest **741/741 GREEN**。 |
+| 當前 phase | **Phase S1 sprint 1** — 5/7 DONE。S1-DOC/HELPER/E1(FAIL)/E2(FAIL)/**E3(PASS)** ✅；下個 task = S1-E0（V1 bootstrap sanity）→ 最後 S1-REPORT |
+| 當前 task | — (S1-E3 DONE，等 next session 開動 S1-E0) |
+| 下一個建議 task | **TASK-S1-E0** — V1 bootstrap sanity：用既有 `analysis/experiment_registry/` V1 trades 做 trade-level resample bootstrap (100 iter)，產 expectancy_bp/sharpe/pf/n_trades 95% CI，輸出 `analysis/s1_e0_v1_bootstrap_report.md`。規格 `STRATEGY_REVIEW.md §D.4`。 |
+| 全域 blocked | 無（S1 sprint 1 進入收尾；P02/X02/X03/D04 等先決條件，sprint 1 結束前不該動）|
+| Pytest 狀態 | 完整 pytest **741/741 GREEN**（6 warnings：scipy precision + urllib3 LibreSSL env） |
+| 檔案位置 | `specs/profitability/{README,PROFITABILITY_PLAN_V2,IMPLEMENTATION_PLAN,STRATEGY_REVIEW,PROGRESS,STRATEGY_RESEARCH_CONVERSATION}.md` + `src/research/event_study.py` + `src/features/{rsi,*}.py` + `src/signals/{ic_analysis,sector_neutral,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/{data_freshness_guard,consistency_check}.py` + `src/execution/order_router.py` + `src/paper/memory_router.py` + `src/universe/{filter,api_loader}.py` + `src/app/pages/strategy.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1,run_s1_e1_chip_event,run_s1_e2_mean_reversion,run_s1_e3_momentum_ic,build_sampled_universe,snapshot_advisor_scores}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report,s1_e1_chip_event_report,s1_e2_mean_reversion_report,s1_e3_momentum_ic_report}.md` |
+| Repo 是否乾淨 | main：TASK-S1-E2/E3 code/test commits 完成；working tree 仍有 pre-existing modified/untracked files。本 session 新增 RSI/event-2 trigger orchestrator + sector_neutral helpers + momentum IC orchestrator + 4 個測試檔 + 2 份 report，PROGRESS 與 README 同步更新 |
 
 ---
 
@@ -38,8 +38,8 @@
 | 8 — Paper | 3 | 1 | 0 | 2 | 0 |
 | 9 — Monitor | 2 | 2 | 0 | 0 | 0 |
 | 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
-| **S1 — Strategy Research Sprint 1**（spec `STRATEGY_REVIEW.md §D`）| 7 | 4 | 0 | 3 | 0 |
-| **總計** | **52** | **45** | **0** | **7** | **0** |
+| **S1 — Strategy Research Sprint 1**（spec `STRATEGY_REVIEW.md §D`）| 7 | 5 | 0 | 2 | 0 |
+| **總計** | **52** | **46** | **0** | **6** | **0** |
 
 ---
 
@@ -1254,7 +1254,8 @@
 - 2026-05-24 | TASK-S1-HELPER | RED `dc56160` + GREEN `82e504c`：新增 research-only `src/research/event_study.py` helper + 12 unit tests。支援 forward returns、trigger event aggregation、cost model 注入 / default `round_trip_cost`、top5% excluded mean、base-rate/hit-rate、GateVerdict reasons、signals 不 import research lint。完整 pytest **713/713 GREEN**（5 scipy precision warnings；urllib3 LibreSSL env warning）。下一 session 接 TASK-S1-E1。
 - 2026-05-24 | TASK-S1-E1 | RED `588e058` + GREEN `6a4cdca` + REFACTOR `fb25f4a` + REPORT `b3e6999`：新增 `scripts/run_s1_e1_chip_event.py` + 7 unit tests + `analysis/s1_e1_chip_event_report.md`。4 triggers 全跑：foreign_anomaly_buy / invtrust_anomaly_buy / foreign_reverse_to_buy / margin_rapid_drop。結果全 FAIL；最接近的 invtrust_anomaly_buy cost_adj_mean_5d=84.71bp 但 cost_adj_median_5d=-13.73bp、hit-rate spread=3.17pp，不過 §D.3 gate。完整 pytest **720/720 GREEN**。下一 session 接 TASK-S1-E2。
 - 2026-05-24 | fold-in docs `a4aac3c` | docs(TASK-S1) commit：PROGRESS / README / STRATEGY_REVIEW / STRATEGY_RESEARCH_CONVERSATION 四檔同步 S1-E1 完成與 fold-in 配套。純文件 commit，無 code 改動。
-- 2026-05-24 | TASK-S1-E2 | RED `deded63` + GREEN `9850a0a` + REFACTOR `4addba3` + REPORT (pending)：新增 `src/features/rsi.py` (Wilder rolling SMA RSI) + `scripts/run_s1_e2_mean_reversion.py` + 13 unit tests + `analysis/s1_e2_mean_reversion_report.md`。Trigger 5 條件全到位（5d ret < −1.5×20d vol / RSI<30 / per-stock regime ∈ {BULL,RANGE} / not limit-down / news_severity > −5），跑 139 檔 4yr → 1265 events、hit-rate 0.556 vs base 0.476（spread 8pp）、cost_adj_mean_5d 55.77bp、cost_adj_median_5d 26.14bp、**top5pct_excluded_mean_5d −4.40bp** → **FAIL by single criterion**（與 V1 §6.1 同 fail mode：edge 靠 outliers）。BEAR skip diagnostic 1938。**不搬** `src/signals/rules/mean_reversion_v1.py`，C1-panic 也不開探索。完整 pytest **733/733 GREEN**。下一 session 接 TASK-S1-E3（C2 momentum IC，**不依 S1-HELPER**）。
+- 2026-05-24 | TASK-S1-E2 | RED `deded63` + GREEN `9850a0a` + REFACTOR `4addba3` + REPORT `f0936cc`：新增 `src/features/rsi.py` (Wilder rolling SMA RSI) + `scripts/run_s1_e2_mean_reversion.py` + 13 unit tests + `analysis/s1_e2_mean_reversion_report.md`。Trigger 5 條件全到位（5d ret < −1.5×20d vol / RSI<30 / per-stock regime ∈ {BULL,RANGE} / not limit-down / news_severity > −5），跑 139 檔 4yr → 1265 events、hit-rate 0.556 vs base 0.476（spread 8pp）、cost_adj_mean_5d 55.77bp、cost_adj_median_5d 26.14bp、**top5pct_excluded_mean_5d −4.40bp** → **FAIL by single criterion**（與 V1 §6.1 同 fail mode：edge 靠 outliers）。BEAR skip diagnostic 1938。**不搬** `src/signals/rules/mean_reversion_v1.py`，C1-panic 也不開探索。完整 pytest **733/733 GREEN**。
+- 2026-05-24 | TASK-S1-E3 | RED `a69b201` + GREEN `0a1cd35` + REFACTOR `559b516` + REPORT (pending)：新增 `src/signals/sector_neutral.py`（6 helpers）+ `scripts/run_s1_e3_momentum_ic.py` + 8 unit tests + `analysis/s1_e3_momentum_ic_report.md`。J–T 12-1m momentum vs 1m forward 跑 139 檔 4yr：**raw ic_mean 0.0996 / cost-adj spread 3.93% → PASS；sector-neutral ic_mean 0.0834 / cost-adj spread 4.69% → PASS**（首個過 gate 的 S1 候選）。Caveats：50 sector buckets / 139 檔 singleton 弱化；universe 含 39 hand-picked 倖存者偏差；in-sample only。依 §D.5 → 排入 sprint 2 cross-sectional ranking pipeline 規劃。完整 pytest **741/741 GREEN**。下一 session 接 **TASK-S1-E0**（V1 bootstrap sanity）→ 最後 S1-REPORT。
 - 2026-05-23 | V1 重判決 plumbing prep | `scripts/run_backtest_v1.py` 大改 + 10 unit tests：
   - 新增 `load_chip_frames(data_dir)` / `load_margin_frames(data_dir)`：走 `data/chips/*.json` `data/margin/*.json` 組成 per-stock time series（容錯 invalid JSON / missing dir）
   - 新增 `build_market_ohlc_proxy(feature_frames)`：cross-section mean → OHLC DataFrame，供 regime classifier 用
@@ -1470,24 +1471,30 @@
 
 - **Name**: C2 Cross-sectional momentum IC
 - **Source**: `STRATEGY_REVIEW.md §D.4` (S1-E3)
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: — (用既有 `src/signals/ic_analysis.py`，不依 S1-HELPER)
-- **Files (planned)**:
-  - `src/signals/sector_neutral.py` — sector-neutralization helper
-  - `tests/test_signals/test_sector_neutral.py`
-  - `scripts/run_s1_e3_momentum_ic.py`
-  - `analysis/s1_e3_momentum_ic_report.md`
-- **Acceptance**:
-  - feature: 12-1m return（skip month-1 防 1-month reversal，J-T 標準）
-  - target: 1m forward return
-  - **雙版 IC**: raw + sector-neutral
-  - decile spread (top − bottom)，**扣 monthly turnover cost** 後再判
-  - sector classification 來源：TWSE 產業別（已在現有 stock metadata；若無則新增 fetcher）
-- **Tests (RED list)**: ≥ 5 項
-  - skip month-1 邏輯 / sector_neutralize 已知值 / decile_spread 計算 / cost 扣除 / IC 與 ic_analysis 對齊
-- **DoD**: IC ≥ V2 §1 對應 horizon 門檻 + decile spread > 0 (cost-adj) → 排入 sprint 2 cross-sectional pipeline 規劃；不過即正式淘汰並寫入報告
+- **Files**:
+  - `src/signals/sector_neutral.py` — `infer_sector` (2-digit TWSE prefix) + `compute_12_1m_return` + `compute_forward_return` + `sector_neutralize` + `decile_spread` + `cost_adjusted_decile_spread`
+  - `tests/test_signals/test_sector_neutral.py` — 6 tests
+  - `scripts/run_s1_e3_momentum_ic.py` — orchestrator + `_evaluate_variant` helper
+  - `tests/test_scripts/test_run_s1_e3_momentum_ic.py` — 2 tests
+  - `analysis/s1_e3_momentum_ic_report.md` — 139 檔 4yr 結果
+- **Verdict**: **PASS（首個過 gate 的 S1 候選）**
+  - Raw: ic_mean **0.0996** (vs 0.04 threshold) / ic_ir 0.448 / p ≈ 0 / decile_spread **4.53%** / cost-adj **3.93%** → PASS
+  - Sector-neutral: ic_mean **0.0834** / ic_ir 0.453 / p ≈ 0 / decile_spread **5.29%** / cost-adj **4.69%** → PASS
+  - Alpha 非純 sector beta（sector-neutral spread > raw）
+- **Caveats（必須跟入 sprint 2 規劃）**:
+  - 50 sector buckets / 139 檔 → 平均 2.78 檔/bucket，多數 singleton sector neutral 等於 raw（需換真實 TWSE 產業別 mapping）
+  - Universe 含 39 檔 hand-picked 倖存者偏差
+  - In-sample only，無 walk-forward 切分
+  - 4.69% / 月 cost-adj spread 對應年化 ~56%，可能被 universe bias + overlap 雙重高估
+- **DoD**: IC ≥ V2 §1 + decile spread > 0 (cost-adj) → 排入 sprint 2 cross-sectional ranking pipeline 規劃（與 V1/C0a/C1 per-stock entry 機制不同）
 - **Last updated**: 2026-05-24
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-24 RED `a69b201`：8 tests（infer_sector 1 + 12-1m return 1 + forward return 1 + sector_neutralize 1 + decile_spread 2 + orchestrator smoke 2），collection ImportError 確認 RED
+  - 2026-05-24 GREEN `0a1cd35`：實作 `src/signals/sector_neutral.py`（6 helpers，全 vectorized via unstack/restack）+ `scripts/run_s1_e3_momentum_ic.py`（複用 `src/signals/ic_analysis.compute_ic`）；首版 test fixture 用 2330/2454 兩個不同前綴股導致 fail，修為 2330/2317 同前綴；完整 pytest **741/741 GREEN**
+  - 2026-05-24 REFACTOR `559b516`：提取 `_evaluate_variant` 合併 raw / sector-neutral 重複的 IC + decile spread + gate 計算，改 dict comprehension
+  - 2026-05-24 REPORT (pending commit)：跑 139 檔 4yr → 兩 variant 雙 PASS
 
 ### TASK-S1-E0
 
