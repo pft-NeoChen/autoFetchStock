@@ -245,7 +245,203 @@
 
 ---
 
+## D. S1 Research Plan（2026-05-24，討論收斂正式版）
+
+> **Single source of truth** for S1 strategy research sprint. 取代 `STRATEGY_RESEARCH_CONVERSATION.md` 中所有 sprint plan 提案。
+> 來源：CONVERSATION §11-§12（第五輪 + 第六輪結案）。新 session 應**只讀本段** + `PROGRESS.md` 對應 task 即可開動。
+>
+> 設計原則：**先做 research gate，過 gate 才進 SignalEngine**。每個候選策略走同一套低成本實驗，避免直接 full implementation 才發現沒 edge。
+
+### D.1 Sprint Scope（取代 §C 行動建議）
+
+7 個 task，總工時 ~3.6d。依此順序：
+
+| 順序 | Task ID | Name | Est | 依賴 |
+|------|---------|------|-----|------|
+| 1 | TASK-S1-DOC | 文件整理（README/PROGRESS/REVIEW 同步） | 0.5d | — |
+| 2 | TASK-S1-HELPER | `src/research/event_study.py` (forward_return + event_study + gate) | 1.0d | TASK-S1-DOC |
+| 3 | TASK-S1-E1 | C0a Chip event-driven（4 triggers, 1d/3d/5d forward） | 0.5d | TASK-S1-HELPER |
+| 4 | TASK-S1-E2 | C1-safe Mean reversion（BULL/RANGE only） | 0.5d | TASK-S1-HELPER |
+| 5 | TASK-S1-E3 | C2 Cross-sectional momentum IC（sector-neutral 雙版） | 0.3d | — (用既有 `ic_analysis.py`) |
+| 6 | TASK-S1-E0 | V1 bootstrap sanity（fast aggregation first） | 0.5d | TASK-S1-HELPER（optional） |
+| 7 | TASK-S1-REPORT | 四項 experiment 比較報告 + Next-step 決策 | 0.3d | E0/E1/E2/E3 |
+
+執行 note：
+- E0 排最後（不擋 E1/E2/E3）。
+- E3 可與 E1/E2 並行（不依 helper，用既有 `src/signals/ic_analysis.py`）。
+- 若 E1/E2 任一 task 暴露 helper 設計問題 → 回頭調 HELPER，不要為單一 experiment 硬撐。
+
+### D.2 候選策略最終優先序（取代 §A.5）
+
+| 序 | 策略 | 動作 | 理由 |
+|----|------|------|------|
+| 0 | V1 bootstrap | 既有 139 檔 bootstrap (S1-E0) | 確認 V1 −41bp 結論穩定性 |
+| 1 | **C0a** Chip event-driven | trigger-level event-study (S1-E1) | 資料最齊（4yr backfill），與 V1 最正交 |
+| 2 | **C1-safe** Mean reversion | trigger-level event-study (S1-E2)，BEAR hard skip | 反 V1 假設，需控接刀風險 |
+| 3 | **C2** Cross-sectional momentum | IC only (S1-E3) | 機制與 V1 不同，低成本斷然了結 |
+| — | C0b Corporate action event | defer | 資料齊但須謹慎處理事件日前後 |
+| — | C1-panic | defer 至 C1-safe 過 gate | BEAR 中極端超跌專案，更嚴格 trigger |
+| — | C3 Volatility breakout | defer 至 sprint 2 | 純 price action，待 C0a/C1 結果再排 |
+| — | C0c Monthly revenue / EPS | defer | 需先補 point-in-time historical feature |
+| — | C4 LLM advisor | 等 3-6 月 advisor 累積 | 無 forward return 對照 |
+| × | C5 Pair trading | drop | 太複雜，留作未來研究 |
+
+### D.3 event-study helper 設計
+
+#### 路徑
+
+`src/research/event_study.py`（**新 package** `src/research/`，與 `src/signals/` 並列）
+
+#### 邊界規範
+
+- production `src/signals/` **不 import** `src/research/`
+- research helper 可讀 `src/features/` / `src/backtest/cost_model.py` / OHLC
+- 策略過 gate → 把 evaluator 搬到 `src/signals/rules/<name>.py`（與 `long_entry.py` 同層）
+
+#### 核心 API
+
+```python
+@dataclass
+class EventStudyResult:
+    n_events: int
+    base_rate: float                                   # 同期 universe 大盤 hit rate
+    hit_rate: float                                    # forward return > 0 比率
+    mean_return_bp: dict[int, float]                   # horizon -> mean
+    median_return_bp: dict[int, float]
+    top5pct_excluded_mean_bp: dict[int, float]         # 排除 top 5% trades 後 mean
+    return_distribution: dict[int, np.ndarray]
+    cost_adjusted_mean_bp: dict[int, float]            # 扣 round-trip cost 後
+    cost_adjusted_median_bp: dict[int, float]
+
+
+def compute_forward_returns(
+    ohlc: pd.DataFrame,
+    horizons: list[int] = [1, 3, 5],
+) -> pd.DataFrame: ...
+# 與 src/signals/ic_analysis.py 共用此 helper（後者重構吃此函式）
+
+
+def event_study(
+    trigger_mask: pd.DataFrame,            # MultiIndex (date, stock_id) -> bool
+    ohlc: pd.DataFrame,
+    horizons: list[int] = [1, 3, 5],
+    cost_model: Callable | None = None,    # 預設接 src/backtest/cost_model.round_trip_cost
+) -> EventStudyResult: ...
+
+
+def evaluate_event_study_gate(result: EventStudyResult, horizon: int = 5) -> GateVerdict: ...
+# 回傳 PASS / FAIL + 失敗 reasons
+```
+
+#### Gate threshold（最終版，取代 CONVERSATION §9.2-B）
+
+| Metric | Threshold | 理由 |
+|--------|-----------|------|
+| n_events | ≥ 100 | 樣本門檻 |
+| cost_adjusted_mean_5d | ≥ 50 bp | 已扣 round-trip ~40bp + slippage buffer |
+| cost_adjusted_median_5d | > 0 bp | 防 mean 被 outliers 撐高 |
+| hit_rate − base_rate | ≥ 5 pp | 比同期大盤多 5pp 勝率 |
+| top5pct_excluded_mean_5d | > 0 bp | 防 V2 §6.1 top5_excluded 同樣 fail mode |
+
+**全 5 項都過才算 PASS**。任一 fail → unstable，不可進 SignalEngine。
+
+**註**：cost 不用 hardcoded `cost_bp=30` default（過低）；強制接 `src/backtest/cost_model.round_trip_cost()`。
+
+### D.4 各 Experiment 規格
+
+#### TASK-S1-E0 — V1 bootstrap sanity
+
+- **目標**: 用既有 139 檔結果驗證 V1 −41bp 是穩定信號還是抽樣噪音
+- **方法（兩層）**:
+  1. **Fast aggregation**（先做）: 用 `analysis/experiment_registry/` 內既有 V1 trades，做 trade-level resample bootstrap（100 iter，with replacement）
+  2. **Full subset rerun**（fallback）: 若 fast 結論不穩，重抽 100 檔走完整 walk-forward backtest
+- **輸出**: expectancy_bp / sharpe / pf / n_trades 的 **95% CI**
+- **判決**:
+  - CI 下界 > 0 → V1 有 edge（極不可能）
+  - CI 含 0 → uncertain（V1 留 baseline，主力放新策略）
+  - CI 上界 < 0 → 真死（V1 降級為純歷史對照）
+
+#### TASK-S1-E1 — C0a Chip event-driven
+
+- **目標**: 驗證籌碼事件是否有短期 forward drift
+- **Trigger（4 個量化定義）**:
+
+  | Trigger | 量化定義 |
+  |---------|---------|
+  | foreign_anomaly_buy | `foreign_net > rolling_60d_mean + 2σ` |
+  | invtrust_anomaly_buy | `inv_trust_net > rolling_60d_mean + 2σ` |
+  | foreign_reverse_to_buy | 前 5d 全負 + 當日 > 0 |
+  | margin_rapid_drop | `margin_5d_change < −2σ` |
+
+- **方法**: 每 trigger 先畫觸發頻率分佈，再跑 `event_study`，套 D.3 gate threshold
+- **判決**: 任一 trigger 過 gate → C0a 通過 → 進 SignalEngine（搬到 `src/signals/rules/chip_event_v1.py`）
+
+#### TASK-S1-E2 — C1-safe Mean reversion
+
+- **目標**: 驗證短線超賣反彈在 BULL/RANGE regime 是否存在
+- **Trigger**:
+  - 5d return < −1.5 × 20d volatility
+  - RSI(14) < 30
+  - per-stock regime ∈ {BULL, RANGE}（強制；BEAR hard skip）
+  - 不處於跌停鎖死 / news_severity ≤ −5
+- **新 features needed**: RSI(14)（純函式，~30 行）
+- **方法**: 同 D.3 event_study + gate
+- **判決**: 過 gate → 搬 `src/signals/rules/mean_reversion_v1.py`；C1-panic 在 C1-safe 過後才探索
+
+#### TASK-S1-E3 — C2 Cross-sectional momentum IC
+
+- **目標**: 用 IC 斷然了結 C2 是否值得排隊
+- **方法**:
+  - feature: 12-1m return（skip month-1 防 1-month reversal，J-T 標準）
+  - target: 1m forward return
+  - **雙版 IC**: raw IC + sector-neutral IC（台股 sector 集中，必區分 sector beta 與 momentum alpha）
+  - decile spread（top − bottom），**扣 monthly turnover cost** 後再判
+- **工具**: 既有 `src/signals/ic_analysis.py` + 新增 sector-neutralization helper
+- **資料需求**: sector classification（若已用 TWSE 產業別則零補資料）
+- **判決**: IC ≥ V2 §1 對應 horizon 門檻 + decile spread > 0 (cost-adj) → 排入 sprint 2；不過即正式淘汰
+
+### D.5 出口條件 / Next-step 決策樹
+
+```
+S1-REPORT 收尾時依結果分支：
+
+任一 E1/E2 過 gate
+  → 把該 evaluator 搬 src/signals/rules/
+  → 接 walk-forward backtest 做 V2 §6.1 完整判決
+  → 過 V2 §6.1 → 接 P01 paper runner（D04 前置）
+
+E3 過 IC + decile spread
+  → 建立 cross-sectional ranking infra（與 V1/C0a/C1 機制不同，需新 portfolio formation pipeline）
+  → 加入 sprint 2
+
+C0a 過 + C1-safe 過
+  → 啟動 C1-panic 探索（BEAR 中極端超跌專案）
+  → 同時規劃 multi-strategy allocation（CONVERSATION §7.5 議題）
+
+全部失敗
+  → S1 sprint 1 結束
+  → sprint 2 候選：C0b corporate action / C3 volatility breakout / 等 C4 advisor 累積（3-6 月）
+  → 若 sprint 2 仍全失敗 → 評估是否轉「補 infra」方向（P02/X02/D04）
+
+E0 V1 bootstrap CI 上界 < 0
+  → 把 V1 從 PROGRESS 降為 baseline-only（不再 active 維護）
+  → 但 long_entry_v1 code / tests / journal 保留作歷史對照
+```
+
+### D.6 不該做的事（強化 §C）
+
+- ❌ 任一 experiment 在 gate 過前 full SignalEngine implementation
+- ❌ helper 第一版塞視覺化 / 過度 reporting
+- ❌ 新 seed 抽 100 檔 backfill（除非 E0 fast bootstrap 結論不穩）
+- ❌ C1-panic / C0b / C0c / C3 / R3-full universe（等 sprint 1 結果）
+- ❌ V1 grid search / 微調 entry 參數
+- ❌ paper runner / multi-strategy allocator（等至少一個策略過 gate）
+- ❌ X02 / X03 / P02（屬實單前置，等 D04 PASS）
+
+---
+
 ## 修改歷史
 
 - 2026-05-24：建立 — V1 §6.1 第六次判決後 retrospective。
 - 2026-05-24：補 A.0「策略類別與經典脈絡」（CAN SLIM / SEPA / Darvas Box / Turtle / 籌碼派 lineage）+ C1-C5 學名與藍本 references。澄清 S1 是 task 代號非策略名稱。
+- 2026-05-24：新增 §D「S1 Research Plan」— 收斂 `STRATEGY_RESEARCH_CONVERSATION.md` 六輪討論結論，定義 7 個 S1 task / event-study helper API / gate threshold / 各 experiment 規格 / 出口決策樹。作為新 session 的 single source of truth。

@@ -27,14 +27,19 @@
 1. specs/profitability/README.md          ← 你正在讀的這份（總入口）
 2. CLAUDE.md                              ← 專案規範（語言、Git、Figma 等強制要求）
 3. specs/profitability/PROGRESS.md        ← 目前進度、當前 task、上次 session log
-4. specs/profitability/IMPLEMENTATION_PLAN.md  ← 38 個 task 的拆解與 TDD 流程
-5. specs/profitability/PROFITABILITY_PLAN_V2.md ← 規格正本（spec）
-6. specs/profitability/PROFITABILITY_PLAN.md   ← V1 意圖原檔（唯讀，背景參考用）
+4. specs/profitability/STRATEGY_REVIEW.md ← 策略 retrospective + S1 Research Plan（§D，目前 active sprint）
+5. specs/profitability/IMPLEMENTATION_PLAN.md  ← 45 個 task 的拆解與 TDD 流程
+6. specs/profitability/PROFITABILITY_PLAN_V2.md ← 規格正本（spec）
+7. specs/profitability/PROFITABILITY_PLAN.md   ← V1 意圖原檔（唯讀，背景參考用）
 ```
+
+可選讀（歷史紀錄，新 session 一般可跳過）：
+- `specs/profitability/STRATEGY_RESEARCH_CONVERSATION.md` — S1 Research Plan 形成過程的六輪討論紀錄（**已 CLOSED**，結論已歸併 `STRATEGY_REVIEW.md §D`）
 
 讀完後**第一個動作**：
 - 開 `specs/profitability/PROGRESS.md` → 看「Quick Status」找當前/下一個 task
-- 對應到 `specs/profitability/IMPLEMENTATION_PLAN.md §5` 看 task 詳細規格
+- **若 task 屬 S1 系列（TASK-S1-*）→ 對應到 `STRATEGY_REVIEW.md §D` 看 sprint plan / experiment 規格**
+- 其餘 task → 對應到 `IMPLEMENTATION_PLAN.md §5` 看 task 詳細規格
 - 對應到 V2 看 spec 來源章節
 - 開始 TDD 的 RED 階段
 
@@ -44,19 +49,22 @@
 
 ```
 specs/
-├── profitability/                       ← 本工作流的所有檔案
-│   ├── README.md                        ← 本檔。Session 入口、唯一單一進入點
-│   ├── PROGRESS.md                      ← 狀態追蹤器（每 session 必更）
-│   ├── IMPLEMENTATION_PLAN.md           ← 執行手冊（38 task / TDD 流程 / 銜接協定）
-│   ├── PROFITABILITY_PLAN_V2.md         ← 規格正本（spec）
-│   └── PROFITABILITY_PLAN.md            ← V1 意圖原檔（唯讀）
+├── profitability/                            ← 本工作流的所有檔案
+│   ├── README.md                             ← 本檔。Session 入口、唯一單一進入點
+│   ├── PROGRESS.md                           ← 狀態追蹤器（每 session 必更）
+│   ├── STRATEGY_REVIEW.md                    ← 策略 retrospective + **S1 Research Plan §D**（active sprint home）
+│   ├── IMPLEMENTATION_PLAN.md                ← 執行手冊（45+S1 task / TDD 流程 / 銜接協定）
+│   ├── PROFITABILITY_PLAN_V2.md              ← 規格正本（spec）
+│   ├── PROFITABILITY_PLAN.md                 ← V1 意圖原檔（唯讀）
+│   └── STRATEGY_RESEARCH_CONVERSATION.md     ← S1 Plan 形成過程的六輪討論（CLOSED，歷史紀錄）
 │
 ├── REQUIREMENTS.md / DESIGN.md / TASK.md  ← 舊系統的 cc-sdd 規格（與本工作流無關）
 └── history/                             ← 舊規格歸檔（背景參考）
 ```
 
-**衝突解決順序**：V2 > IMPLEMENTATION_PLAN > PROGRESS。
-若 V2 與 PLAN 衝突 → 改 PLAN；若 PLAN 與 PROGRESS 衝突 → 改 PROGRESS。
+**衝突解決順序**：V2 > IMPLEMENTATION_PLAN > STRATEGY_REVIEW > PROGRESS。
+若 V2 與 PLAN 衝突 → 改 PLAN；若 PLAN 與 REVIEW 衝突 → 改 REVIEW；若 REVIEW 與 PROGRESS 衝突 → 改 PROGRESS。
+**S1 系列 task** 規格以 `STRATEGY_REVIEW.md §D` 為準（不在 IMPLEMENTATION_PLAN 內）。
 
 **修改頻率**：
 
@@ -65,8 +73,10 @@ specs/
 | V1 | 永不改 |
 | V2 | 偶爾改（spec 演進，要明確 commit `docs(spec): ...`） |
 | IMPLEMENTATION_PLAN | 偶爾改（task 增刪、流程調整） |
+| STRATEGY_REVIEW | 偶爾改（S1 sprint 結束 / 新 retrospective） |
 | PROGRESS | **每次 session 必更** |
 | README（本檔） | 結構性大改時才動 |
+| STRATEGY_RESEARCH_CONVERSATION | **freeze**（CLOSED，歷史紀錄不再改） |
 
 ---
 
@@ -76,11 +86,11 @@ specs/
 
 ### 3.1 目前 phase
 
-**🎯 V1 §6.1 判決已 6 次完成（皆 ❌ FAIL，但 5/10 PASS）→ 進入 S1 strategy 研究階段**
+**🎯 V1 §6.1 第六次判決完成（5/10 PASS）→ S1 Research Plan 已收斂（CONVERSATION 6 輪討論結束 2026-05-24）→ 進入 S1 sprint 1 執行階段**
 
-- **總進度**: **41/45** tasks DONE，0 IN_PROGRESS，0 BLOCKED，3 NOT_STARTED（P02 / X02 / X03 / D04 須時間累積）
-- **Phase 完成度**: Phase 0/1/2/3/4/5/6/7/9 全 ✅；Phase 8 部分（P01 ✅）；Phase 10 部分（X01 ✅）
-- **Pytest**: 完整 **688/688 GREEN**（5 env-level warnings）
+- **總進度**: **42/52** tasks DONE（base 41/45 + S1 phase 1/7：TASK-S1-DOC 本 session 完成）；0 IN_PROGRESS / 0 BLOCKED / 10 NOT_STARTED（6 S1 sprint + 4 infra defer）
+- **Phase 完成度**: Phase 0-7/9 全 ✅；Phase 8（P01 ✅，P02/D04 等）；Phase 10（X01 ✅，X02/X03 等）；**Phase S1 啟動**（DOC ✅，HELPER/E0-3/REPORT 待做）
+- **Pytest**: 完整 **701/701 GREEN**（5 env-level warnings）
 
 ### 3.2 V1 第六次判決 verdict 摘要
 
@@ -93,17 +103,20 @@ specs/
 
 `long_entry_v1` 屬 **trend-following + volume breakout + chip confirmation 混合**（類 CAN SLIM / SEPA / Turtle / 台股籌碼派 family）。技術修補（Plan A/D/E + R1/R2/R3 + D-investigate + top5 真實計算）全部到位，但 strategy 本質在 broader universe 上不賺。
 
-**V1 框架內優化 ROI 低 → 換 strategy class**：
+**V1 框架內優化 ROI 低 → 換 strategy class**：經 CONVERSATION 6 輪討論收斂，最終決定走 **research gate 系統化路徑**（不直接 full implementation 單一策略）。
 
-| 候選 | 學名 / 藍本 | 推薦序 |
-|------|-------------|--------|
-| C1 Mean Reversion | AQR 短期反轉 / Lo contrarian | ★★★ |
-| C3 Volatility Breakout | Turtle / Keltner / Bollinger | ★★ |
-| C4 LLM Advisor Signal | NLP sentiment factor | ★（等 S2 累積 3-6 月）|
-| C2 52w Momentum | Jegadeesh & Titman 1993 | × 與 V1 重疊 |
-| C5 Pair Trading | StatArb / Avellaneda & Lee | × 留作未來 |
+**最終候選優先序**（取代舊推薦表）：
 
-**完整 retrospective**：見 [`STRATEGY_REVIEW.md`](STRATEGY_REVIEW.md)（A 段策略問題 / B 段未完成 task / C 段行動建議）。
+| 序 | 策略 | 動作 | Task |
+|----|------|------|------|
+| 0 | V1 bootstrap | 既有 139 檔 fast aggregation 驗 −41bp 穩定性 | TASK-S1-E0 |
+| 1 | **C0a Chip event-driven** | 4 triggers event-study | TASK-S1-E1 |
+| 2 | **C1-safe Mean reversion** | BULL/RANGE only event-study | TASK-S1-E2 |
+| 3 | **C2 Cross-sectional momentum** | sector-neutral IC only | TASK-S1-E3 |
+| defer | C0b/c, C1-panic, C3, C4, C5 | 等 sprint 1 結果 | — |
+
+**單一 source of truth**：[`STRATEGY_REVIEW.md §D`](STRATEGY_REVIEW.md)（S1 Research Plan / event-study helper API / gate threshold / 出口決策樹）。
+**歷史討論**：[`STRATEGY_RESEARCH_CONVERSATION.md`](STRATEGY_RESEARCH_CONVERSATION.md)（CLOSED，6 輪 thread 不再修改）。
 
 ### 3.4 並行已部署 infrastructure
 
@@ -126,19 +139,24 @@ specs/
 ### 3.6 進入 S1 session 應做什麼
 
 1. **必讀**:
-   - `STRATEGY_REVIEW.md` A.0 策略類別 + A.5 候選 C1-C5（含學名 / 藍本 / 學術 paper reference）
-   - `PROGRESS.md` Global Session Log 末段（看 V1 六次判決演進）
-   - `analysis/backtest_v1_report.md` 詳細指標 + OOS-IS Window Diagnostic 表
-2. **先做**: 挑 C1 / C3 / C4 一個（建議 **C1 mean reversion**）做 IC 分析 → 過門檻才進 SignalEngine
-3. **新規格**: 應在 V2 §2 加 amendment 區寫 C1 / C3 / C4 策略定義，新建 `src/signals/rules/<strategy_name>.py`，比照 `long_entry_v1` 結構（pure evaluator + EntryConditions dataclass）
-4. **複用 infra**: backtest engine / orchestrator / regime gate / risk gates / journal / report 全部 **不必重做**，只換 entry rule
+   - `STRATEGY_REVIEW.md §D` — S1 Research Plan（sprint 7 tasks / event-study helper API / gate threshold / experiment 規格 / 出口決策樹）
+   - `PROGRESS.md` Quick Status + S1 phase 對應 task block
+   - `analysis/backtest_v1_report.md` V1 第六次判決細節（背景）
+2. **下一個動作**（依 PROGRESS Quick Status）：
+   - 當前 active task = **TASK-S1-HELPER**（`src/research/event_study.py` RED 階段）
+   - DOC 已 DONE（本次 fold-in session 完成）
+3. **不要直接做**: 完整 SignalEngine implementation（除非該策略已過 §D.3 gate）/ paper runner / multi-strategy allocator
+4. **複用 infra**: backtest engine / orchestrator / regime gate / risk gates / journal / report / cost_model 全部 **不必重做**
 
-### 3.7 不應再做的事
+### 3.7 不應再做的事（強化 §D.6）
 
-- ❌ V1 內 grid search / 微調 entry 參數（已邊際遞減，會 overfit IS）
-- ❌ R3-full universe 全名單 35h backfill（sample 已證無 edge，ROI 低）
-- ❌ X02/X03 / P02（屬實單前置，現在做沒意義）
-- ❌ 收集更多 data（chip/margin 都已 4yr，universe sample 已驗證）
+- ❌ V1 內 grid search / 微調 entry 參數
+- ❌ R3-full universe 全名單 35h backfill
+- ❌ X02/X03 / P02（實單前置）
+- ❌ 任一 S1-E* 過 gate 前 full SignalEngine implementation
+- ❌ event-study helper 第一版塞視覺化 / 過度 reporting
+- ❌ 新 seed 抽 100 檔 backfill（除非 S1-E0 fast bootstrap 結論不穩）
+- ❌ C1-panic / C0b / C0c / C3 / 多策略 allocator（等 S1 sprint 1 結果）
 
 若實際狀態與此段不符 → 以 PROGRESS 為準，並順手更新本段。
 
@@ -225,47 +243,52 @@ NOT_STARTED → RED → GREEN → REFACTORED → DONE
 
 ---
 
-## 6. 38 個 Task 路線圖（速覽）
+## 6. Task 路線圖（速覽）
 
-> 詳細見 `IMPLEMENTATION_PLAN.md §4`。決策點（D 系列）為 phase 出口。
+> 詳細見 `IMPLEMENTATION_PLAN.md §4`（Phase 0-10）+ `STRATEGY_REVIEW.md §D`（Phase S1）。決策點（D 系列）為 phase 出口。
 
 ```
-Phase 0 — 資料盤點 + Universe + Feature Store
+Phase 0 — 資料盤點 + Universe + Feature Store ✅
   D01 → U01 → F01/F02 → F03 → F04..F08 + B03
-  ⤷ Phase 0 出口：可對某日期產出完整 feature DataFrame + manifest + benchmark
+  ⤷ 出口：可對某日期產出完整 feature DataFrame + manifest + benchmark
 
-Phase 1 — IC / decay 分析
+Phase 1 — IC / decay 分析 ✅
   S01 → D02（決策點：feature 是否過門檻）
 
-Phase 2 — SignalEngine
+Phase 2 — SignalEngine ✅
   S02 → S03 → S04
 
-Phase 3 — Backtester
+Phase 3 — Backtester ✅
   B01 → B02 → B04 → B05 → J04 → D03（決策點：V2 §6.1 量化門檻）
 
-Phase 4 — Risk + Sizing
+Phase 4 — Risk + Sizing ✅
   R01 → R02
 
-Phase 5 — Journal + Performance
+Phase 5 — Journal + Performance ✅
   J01 → J02 → J03
 
-Phase 6 — Portfolio
+Phase 6 — Portfolio ✅
   R03 → S05
 
-Phase 7 — UI
+Phase 7 — UI ✅
   UI01
 
-Phase 8 — Paper Trading
-  P01 → P02 → D04（決策點：V2 §8.3 升級門檻）
+Phase 8 — Paper Trading（partial）
+  P01 ✅ → P02 (defer) → D04 (defer，需 paper 60d)
 
-Phase 9 — Monitor
+Phase 9 — Monitor ✅
   M01 → M02
 
-Phase 10 — OrderExecutor
-  X01 → X02 → X03（實單，最後）
+Phase 10 — OrderExecutor（partial）
+  X01 ✅ → X02 (defer) → X03 (defer，等 D04)
+
+Phase S1 — Strategy Research Sprint（active；spec 在 STRATEGY_REVIEW.md §D）
+  S1-DOC ✅ → S1-HELPER → S1-E1 (C0a) → S1-E2 (C1-safe) → S1-E3 (C2 IC) → S1-E0 (V1 bootstrap) → S1-REPORT
+  ⤷ 出口：任一 E1/E2 過 gate → 搬 src/signals/rules/ 接 walk-forward；全敗 → sprint 2 候選
 ```
 
 **任一 D-task 未通過 → 不可進下一 phase。**
+**任一 S1-E* 未過 §D.3 gate → 不可搬 src/signals/rules/ + 不接 walk-forward backtest。**
 
 ---
 
@@ -364,3 +387,4 @@ python scripts/test_shioaji_login.py
 
 - 2026-05-22：初版建立。Bootstrap session 完成 V2 spec + IMPLEMENTATION_PLAN + PROGRESS + 本 README。
 - 2026-05-24：§3 大改 — V1 §6.1 第 6 次判決完成（皆 FAIL，5/10 PASS）；總進度 41/45；新增 §3.1-3.7（V1 verdict 摘要 / 為何進入 S1 / 並行 infra / 剩餘 task / 進入 S1 session 應做什麼 / 不應做的事）；連結 STRATEGY_REVIEW.md。
+- 2026-05-24（fold-in）：CONVERSATION 6 輪討論收斂 → S1 Research Plan 入 `STRATEGY_REVIEW.md §D`。本 README 配套更新：§1 必讀清單加 STRATEGY_REVIEW.md（含 §D 指引）+ STRATEGY_RESEARCH_CONVERSATION 標 CLOSED；§2 檔案地圖加新檔；衝突順序加入 STRATEGY_REVIEW；§3 進度 42/52 + S1 phase 啟動；§3.3 候選表更新為 C0a/C1-safe/C2/E0 優先序；§3.6 下個 session 動作改為 TASK-S1-HELPER；§3.7 不應做加 S1 相關禁區；§6 路線圖加 Phase S1。
