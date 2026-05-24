@@ -11,10 +11,10 @@
 |------|----|
 | 上次更新 | 2026-05-24 |
 | 上次 session | V1 §6.1 第五次判決（R1+R2 applied）+ D-investigate (window diagnostic) — R1 移除 long_entry `market_above_ma60` + R2 `RegimeGateConfig` default `{BULL,RANGE}` → n_trades 43→47 (-0.91% / Sharpe -0.11)；加 `_render_window_diagnostic` 表 11 windows IS vs OOS／regime/trade count → 揭露非典型 overfit：IS+ 5/11 vs OOS+ 4/11（接近），但 BEAR windows (7-10) IS+ 而 OOS- 顯示 bear cherry-pick 不延續；OOS 每窗 1-9 trades 統計噪音為主 → 根因：**樣本量 / regime 集中問題，非策略缺陷**。R3 (universe 全名單) 確定是正解。完整 pytest 649/649 GREEN |
-| 當前 phase | **V1 §6.1 第五次判決完成（❌ FAIL，5/10 PASS）+ D-investigate DONE** — 確認 R3 為下一步正解 |
-| 當前 task | R3 啟動候選 — TWSE listed+delisted universe 全名單 |
-| 下一個建議 task | (R3) 拆 sub-tasks：(R3a) 找 TWSE 公開上市/上櫃名單 API + 載入；(R3b) 找 delisted/減資/停止交易歷史名單；(R3c) 改 `src/universe/filter.py` 接全名單；(R3d) D01b backfill 擴 universe；(R3e) 重跑 V1 第 6 次判決 |
-| 全域 blocked | 無（R3 大型工作，autonomous burst 起步階段做 R3a-c 設計與探勘，backfill 留待用戶決定執行時機） |
+| 當前 phase | **V1 §6.1 第五次判決完成（❌ FAIL，5/10 PASS）+ D-investigate DONE + R3 endpoint 探勘 DONE** — 等 user 決定 R3 backfill 是否值得 |
+| 當前 task | R3 endpoint 探勘完成；實作待 user 確認啟動 |
+| 下一個建議 task | (R3a) universe loader 走 TWSE `openapi.twse.com.tw/v1/opendata/t187ap03_L`（~1000 檔上市）+ TPEx `tpex.org.tw/openapi/v1/mopsfin_t187ap03_O`（~800 檔上櫃），共 ~1800 檔；(R3b) TWSE 終止上市 `openapi.twse.com.tw/v1/company/suspendListingCsvAndHtml`（JSON `[{DelistingDate(民國), Company, Code}]`）；TPEx 終止上櫃**無公開 endpoint**，需爬 web 或商業源；(R3c) 改 `src/universe/filter.py` 從 hand-list → API loader；(R3d) D01b backfill 擴 ~1800 stocks 需 ~35h，建議分批或先抽樣 100 檔驗證；(R3e) V1 第 6 次判決 |
+| 全域 blocked | R3 backfill 35h estimate — 建議 user 拍板：分批跑 / 抽樣 100 檔驗證 / 棄略 R3 走其他路 |
 | Pytest 狀態 | 完整 pytest 649/649 GREEN（5 warnings env-level） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/execution/order_router.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
 | Repo 是否乾淨 | main：X01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
@@ -1059,6 +1059,15 @@
   - 完整 pytest 649/649 GREEN（從 648 加 1，分裂 range test）
   - **V1 重跑**: n_trades 43 → 47（仍差 3），total_return -0.91%、Sharpe -0.11、PF 1.50、max_dd 2.60%、beats_benchmarks ✅ + oos_alpha ✅ 仍 PASS、regime_coverage 7+4+0 不變
   - **結論**: R1 效果遞減（+4 trades）。繼續放寬 entry rule 已邊際；策略本質仍 break-even。建議：(R3) universe 解 survivorship / (D-investigate) 診斷 OOS-IS 反向
+- 2026-05-24 | R3 endpoint 探勘 |
+  - WebSearch + curl probe TWSE / TPEx OpenAPI swagger.json
+  - **TWSE listed**: `GET https://openapi.twse.com.tw/v1/opendata/t187ap03_L` → JSON `[{出表日期, 公司代號, 公司名稱, 公司簡稱, 產業別, 上市日期, ...}]` ~1000 檔
+  - **TWSE 終止上市**: `GET https://openapi.twse.com.tw/v1/company/suspendListingCsvAndHtml` → JSON `[{DelistingDate(民國yyy/mm/dd), Company, Code}]`，17.8KB content（涵蓋 113 年 ~ 115 年範圍）
+  - **TPEx 上櫃**: `GET https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O` → 同結構 ~800 檔
+  - **TPEx 終止上櫃**: **無公開 endpoint**；swagger.json 內僅有 `/tpex_cmode`（變更交易/分盤/停止交易，非終止上櫃歷史）
+  - 規模估計：~1800 檔 listed + N 檔 delisted。Backfill ~1800 × 24mo × 3s ≈ 35h。
+  - **建議策略**: 抽樣 100 檔 + delisted 全部（17KB JSON 一次抓即解）驗證 R3 概念，全跑等用戶決定。
+  - 不寫 code，純探勘。停止 autonomous burst（R3 backfill 規模需用戶拍板）。
 - 2026-05-24 | D-investigate window diagnostic |
   - `scripts/run_backtest_v1.py` 加 `_render_window_diagnostic(result, market_ohlc)` + `_segment_return`：產 markdown 表 11 windows IS vs OOS、regime label、trade counts、ratio
   - V1 報告末段新增 「OOS-IS Window Diagnostic」 section
