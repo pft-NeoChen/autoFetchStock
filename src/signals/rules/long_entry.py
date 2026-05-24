@@ -92,9 +92,11 @@ def evaluate_long_entry(c: EntryConditions) -> Tuple[bool, List[str], List[str]]
         return False, [], []
     reasons.append("chip_supportive")
 
-    if c.market_close <= c.market_ma_60:
-        return False, [], []
-    reasons.append("market_above_ma60")
+    # R1 amendment (2026-05-24): market-wide `market_above_ma60` check removed —
+    # per-stock regime gate (Plan D) already enforces trend at the entry-factory
+    # level using each stock's own MA50/MA200. The previous universe-mean check
+    # double-gated with a different proxy and was killing trades after Plan D.
+    # market_close / market_ma_60 fields stay on EntryConditions for back-compat.
 
     invalidations = [
         "break_below_ma20",

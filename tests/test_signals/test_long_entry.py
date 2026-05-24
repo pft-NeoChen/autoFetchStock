@@ -88,10 +88,14 @@ def test_weak_chip_blocks() -> None:
 
 
 @pytest.mark.unit
-def test_market_below_ma60_blocks() -> None:
+def test_market_below_ma60_does_not_block(
+    # R1 amendment (2026-05-24): per-stock regime gate (Plan D) supersedes
+    # this market-wide check; long_entry no longer gates on market_close vs
+    # market_ma_60. Field kept on EntryConditions for back-compat.
+) -> None:
     c = replace(_passing(), market_close=16000.0)
     ok, _, _ = evaluate_long_entry(c)
-    assert ok is False
+    assert ok is True
 
 
 @pytest.mark.unit
