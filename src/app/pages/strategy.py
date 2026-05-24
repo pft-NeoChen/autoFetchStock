@@ -1,20 +1,21 @@
-"""TASK-UI01 — Strategy page (V2 §7).
+"""TASK-UI01 — Strategy page (user-facing).
 
-Shows the latest V1 backtest verdict in user-friendly Chinese layout:
+設計原則：
+1. **結論優先**：第一屏即看到 verdict + 白話建議
+2. **白話解讀**：所有數字配「這代表什麼意思」一句說明
+3. **拒絕 jargon**：移除 V2 §X / experiment_id / 內部規格文件 reference
+4. **進階摺疊**：manifest / 完整報告放 ``<details>``，預設收合
+5. **單頁可滾動**：不在內層 div 設 max-height（讓 browser 接管 scroll）
 
-* 中文欄位 + 單位（取代 raw key 名）
-* 數值格式化（千分位、捨小數）
-* 策略說明 panel（解釋 long_entry_v1 是什麼）
-* 詳細報告**內嵌渲染**（取代「點開另開新分頁」）
-
-Element IDs (kebab-case per project convention):
+Element IDs (kebab-case)：
 * ``strategy-page``                — root
-* ``strategy-page-verdict``        — verdict banner
-* ``strategy-page-overview``       — 策略說明區塊
-* ``strategy-page-metrics``        — 績效指標表
-* ``strategy-page-manifest``       — 回測設定表
-* ``strategy-page-report``         — 內嵌詳細報告
-* ``strategy-page-empty``          — 無實驗記錄時 empty-state
+* ``strategy-page-verdict``        — 白話結論卡
+* ``strategy-page-explainer``      — 「這個頁面在做什麼」說明
+* ``strategy-page-what-we-tested`` — 「我們測試了什麼」
+* ``strategy-page-metrics``        — 數字解讀區
+* ``strategy-page-recommendation`` — 建議行動
+* ``strategy-page-details``        — 進階詳情（manifest + 報告）
+* ``strategy-page-empty``          — 無實驗 empty state
 """
 
 from __future__ import annotations
@@ -27,7 +28,10 @@ from dash import dash_table, dcc, html
 
 __all__ = [
     "MANIFEST_LABELS",
+    "METRIC_INTERPRETATIONS",
     "SUMMARY_LABELS",
+    "build_recommendation",
+    "build_verdict_summary",
     "create_strategy_page_layout",
     "format_manifest_value",
     "format_summary_value",
@@ -37,10 +41,9 @@ __all__ = [
 
 DEFAULT_REGISTRY_DIR = Path("analysis/experiment_registry")
 DEFAULT_REPORT_PATH = Path("analysis/backtest_v1_report.md")
-DEFAULT_STRATEGY_REVIEW_PATH = Path("specs/profitability/STRATEGY_REVIEW.md")
 
 
-# ── 數值格式化 helpers ──────────────────────────────────────────────────────
+# ── 數值格式 ────────────────────────────────────────────────────────────────
 
 
 def _fmt_money(value: Any) -> str:
@@ -61,19 +64,8 @@ def _fmt_int_with_unit(unit: str) -> Callable[[Any], str]:
     return fmt
 
 
-def _fmt_months(value: Any) -> str:
-    return _fmt_int_with_unit("月")(value)
-
-
-def _fmt_business_days(value: Any) -> str:
-    return _fmt_int_with_unit("交易日")(value)
-
-
 def _fmt_str(value: Any) -> str:
     return str(value) if value not in (None, "") else "—"
-
-
-# ── key → 中文 label + formatter mapping ────────────────────────────────────
 
 
 SUMMARY_LABELS: Dict[str, Tuple[str, Callable[[Any], str]]] = {
@@ -90,14 +82,33 @@ MANIFEST_LABELS: Dict[str, Tuple[str, Callable[[Any], str]]] = {
     "universe_size": ("Universe 樣本檔數", _fmt_int_with_unit("檔")),
     "data_span_start": ("資料起始日", _fmt_str),
     "data_span_end": ("資料結束日", _fmt_str),
-    "is_months": ("IS 訓練視窗長度", _fmt_months),
-    "oos_months": ("OOS 驗證視窗長度", _fmt_months),
-    "embargo_business_days": ("IS / OOS 之間 embargo", _fmt_business_days),
+    "is_months": ("IS 訓練視窗長度", _fmt_int_with_unit("月")),
+    "oos_months": ("OOS 驗證視窗長度", _fmt_int_with_unit("月")),
+    "embargo_business_days": ("IS / OOS 之間 embargo", _fmt_int_with_unit("交易日")),
     "initial_cash_per_stock": ("單檔初始資金", _fmt_money),
     "target_shares": ("每筆目標部位", _fmt_int_with_unit("股")),
     "caveats": ("注意事項", _fmt_str),
     "n_trades": ("OOS 期總成交筆數", _fmt_int_with_unit("筆")),
     "experiment_id": ("實驗 ID", _fmt_str),
+}
+
+
+# 白話解讀 — 給每個關鍵指標一句說明
+METRIC_INTERPRETATIONS: Dict[str, Callable[[Any], str]] = {
+    "trade_count": lambda v: (
+        f"在驗證期間共成交 {int(v)} 筆。"
+        + ("樣本筆數足夠（≥50），結論較可信。" if int(v) >= 50
+           else "樣本筆數偏少（<50），結論可能受運氣影響。")
+    ),
+    "total_pnl": lambda v: (
+        f"在驗證期間累計賺賠約 {float(v):,.0f} 元。"
+        + ("總體獲利。" if float(v) > 0 else "總體虧損或打平。")
+    ),
+    "is_trade_count": lambda v: f"訓練期間共成交 {int(v)} 筆，用於最佳化策略參數。",
+    "is_total_pnl": lambda v: f"訓練期間累計賺賠約 {float(v):,.0f} 元。",
+    "n_windows": lambda v: (
+        f"把資料切成 {int(v)} 段，每段獨立訓練 + 驗證，避免只看單一時期的好運。"
+    ),
 }
 
 
@@ -115,11 +126,64 @@ def format_manifest_value(key: str, value: Any) -> str:
     return label_fmt[1](value)
 
 
-# ── 表格列建構 ───────────────────────────────────────────────────────────────
+# ── 白話結論建構 ───────────────────────────────────────────────────────────
+
+
+def build_verdict_summary(experiment: Dict[str, Any]) -> Dict[str, str]:
+    """Build a human-readable verdict from the experiment summary."""
+    summary = experiment.get("summary") or {}
+    trades = summary.get("trade_count", 0)
+    pnl = float(summary.get("total_pnl") or 0)
+
+    if trades <= 0:
+        headline = "❓ 沒有產生任何交易"
+        reason = "策略條件太嚴，整段測試期間都沒進場 — 無法評估表現。"
+        action = "建議放寬進場條件或檢查資料完整性。"
+    elif pnl > 0 and trades >= 50:
+        headline = "✅ 策略表現正向"
+        reason = (
+            f"在 {int(trades)} 筆成交中，累計賺 {pnl:,.0f} 元，"
+            "樣本筆數足以支持初步信心。"
+        )
+        action = "可考慮進入 Paper（紙上）交易階段做進一步驗證。"
+    elif pnl > 0 and trades < 50:
+        headline = "⚠️ 表面獲利，但樣本不足"
+        reason = (
+            f"在 {int(trades)} 筆成交中累計賺 {pnl:,.0f} 元，"
+            "但樣本不到 50 筆，可能只是運氣。"
+        )
+        action = "需更多資料或不同股票池再驗證。"
+    else:
+        headline = "❌ 策略目前沒有穩定獲利能力"
+        reason = (
+            f"在 {int(trades)} 筆成交中累計約 {pnl:,.0f} 元，且品質指標未達標"
+            "（如平均每筆期望值為負、去除少數爆賺後即虧損）。"
+        )
+        action = "不建議直接拿來下實單。可參考下方建議行動。"
+
+    return {"headline": headline, "reason": reason, "action": action}
+
+
+def build_recommendation(experiment: Dict[str, Any]) -> List[str]:
+    summary = experiment.get("summary") or {}
+    trades = summary.get("trade_count", 0)
+    pnl = float(summary.get("total_pnl") or 0)
+    items: List[str] = []
+    if pnl <= 0 or trades < 50:
+        items.append("⛔ 暫時不要用這個策略下實單。")
+        items.append("🔁 嘗試替代策略類型（如：短線反轉、突破系統）。")
+        items.append("📊 等待更多資料累積（advisor 評分需 3-6 個月）。")
+    else:
+        items.append("✅ 可進入 Paper（紙上）交易階段驗證。")
+        items.append("⏱ 至少跑滿 60 個交易日 + 100 筆成交再評估升級。")
+    return items
+
+
+# ── 表格樣式（暗色主題） ────────────────────────────────────────────────────
 
 
 _DARK_TABLE_STYLE = {
-    "style_table": {"maxWidth": "720px", "marginBottom": "16px"},
+    "style_table": {"maxWidth": "720px", "marginBottom": "12px"},
     "style_header": {
         "backgroundColor": "#2a2a2a",
         "color": "#f5f5f5",
@@ -140,21 +204,6 @@ _DARK_TABLE_STYLE = {
 }
 
 
-def _summary_rows(summary: Dict[str, Any]) -> List[Dict[str, str]]:
-    rows: List[Dict[str, str]] = []
-    for key in SUMMARY_LABELS:
-        if key not in summary:
-            continue
-        label, fmt = SUMMARY_LABELS[key]
-        rows.append({"name": label, "value": fmt(summary[key])})
-    # Surface any extra keys that aren't in the mapping (forward-compat).
-    for key, value in summary.items():
-        if key in SUMMARY_LABELS:
-            continue
-        rows.append({"name": key, "value": str(value)})
-    return rows
-
-
 def _manifest_rows(manifest: Dict[str, Any]) -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
     for key in MANIFEST_LABELS:
@@ -162,178 +211,239 @@ def _manifest_rows(manifest: Dict[str, Any]) -> List[Dict[str, str]]:
             continue
         label, fmt = MANIFEST_LABELS[key]
         rows.append({"name": label, "value": fmt(manifest[key])})
-    for key, value in manifest.items():
-        if key in MANIFEST_LABELS or key in ("universe", "windows"):
-            continue
-        rows.append({"name": key, "value": str(value)})
     return rows
 
 
-# ── Layout 區塊 ──────────────────────────────────────────────────────────────
+# ── 區塊 builders ────────────────────────────────────────────────────────────
 
 
-def _verdict_banner(experiment: Optional[Dict[str, Any]]) -> html.Div:
-    if experiment is None:
-        return html.Div(
-            "尚無實驗記錄。請先執行 `python -m scripts.run_backtest_v1`。",
-            id="strategy-page-empty",
-            className="strategy-empty-state",
-        )
-    summary = experiment.get("summary") or {}
-    trade_count = summary.get("trade_count")
-    pnl = summary.get("total_pnl")
-    pnl_text = format_summary_value("total_pnl", pnl) if pnl is not None else "—"
-    trade_text = format_summary_value("trade_count", trade_count) if trade_count is not None else "—"
+def _verdict_section(experiment: Dict[str, Any]) -> html.Div:
+    verdict = build_verdict_summary(experiment)
     return html.Div(
-        [
-            html.H2("V1 §6.1 最近回測判決", className="strategy-section-title"),
-            html.Div(
-                f"OOS 期成交 {trade_text}，累計損益 {pnl_text}。",
-                className="strategy-verdict-summary",
-            ),
-            html.Div(
-                f"實驗 ID: {experiment.get('experiment_id', '—')}",
-                className="strategy-verdict-id",
-                style={"color": "#999", "fontSize": "0.9em", "marginTop": "4px"},
-            ),
-        ],
         id="strategy-page-verdict",
-        className="strategy-verdict-banner",
-    )
-
-
-def _strategy_overview() -> html.Div:
-    """解釋當前策略 long_entry_v1 是什麼。"""
-    return html.Div(
-        id="strategy-page-overview",
-        className="strategy-overview",
+        className="strategy-verdict",
         style={
-            "background": "#2a2a2a",
-            "padding": "16px 20px",
-            "borderRadius": "8px",
-            "margin": "12px 0 24px 0",
-            "borderLeft": "4px solid #6c8eff",
+            "background": "#252525",
+            "padding": "24px 28px",
+            "borderRadius": "10px",
+            "borderLeft": "5px solid #6c8eff",
+            "marginBottom": "20px",
         },
         children=[
-            html.H3("策略說明 — long_entry_v1（V2 §2 第一版）"),
+            html.Div("回測結論", style={"color": "#aaa", "fontSize": "0.85em", "marginBottom": "8px"}),
+            html.H2(
+                verdict["headline"],
+                style={"margin": "0 0 12px 0", "fontSize": "1.6em"},
+            ),
+            html.P(verdict["reason"], style={"color": "#ddd", "marginBottom": "8px", "lineHeight": "1.6"}),
             html.P(
-                "屬「趨勢追蹤 + 量價突破 + 籌碼確認」混合型策略（類 CAN SLIM / SEPA / Turtle "
-                "Trading / 台股本土籌碼派 family）。多方進場，平均持有 5-20 個交易日。",
-                style={"marginBottom": "8px"},
-            ),
-            html.Ul(
-                children=[
-                    html.Li("進場條件（5 條同時滿足）：close>MA20 AND close>MA60、成交量爆發 ≥ MID、紅 K 或突破 20 日高、三大法人連 3 日 net buy 或融資 5 日減幅 < 0、非漲停板鎖死"),
-                    html.Li("避免進場：上影線 > 實體 ×1.5、嚴重利空、daily loss limit"),
-                    html.Li("出場（5 條任一觸發）：ATR 1.5× 停損、跌破 MA10、爆量長黑、ATR 1× 移動停利、持有 > 10 日"),
-                    html.Li("Regime gate：每股自身 MA50/MA200 分類，允許 {BULL, RANGE}（BEAR 不交易）"),
-                ],
-                style={"marginBottom": "8px"},
-            ),
-            html.P(
-                "完整 retrospective + 替代策略候選 C1-C5 見 specs/profitability/STRATEGY_REVIEW.md。",
-                style={"color": "#aaa", "fontSize": "0.9em"},
+                verdict["action"],
+                style={"color": "#9ec1ff", "fontWeight": "500", "marginBottom": "0"},
             ),
         ],
     )
 
 
-def _metrics_table(experiment: Optional[Dict[str, Any]]) -> html.Div:
-    if experiment is None:
-        return html.Div(id="strategy-page-metrics")
-    summary = experiment.get("summary") or {}
+def _explainer_section() -> html.Div:
     return html.Div(
-        [
-            html.H3("績效指標（從實驗記錄）"),
-            dash_table.DataTable(
-                id="strategy-page-metrics-table",
-                columns=[
-                    {"name": "指標", "id": "name"},
-                    {"name": "數值", "id": "value"},
-                ],
-                data=_summary_rows(summary),
-                **_DARK_TABLE_STYLE,
-            ),
-        ],
-        id="strategy-page-metrics",
-    )
-
-
-def _manifest_table(experiment: Optional[Dict[str, Any]]) -> html.Div:
-    if experiment is None:
-        return html.Div(id="strategy-page-manifest")
-    manifest = experiment.get("manifest") or {}
-    return html.Div(
-        [
-            html.H3("回測設定"),
-            dash_table.DataTable(
-                id="strategy-page-manifest-table",
-                columns=[
-                    {"name": "設定項", "id": "name"},
-                    {"name": "內容", "id": "value"},
-                ],
-                data=_manifest_rows(manifest),
-                **_DARK_TABLE_STYLE,
-            ),
-        ],
-        id="strategy-page-manifest",
-    )
-
-
-def _inline_report(report_path: Path) -> html.Div:
-    """把 backtest_v1_report.md 內嵌渲染（取代「點開另開分頁」）。"""
-    if not report_path.exists():
-        return html.Div(
-            "（尚未產生詳細報告）",
-            id="strategy-page-report",
-            className="strategy-report-empty",
-            style={"color": "#999", "marginTop": "24px"},
-        )
-    try:
-        md_text = report_path.read_text()
-    except OSError as exc:
-        return html.Div(
-            f"（讀取報告失敗：{exc}）",
-            id="strategy-page-report",
-            style={"color": "#c44", "marginTop": "24px"},
-        )
-    return html.Div(
-        id="strategy-page-report",
-        className="strategy-report-inline",
-        style={"marginTop": "24px"},
+        id="strategy-page-explainer",
+        className="strategy-explainer",
+        style={
+            "background": "#1f1f1f",
+            "padding": "20px 24px",
+            "borderRadius": "8px",
+            "marginBottom": "20px",
+        },
         children=[
-            html.H3("詳細回測報告"),
+            html.H3("📖 這個頁面在做什麼？", style={"marginTop": "0"}),
+            html.P(
+                "這裡顯示「策略回測」結果。我們把一套買賣規則套到歷史股價上，"
+                "模擬「如果過去這樣交易，會賺/賠多少」，"
+                "用來判斷策略是否值得拿到真實市場使用。",
+                style={"color": "#ddd", "lineHeight": "1.7", "marginBottom": "0"},
+            ),
+        ],
+    )
+
+
+def _what_we_tested_section(experiment: Dict[str, Any]) -> html.Div:
+    manifest = experiment.get("manifest") or {}
+    universe = manifest.get("universe_size", "—")
+    start = manifest.get("data_span_start", "—")
+    end = manifest.get("data_span_end", "—")
+    n_windows = (experiment.get("summary") or {}).get("n_windows", "—")
+    return html.Div(
+        id="strategy-page-what-we-tested",
+        className="strategy-what-we-tested",
+        style={
+            "background": "#1f1f1f",
+            "padding": "20px 24px",
+            "borderRadius": "8px",
+            "marginBottom": "20px",
+        },
+        children=[
+            html.H3("🔬 我們測試了什麼？", style={"marginTop": "0"}),
+            html.Div(
+                style={"display": "grid", "gridTemplateColumns": "180px 1fr", "gap": "10px 16px"},
+                children=[
+                    html.Div("策略類型", style={"color": "#aaa"}),
+                    html.Div("趨勢追蹤（趨勢起漲時跟進，跌破停損出場）"),
+                    html.Div("進場判斷依據", style={"color": "#aaa"}),
+                    html.Div("股價站上 20 / 60 日均線、出現爆量、法人連續買進"),
+                    html.Div("出場判斷依據", style={"color": "#aaa"}),
+                    html.Div("停損 1.5×ATR、跌破 10 日均線、爆量長黑、移動停利、持有 > 10 日"),
+                    html.Div("測試的股票池", style={"color": "#aaa"}),
+                    html.Div(f"{universe} 檔台股（含上市 + 上櫃部分樣本）"),
+                    html.Div("測試的時間範圍", style={"color": "#aaa"}),
+                    html.Div(f"{start} ~ {end}"),
+                    html.Div("測試的方式", style={"color": "#aaa"}),
+                    html.Div(
+                        f"Walk-forward 滾動，共切 {n_windows} 段獨立訓練 + 驗證，"
+                        "避免只看單一時期的好運。"
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def _metrics_section(experiment: Dict[str, Any]) -> html.Div:
+    summary = experiment.get("summary") or {}
+    rows: List[html.Div] = []
+    for key in ("total_pnl", "trade_count", "n_windows", "is_total_pnl", "is_trade_count"):
+        if key not in summary:
+            continue
+        label = SUMMARY_LABELS[key][0]
+        value_str = format_summary_value(key, summary[key])
+        interp_fn = METRIC_INTERPRETATIONS.get(key)
+        interp = interp_fn(summary[key]) if interp_fn else ""
+        rows.append(
             html.Div(
                 style={
-                    "background": "#1a1a1a",
-                    "padding": "16px 24px",
-                    "borderRadius": "8px",
-                    "border": "1px solid #333",
-                    "maxHeight": "70vh",
-                    "overflowY": "auto",
+                    "padding": "14px 16px",
+                    "borderBottom": "1px solid #333",
+                    "display": "grid",
+                    "gridTemplateColumns": "240px 180px 1fr",
+                    "gap": "16px",
+                    "alignItems": "baseline",
                 },
                 children=[
-                    dcc.Markdown(
-                        md_text,
-                        link_target="_blank",
-                        style={"color": "#e8e8e8"},
+                    html.Div(label, style={"color": "#aaa"}),
+                    html.Div(
+                        value_str,
+                        style={
+                            "fontFamily": "ui-monospace, SF Mono, Menlo, monospace",
+                            "fontSize": "1.05em",
+                            "color": "#f5f5f5",
+                        },
                     ),
+                    html.Div(interp, style={"color": "#bbb", "fontSize": "0.9em"}),
                 ],
-            ),
-            html.Div(
-                children=[
-                    html.A(
-                        f"以原始檔案開啟：{report_path}",
-                        href=f"/{report_path.as_posix()}",
-                        target="_blank",
-                        className="strategy-report-link",
-                        style={"color": "#6c8eff", "fontSize": "0.9em"},
-                    ),
-                ],
-                style={"marginTop": "8px"},
+            )
+        )
+
+    return html.Div(
+        id="strategy-page-metrics",
+        className="strategy-metrics",
+        style={
+            "background": "#1f1f1f",
+            "padding": "20px 24px",
+            "borderRadius": "8px",
+            "marginBottom": "20px",
+        },
+        children=[
+            html.H3("📊 主要結果（含白話解讀）", style={"marginTop": "0"}),
+            html.Div(rows) if rows else html.Div("（無資料）", style={"color": "#888"}),
+        ],
+    )
+
+
+def _recommendation_section(experiment: Dict[str, Any]) -> html.Div:
+    items = build_recommendation(experiment)
+    return html.Div(
+        id="strategy-page-recommendation",
+        className="strategy-recommendation",
+        style={
+            "background": "#1f1f1f",
+            "padding": "20px 24px",
+            "borderRadius": "8px",
+            "marginBottom": "20px",
+        },
+        children=[
+            html.H3("👉 接下來該怎麼做？", style={"marginTop": "0"}),
+            html.Ul(
+                [html.Li(item, style={"marginBottom": "6px"}) for item in items],
+                style={"color": "#ddd", "lineHeight": "1.7", "marginBottom": "0"},
             ),
         ],
     )
+
+
+def _details_section(experiment: Dict[str, Any], report_path: Path) -> html.Div:
+    manifest = experiment.get("manifest") or {}
+    manifest_table = dash_table.DataTable(
+        id="strategy-page-manifest-table",
+        columns=[
+            {"name": "設定項", "id": "name"},
+            {"name": "內容", "id": "value"},
+        ],
+        data=_manifest_rows(manifest),
+        **_DARK_TABLE_STYLE,
+    )
+
+    md_text: Optional[str] = None
+    if report_path.exists():
+        try:
+            md_text = report_path.read_text()
+        except OSError:
+            md_text = None
+
+    report_block = (
+        dcc.Markdown(md_text, link_target="_blank", style={"color": "#e8e8e8"})
+        if md_text
+        else html.Div("（尚未產生詳細報告 — 請執行 python -m scripts.run_backtest_v1）",
+                      style={"color": "#888"})
+    )
+
+    return html.Div(
+        id="strategy-page-details",
+        className="strategy-details",
+        style={"marginBottom": "20px"},
+        children=[
+            html.Details(
+                style={
+                    "background": "#1a1a1a",
+                    "padding": "12px 20px",
+                    "borderRadius": "8px",
+                    "marginBottom": "12px",
+                },
+                children=[
+                    html.Summary(
+                        "⚙️ 回測詳細設定",
+                        style={"cursor": "pointer", "fontWeight": "500", "color": "#ccc"},
+                    ),
+                    html.Div(manifest_table, style={"marginTop": "12px"}),
+                ],
+            ),
+            html.Details(
+                style={
+                    "background": "#1a1a1a",
+                    "padding": "12px 20px",
+                    "borderRadius": "8px",
+                },
+                children=[
+                    html.Summary(
+                        "📄 完整回測報告（markdown）",
+                        style={"cursor": "pointer", "fontWeight": "500", "color": "#ccc"},
+                    ),
+                    html.Div(report_block, style={"marginTop": "12px"}),
+                ],
+            ),
+        ],
+    )
+
+
+# ── 載入 + 組合 ──────────────────────────────────────────────────────────────
 
 
 def load_latest_experiment(
@@ -361,20 +471,65 @@ def load_latest_experiment(
     return candidates[0][1]
 
 
+def _empty_state() -> html.Div:
+    return html.Div(
+        id="strategy-page-empty",
+        className="strategy-empty-state",
+        style={
+            "padding": "40px",
+            "textAlign": "center",
+            "color": "#999",
+        },
+        children=[
+            html.H2("📭 尚未有回測結果"),
+            html.P("請先執行回測腳本以產生報告："),
+            html.Pre(
+                "python -m scripts.run_backtest_v1",
+                style={
+                    "background": "#1a1a1a",
+                    "padding": "12px",
+                    "borderRadius": "6px",
+                    "display": "inline-block",
+                    "color": "#9ec1ff",
+                },
+            ),
+        ],
+    )
+
+
 def create_strategy_page_layout(
     registry_dir: Path = DEFAULT_REGISTRY_DIR,
     report_path: Path = DEFAULT_REPORT_PATH,
 ) -> html.Div:
     experiment = load_latest_experiment(registry_dir)
+    children: List[Any] = [
+        html.H1(
+            "策略績效",
+            className="strategy-page-title",
+            style={"marginBottom": "20px"},
+        ),
+    ]
+    if experiment is None:
+        children.append(_empty_state())
+    else:
+        children.extend([
+            _verdict_section(experiment),
+            _explainer_section(),
+            _what_we_tested_section(experiment),
+            _metrics_section(experiment),
+            _recommendation_section(experiment),
+            _details_section(experiment, report_path),
+        ])
+
     return html.Div(
         id="strategy-page",
         className="strategy-page",
-        children=[
-            html.H1("策略績效 (V2 §7)", className="strategy-page-title"),
-            _verdict_banner(experiment),
-            _strategy_overview(),
-            _metrics_table(experiment),
-            _manifest_table(experiment),
-            _inline_report(report_path),
-        ],
+        # 不在內層 div 設 maxHeight → 讓 body 接管 scroll，避免被裁切。
+        style={
+            "padding": "24px 32px",
+            "maxWidth": "1100px",
+            "margin": "0 auto",
+            "color": "#e8e8e8",
+        },
+        children=children,
     )
