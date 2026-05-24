@@ -478,6 +478,7 @@ def run(
     initial_cash_per_stock: float = 1_000_000.0,
     target_shares: int = 1000,
     registry_dir: Path | None = None,
+    dump_trades_path: Path | None = None,
 ) -> None:
     logger.info("loading OHLC from %s", data_dir)
     ohlc_frames = load_daily_ohlc_frames(data_dir)
@@ -587,6 +588,21 @@ def run(
         "backtest done: OOS trades=%d, IS trades=%d",
         len(result.all_trades), len(result.is_all_trades),
     )
+
+    if dump_trades_path is not None:
+        dump_trades_path.parent.mkdir(parents=True, exist_ok=True)
+        dump_trades_path.write_text(
+            json.dumps(
+                {
+                    "oos_trades": [_trade_to_dict(t) for t in result.all_trades],
+                    "is_trades": [_trade_to_dict(t) for t in result.is_all_trades],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        logger.info("dumped %d OOS + %d IS trades to %s",
+                    len(result.all_trades), len(result.is_all_trades), dump_trades_path)
 
     initial_capital = initial_cash_per_stock * len(feature_frames)
     metrics = summarize_performance(
@@ -706,6 +722,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--target-shares", type=int, default=1000)
     p.add_argument("--registry-dir", type=Path,
                    default=Path("analysis/experiment_registry"))
+    p.add_argument(
+        "--dump-trades",
+        type=Path,
+        default=None,
+        help="Optional: also dump OOS + IS trades as JSON (for TASK-S1-E0 bootstrap).",
+    )
     return p.parse_args(argv)
 
 
@@ -718,7 +740,23 @@ def main() -> None:
         initial_cash_per_stock=args.initial_cash_per_stock,
         target_shares=args.target_shares,
         registry_dir=args.registry_dir,
+        dump_trades_path=args.dump_trades,
     )
+
+
+def _trade_to_dict(trade) -> dict:
+    """Serialize a Trade dataclass; dates -> ISO strings."""
+    from datetime import date as _date
+    data: dict = {}
+    for slot in (
+        "stock_id", "entry_date", "entry_price", "exit_date", "exit_price",
+        "shares", "pnl", "pnl_pct", "fees", "tax", "reason",
+    ):
+        value = getattr(trade, slot, None)
+        if isinstance(value, _date):
+            value = value.isoformat()
+        data[slot] = value
+    return data
 
 
 if __name__ == "__main__":

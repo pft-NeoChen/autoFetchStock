@@ -12,7 +12,7 @@ Decision per `STRATEGY_REVIEW.md §D.4`:
 
 Usage:
     python -m scripts.run_s1_e0_v1_bootstrap \
-        --trades data/v1_trades.json \
+        --trades analysis/v1_trades.json \
         --out analysis/s1_e0_v1_bootstrap_report.md
 """
 
@@ -62,8 +62,8 @@ def run_v1_bootstrap_experiment(
         output_path.write_text(
             "# V1 Bootstrap Sanity\n\n"
             f"No V1 trades file at `{trades_path}`. "
-            "Run `python -m scripts.run_backtest_v1 --dump-trades data/v1_trades.json` "
-            "first.\n"
+            "Run `python -m scripts.run_backtest_v1 --dump-trades "
+            "analysis/v1_trades.json` first.\n"
         )
         return {}
 
@@ -157,7 +157,7 @@ def _fmt(value: float) -> str:
 
 def main() -> int:  # pragma: no cover
     parser = argparse.ArgumentParser(description="Run S1-E0 V1 bootstrap sanity.")
-    parser.add_argument("--trades", type=Path, default=Path("data/v1_trades.json"))
+    parser.add_argument("--trades", type=Path, default=Path("analysis/v1_trades.json"))
     parser.add_argument(
         "--out",
         type=Path,
