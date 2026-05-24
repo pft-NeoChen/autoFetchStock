@@ -11,8 +11,8 @@
 |------|----|
 | 上次更新 | 2026-05-24 |
 | 上次 session | V1 §6.1 第五次判決（R1+R2 applied）+ D-investigate (window diagnostic) — R1 移除 long_entry `market_above_ma60` + R2 `RegimeGateConfig` default `{BULL,RANGE}` → n_trades 43→47 (-0.91% / Sharpe -0.11)；加 `_render_window_diagnostic` 表 11 windows IS vs OOS／regime/trade count → 揭露非典型 overfit：IS+ 5/11 vs OOS+ 4/11（接近），但 BEAR windows (7-10) IS+ 而 OOS- 顯示 bear cherry-pick 不延續；OOS 每窗 1-9 trades 統計噪音為主 → 根因：**樣本量 / regime 集中問題，非策略缺陷**。R3 (universe 全名單) 確定是正解。完整 pytest 649/649 GREEN |
-| 當前 phase | **V1 §6.1 第五次判決完成（❌ FAIL，5/10 PASS）+ D-investigate DONE + R3 endpoint 探勘 DONE** — 等 user 決定 R3 backfill 是否值得 |
-| 當前 task | R3 endpoint 探勘完成；實作待 user 確認啟動 |
+| 當前 phase | **R3-sample 推進中** — R3a (universe API loader) DONE + 100-stock 2yr backfill 背景跑（PID 93294，ETA ~2h） |
+| 當前 task | 等 backfill 完成 → V1 第 6 次判決 |
 | 下一個建議 task | (R3a) universe loader 走 TWSE `openapi.twse.com.tw/v1/opendata/t187ap03_L`（~1000 檔上市）+ TPEx `tpex.org.tw/openapi/v1/mopsfin_t187ap03_O`（~800 檔上櫃），共 ~1800 檔；(R3b) TWSE 終止上市 `openapi.twse.com.tw/v1/company/suspendListingCsvAndHtml`（JSON `[{DelistingDate(民國), Company, Code}]`）；TPEx 終止上櫃**無公開 endpoint**，需爬 web 或商業源；(R3c) 改 `src/universe/filter.py` 從 hand-list → API loader；(R3d) D01b backfill 擴 ~1800 stocks 需 ~35h，建議分批或先抽樣 100 檔驗證；(R3e) V1 第 6 次判決 |
 | 全域 blocked | R3 backfill 35h estimate — 建議 user 拍板：分批跑 / 抽樣 100 檔驗證 / 棄略 R3 走其他路 |
 | Pytest 狀態 | 完整 pytest 649/649 GREEN（5 warnings env-level） |
@@ -1059,6 +1059,13 @@
   - 完整 pytest 649/649 GREEN（從 648 加 1，分裂 range test）
   - **V1 重跑**: n_trades 43 → 47（仍差 3），total_return -0.91%、Sharpe -0.11、PF 1.50、max_dd 2.60%、beats_benchmarks ✅ + oos_alpha ✅ 仍 PASS、regime_coverage 7+4+0 不變
   - **結論**: R1 效果遞減（+4 trades）。繼續放寬 entry rule 已邊際；策略本質仍 break-even。建議：(R3) universe 解 survivorship / (D-investigate) 診斷 OOS-IS 反向
+- 2026-05-24 | R3a + R3-sample 啟動 |
+  - `src/universe/api_loader.py` 新模組：`fetch_twse_listed` / `fetch_tpex_listed` / `fetch_twse_delisted` + `parse_minguo_date` helper（民國年 yyy/mm/dd 與 7-digit 緊湊兩格式 + 8-digit AD fallback）；9 unit tests GREEN，live API smoke 確認 TWSE 1088 / TPEx 887 / 終止上市 263
+  - `scripts/build_sampled_universe.py`：fetch listed → exclude existing on-disk → deterministic random sample → write `data/cache/sampled_universe.json` + print stock_ids（pipe friendly）
+  - **抽 100 檔 seed=42** (排除既有 39，候選 1937 中抽)，背景跑 `backfill_historical_daily --years 2 --stocks <100ids>` PID 93294 ETA ~2h
+  - delisted (263 檔) 暫不抓 — chip/margin 在 2024 後才有資料，delisted 對 V1 §6.1 無幫助
+  - 完整 pytest 658/658 GREEN
+  - 等 backfill 完 V1 自動 pick 起 139 檔（39 + 100）→ V1 第 6 次判決
 - 2026-05-24 | R3 endpoint 探勘 |
   - WebSearch + curl probe TWSE / TPEx OpenAPI swagger.json
   - **TWSE listed**: `GET https://openapi.twse.com.tw/v1/opendata/t187ap03_L` → JSON `[{出表日期, 公司代號, 公司名稱, 公司簡稱, 產業別, 上市日期, ...}]` ~1000 檔
