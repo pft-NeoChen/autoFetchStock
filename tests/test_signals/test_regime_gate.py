@@ -47,8 +47,16 @@ def test_gate_bear_blocked_by_default() -> None:
 
 
 @pytest.mark.unit
-def test_gate_range_blocked_by_default() -> None:
+def test_gate_range_allowed_by_default() -> None:
+    # R2 amendment (2026-05-24): RANGE now in default allowed set.
     ok, reason = gate_by_regime(Regime.RANGE)
+    assert ok is True
+    assert "range" in reason.lower()
+
+
+@pytest.mark.unit
+def test_gate_range_blocked_when_explicitly_restricted_to_bull() -> None:
+    ok, reason = gate_by_regime(Regime.RANGE, allowed=frozenset({Regime.BULL}))
     assert ok is False
     assert "range" in reason.lower()
 
@@ -75,8 +83,12 @@ def test_gate_custom_allowed_set_includes_range() -> None:
 
 
 @pytest.mark.unit
-def test_default_allowed_is_bull_only() -> None:
-    assert DEFAULT_ALLOWED_REGIMES == frozenset({Regime.BULL})
+def test_default_allowed_is_bull_and_range() -> None:
+    # R2 amendment (2026-05-24): widened from {BULL} → {BULL, RANGE}.
+    # BULL strict definition (close>MA200 AND MA50>MA200) misses V-shaped
+    # recoveries where close is still under MA200; RANGE keeps sideways
+    # consolidations tradeable while BEAR (clear downtrend) stays blocked.
+    assert DEFAULT_ALLOWED_REGIMES == frozenset({Regime.BULL, Regime.RANGE})
 
 
 # ---- evaluate_regime_for_signal ----
@@ -117,7 +129,8 @@ def test_evaluate_uses_config_overrides() -> None:
 
 @pytest.mark.unit
 def test_evaluate_default_config_when_none_passed() -> None:
-    # Flat → RANGE → blocked by default
+    # R2 amendment (2026-05-24): flat → RANGE → now PASSES by default.
+    # BEAR still blocked (covered by test_evaluate_bear_market_blocked above).
     df = _market_df([100.0] * 250)
     ok, _ = evaluate_regime_for_signal(df, df.index[-1].date())
-    assert ok is False
+    assert ok is True

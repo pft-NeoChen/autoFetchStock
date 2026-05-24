@@ -28,7 +28,7 @@ __all__ = [
 ]
 
 
-DEFAULT_ALLOWED_REGIMES: FrozenSet[Regime] = frozenset({Regime.BULL})
+DEFAULT_ALLOWED_REGIMES: FrozenSet[Regime] = frozenset({Regime.BULL, Regime.RANGE})
 
 
 @dataclass(frozen=True)
