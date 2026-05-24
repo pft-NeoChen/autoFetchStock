@@ -158,10 +158,7 @@ def classify_per_stock_regime(
     invalid = ma_fast.isna() | ma_slow.isna() | close_wide.isna()
     labels = labels.where(~invalid, None)
 
-    out = labels.stack(dropna=False)
-    out.index = out.index.set_names(["date", "stock_id"])
-    out.name = "regime"
-    return out.sort_index()
+    return _restack(labels).rename("regime")
 
 
 def _per_stock_transform(
@@ -169,8 +166,11 @@ def _per_stock_transform(
     fn,
 ) -> pd.Series:
     wide = series.unstack("stock_id").sort_index()
-    out_wide = fn(wide)
-    out = out_wide.stack(dropna=False)
+    return _restack(fn(wide))
+
+
+def _restack(wide: pd.DataFrame) -> pd.Series:
+    out = wide.stack(future_stack=True)
     out.index = out.index.set_names(["date", "stock_id"])
     return out.sort_index()
 
