@@ -7,6 +7,26 @@
 
 ## A. S1 策略問題記錄
 
+> **澄清**：S1 是「策略重設計」task 代號（與 S2 / S3 並列的 next-step option），**不是策略名稱**。當前在跑的策略叫 `long_entry_v1`（V2 §2 第一版）。S1 = 把 `long_entry_v1` 換掉或大改的動作，目前**還沒做**（等 S2 advisor 累積 3-6 月後啟動）。
+
+### 0. 策略類別與經典脈絡
+
+`long_entry_v1` 屬 **Trend-following + Volume Breakout + Chip Confirmation（趨勢追蹤 + 量價突破 + 籌碼確認）混合**，**不是復刻單一知名策略**，而是多套經典 idea 拼裝：
+
+| 經典策略 | 提出者 / 出處 | 與 long_entry_v1 重疊 |
+|----------|--------------|----------------------|
+| **CAN SLIM** | William O'Neil（Investor's Business Daily 創辦人，1988 *How to Make Money in Stocks*）| 突破 20 日高 + 量能放大 + 法人買超（"I" + "L" + "I" 子要素）|
+| **SEPA** (Specific Entry Point Analysis) | Mark Minervini（U.S. Investing Champion）| Stage 2 趨勢確認（MA20/MA60 多頭排列）+ Pocket Pivot 量價突破 |
+| **Darvas Box** | Nicolas Darvas（1960s，*How I Made $2,000,000 in the Stock Market*）| 突破箱頂 + 帶量 ≈ V1 第 3 條件突破 20 日高 |
+| **Turtle Trading** | Richard Dennis / William Eckhardt（1983 著名實驗）| 20/55 日 Donchian channel 突破 + ATR 止損 ≈ V1 MA60 + 出場 ATR 1.5× |
+| **台股本土「籌碼派」** | 無單一作者；散見 PressPlay / Mr.Market 等部落格體系 | 第 4 條件三大法人 + 融資是典型台股風格 |
+
+**特性總結**：
+- **方向**：long-only（多方）
+- **時序**：日線 / swing trade（5-20 日 holding）
+- **alpha 來源假設**：（a）短期動能延續（trend）（b）爆量伴隨主力進場（volume 確認）（c）籌碼面領先價格（chip 領先指標）
+- **risk profile**：低換手（turnover 0.31）、固定 ATR 停損、走勢 fail-fast
+
 ### 1. 使用什麼策略
 
 **`long_entry_v1`**（V2 §2 第一版，定義於 `src/signals/rules/long_entry.py` + `src/signals/rules/exits.py`）：
@@ -95,10 +115,14 @@
 
 ### 5. 有什麼更好的策略可以取代
 
-候選 C1-C5，按建議優先序排列：
+候選 C1-C5，按建議優先序排列。每候選列出 **學名 / 經典藍本** 供 reference。
 
 #### C1 — Mean reversion（短線反轉）★ 推薦先試
 
+- **學名 / 藍本**：
+  - **AQR 短期反轉 factor**（Asness, Moskowitz, Pedersen 2013 *Value and Momentum Everywhere* 反例）
+  - **Andrew Lo's contrarian strategy**（Lo & MacKinlay 1990 *When Are Contrarian Profits Due to Stock Market Overreaction?*）
+  - **台股當沖反手 / T+1 反彈**（坊間常見手法）
 - **假設**：超賣後反彈
 - **Trigger**：
   - 過去 5 日跌幅 > 1.5 × 20 日標準差
@@ -111,35 +135,52 @@
 
 #### C2 — Momentum factor（52 週新高）
 
+- **學名 / 藍本**：
+  - **Jegadeesh & Titman (1993)** *Returns to Buying Winners and Selling Losers* — 學術 momentum factor 開山祖
+  - **Mark Minervini's SEPA** Stage 2（與 V1 同源，純化版）
+  - **Dual Momentum** (Gary Antonacci 2014)
 - **假設**：新高有續勢
 - **Trigger**：close > 52 週 high + 量能 ≥ 1.5×
 - **Hold**：trailing stop 跌破 MA20
 - **Why try**：V1 突破 20 日高已測，更高時間框架（52 週）filter 雜訊
-- **缺點**：與 V1 trend-following 機制重疊太多，可能複現 V1 問題
+- **缺點**：與 V1 trend-following 機制重疊太多，可能複現 V1 問題 → **跳過**
 
-#### C3 — Volatility breakout (Donchian / Keltner)
+#### C3 — Volatility breakout (Donchian / Keltner) ★ 推薦次試
 
+- **學名 / 藍本**：
+  - **Turtle Trading System** (Richard Dennis 1983) — 20/55 日 Donchian channel + ATR 1.5× 止損 + 2N 加碼
+  - **Keltner Channel** (Chester Keltner 1960) — EMA20 ± 2×ATR
+  - **Bollinger Band Breakout** (John Bollinger 1980s)
 - **假設**：盤整後突破跟單
 - **Trigger**：close > N 日 Donchian upper band + ATR 擴張 > 20 日平均
 - **Hold**：ATR-based trailing stop
-- **Why try**：純 price action，**不依賴 chip / news data quality**（V1 主要弱點）
-- **新 features needed**：Donchian channel
+- **Why try**：**純 price action**，不依賴 chip / news data quality（V1 主要弱點）；Turtle 在原始 paper 證明跨資產 robust
+- **新 features needed**：Donchian channel（已有 high_20d 是 sub-set）
 - **預估工時**：1d
 
 #### C4 — LLM advisor signal（待 S2 累積 3-6 月後）
 
+- **學名 / 藍本**：
+  - **Alternative data signal** family（Eagle Alpha / Yipit）— 用非傳統資料源產生 alpha
+  - **NLP sentiment factor**（Hutchinson 2019; Ke, Kelly, Xiu 2019 *Predicting Returns with Text Data*）
+  - **Bloomberg ESG / Glassdoor employee sentiment** 等資料驅動 factor
 - **假設**：LLM 多維度評分有預測力
 - **Trigger**：overall_score > 7 + confidence > 0.6
 - **Hold**：5 日 fixed
-- **Why try**：利用既有 `src/data/advisor.py`；S2 cron（已部署）3-6 月後做 IC 分析驗證有無預測力
+- **Why try**：利用既有 `src/data/advisor.py`；S2 cron（已部署）3-6 月後做 IC 分析驗證有無預測力。**此類 factor 學術界尚無共識**（部分 paper 顯示有 alpha 部分顯示無），自己 IC 是唯一答案。
 - **Time-gate**：必須等 advisor 歷史累積夠長才能跑 IC
 
 #### C5 — Pair trading（同產業 spread）
 
-- **假設**：同產業兩檔短期偏離回歸
+- **學名 / 藍本**：
+  - **Statistical Arbitrage / StatArb** (Edward Thorp 1980s; Morgan Stanley 量化團隊 Tartaglia 1985-87 開拓)
+  - **Long-Term Capital Management** convergence trades (1994-1998；終結於 1998 危機)
+  - **Avellaneda & Lee (2010)** *Statistical Arbitrage in the U.S. Equities Market*
+  - **Gatev, Goetzmann, Rouwenhorst (2006)** *Pairs Trading: Performance of a Relative-Value Arbitrage Rule*
+- **假設**：同產業兩檔短期偏離回歸（cointegration）
 - **Trigger**：pair z-score > 2σ → 多空 spread
-- **Why try**：market-neutral，不受 universe survivorship 影響
-- **缺點**：pair selection 是另一大坑；需估計協整 / 半週期 / OU process
+- **Why try**：market-neutral，不受 universe survivorship 影響；經典量化套利 family
+- **缺點**：pair selection 是另一大坑；需估計協整 / 半週期 / OU process；StatArb 自 2010 後 alpha 萎縮（高頻量化吃光）→ 留作未來研究方向
 
 ### 推薦試點順序
 
@@ -207,3 +248,4 @@
 ## 修改歷史
 
 - 2026-05-24：建立 — V1 §6.1 第六次判決後 retrospective。
+- 2026-05-24：補 A.0「策略類別與經典脈絡」（CAN SLIM / SEPA / Darvas Box / Turtle / 籌碼派 lineage）+ C1-C5 學名與藍本 references。澄清 S1 是 task 代號非策略名稱。
