@@ -509,10 +509,44 @@ Sprint 2 verdict UNCERTAIN（OOS sector-neutral ic_mean 0.0320 / t-stat 0.77）�
 
 ### F.4 Resume 操作協定（與 user 約定）
 
-User 在新 session 用「繼續 backfill」一句指令 → Claude:
-1. 跑 `python -m scripts.backfill_wide_universe --resume --background`
-2. 回報已完成 / 剩餘股票數
-3. 若 backfill 全部結束 → 自動接 TASK-S3-WALKFWD-WIDE
+User 在新 session 通常會先說「讀取 README」再說「繼續 backfill」。
+冷啟動 Claude 看到「繼續 backfill」一句指令時應立即執行：
+
+1. **檢查當前狀態**（不打網路）:
+   ```python
+   from pathlib import Path
+   from scripts.backfill_wide_universe import select_wide_universe, load_state
+   targets = select_wide_universe(
+       sector_map_path=Path("analysis/sector_map.json"),
+       data_dir=Path("data"),
+   )
+   state = load_state(Path("analysis/backfill_state_wide.json"))
+   ok = sum(1 for v in (state.completed if state else {}).values() if v == "ok")
+   failed = sum(1 for v in (state.completed if state else {}).values() if v == "failed")
+   ```
+   回報「pending {len(targets)} / ok {ok} / failed {failed}」
+
+2. **啟動背景 backfill**（用 Bash tool `run_in_background=true`）:
+   ```bash
+   .venv/bin/python -m scripts.backfill_wide_universe \
+       --resume --years 4 --sleep-seconds 3 \
+       > logs/backfill_wide.log 2>&1
+   ```
+   注意：
+   - 無 `--background` flag，是 Bash tool 的 `run_in_background` 參數
+   - state 路徑 default `analysis/backfill_state_wide.json` 不必傳
+   - log 寫 `logs/backfill_wide.log`，可用 `tail -20 logs/backfill_wide.log` 查當前進度
+   - 背景 task 隨 session 結束而終止，這是 expected — 中斷後再 resume 即可
+
+3. **若 `len(targets) == 0`**（無 pending 股票）→ backfill 已全部結束，直接接 TASK-S3-WALKFWD-WIDE：
+   ```bash
+   .venv/bin/python -m scripts.run_s2_walkfwd_momentum \
+       --data-dir data \
+       --sector-map analysis/sector_map.json \
+       --out analysis/s3_walkfwd_wide_report.md
+   ```
+
+4. **session 結束安全性**：每完成一檔 state file flush 一次（atomic write via tmp + `os.replace`）。中斷時若卡在 mid-stock，state 會有 `current=<sid>` 但 completed[sid] 未設 → resume 會重跑該股票，per-month idempotent 不重抓已有月份。**user 可隨時關閉 session**。
 
 ### F.5 修改歷史（§F 自身）
 
