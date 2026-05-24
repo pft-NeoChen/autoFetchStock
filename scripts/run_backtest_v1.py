@@ -682,7 +682,7 @@ def run(
         "- **News features 仍 neutral default**（TASK-D01d news cron 未實作，RSS 無歷史）→ news_severity / is_limit_up 永遠 0/False。",
         "- **Benchmarks**: weighted_index / etf_total_return 兩槽位皆用 **0050 raw OHLC 作 proxy**（含息 IR0003 backfill 未做；0050 也未做 dividend adjustment）→ price-only 近似。",
         "- **Top-N excluded return** 已採真實計算（sort by pnl 排除最賺 5 筆後 / initial_capital）。",
-        "- **本報告 V1 §6.1 第三次量化判決（post equity-fix / real-benchmark / per-stock regime gate）**。剩餘 FAIL 主因：(1) n_trades 仍 < 50（資料 span 僅 2 年 × 39 檔，OOS 9mo 內訊號自然有限）(2) universe survivorship bias 推高 benchmark (3) 0050 OOS 全 BEAR → regime_coverage 不滿足 1+1+1。",
+        "- **本報告 V1 §6.1 第六次判決（R3-sample 100 stocks 加入）**。重要 finding：n_trades 47→59 PASS，但 expectancy_bp +33→**-41 翻負**；equal_weight 166%→110% 顯示 universe bias 減半。**原 39 檔 hand-picked 造成 expectancy 假陽性，broader universe 顯示 strategy 缺真實 edge**。",
         "",
         "---",
         "",
