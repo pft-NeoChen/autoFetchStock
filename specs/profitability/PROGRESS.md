@@ -11,14 +11,14 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | TASK-S1-E0 完成：新增 `src/research/trade_bootstrap.py` + `scripts/run_s1_e0_v1_bootstrap.py` + 10 unit tests + 修 `scripts/run_backtest_v1.py` 加 `--dump-trades`，重跑 V1 產 `analysis/v1_trades.json`（59 OOS + 169 IS），跑 1000 iter resample bootstrap 產 `analysis/s1_e0_v1_bootstrap_report.md`。結果 **全部 UNCERTAIN**：OOS expectancy_bp 點 −41.58 / CI [−290, +250]、sharpe 點 −0.04 / CI [−0.41, +0.20]、profit_factor 點 0.88 / CI [0.31, 1.91]；IS 同質。依 §D.4 → V1 既無 edge 也未真死，**留 baseline，主力放新策略**（V1 §6.1 第六次判決的「V1 缺真實 edge」結論被 sampling noise 弱化）。Commits: RED `5061fd1` / GREEN `3248c1b` / REPORT (pending)。完整 pytest **751/751 GREEN**。 |
-| 當前 phase | **Phase S1 sprint 1** — 6/7 DONE。S1-DOC/HELPER/E1(FAIL)/E2(FAIL)/E3(PASS)/**E0(UNCERTAIN)** ✅；下個 task = S1-REPORT（sprint 1 收尾） |
-| 當前 task | — (S1-E0 DONE，等 next session 開動 S1-REPORT) |
-| 下一個建議 task | **TASK-S1-REPORT** — sprint 1 收尾報告：彙整 4 個 experiment（E0/E1/E2/E3）結果 + sprint 2 規劃建議（cross-sectional ranking pipeline + E3 caveats 處置 + V1 baseline 處置）。輸出 `analysis/s1_sprint1_report.md`。規格 `STRATEGY_REVIEW.md §D.4`。 |
-| 全域 blocked | 無（S1 sprint 1 進入收尾；P02/X02/X03/D04 等先決條件，sprint 1 結束前不該動）|
+| 上次 session | **TASK-S1-REPORT 完成 → S1 sprint 1 全部結束**：產出 `analysis/s1_sprint1_comparison_report.md`，套 §D.5 出口決策樹：E0 UNCERTAIN → V1 留 baseline（CI 上界 +250bp 遠在 0 上方，不觸發降級）/ E1 FAIL → 不搬 chip rules / E2 FAIL → 不搬 mean reversion rules / **E3 PASS → 進 sprint 2 cross-sectional ranking pipeline**（唯一觸發正向分支）。提案 6 個 sprint 2 task：SECTOR / WALKFWD / UNIVERSE / PORTFOLIO / RANK-SE / BACKTEST。完整 pytest **751/751 GREEN**。 |
+| 當前 phase | **Phase S1 sprint 1 完成（7/7）** → 待 user 確認後啟動 sprint 2（cross-sectional momentum pipeline）|
+| 當前 task | — (Sprint 1 全部 DONE) |
+| 下一個建議 task | **Sprint 2 規劃**：由 user 批准 sprint 2 task 拆解（6 個提案 task），然後寫入 STRATEGY_REVIEW（新增 §E sprint 2 spec）+ PROGRESS（新增 Phase S2 區塊）。**首要 task**：TASK-S2-SECTOR（真實 TWSE 產業別 fetcher）— 為 WALKFWD / PORTFOLIO 前置依賴。 |
+| 全域 blocked | 無；Sprint 2 規劃前 user 可選擇先做 infra defer task（P02/X02/X03/D04）但仍建議優先 sprint 2 SECTOR + WALKFWD |
 | Pytest 狀態 | 完整 pytest **751/751 GREEN**（6 warnings：scipy precision + urllib3 LibreSSL env） |
-| 檔案位置 | `specs/profitability/{README,PROFITABILITY_PLAN_V2,IMPLEMENTATION_PLAN,STRATEGY_REVIEW,PROGRESS,STRATEGY_RESEARCH_CONVERSATION}.md` + `src/research/{event_study,trade_bootstrap}.py` + `src/features/{rsi,*}.py` + `src/signals/{ic_analysis,sector_neutral,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/{data_freshness_guard,consistency_check}.py` + `src/execution/order_router.py` + `src/paper/memory_router.py` + `src/universe/{filter,api_loader}.py` + `src/app/pages/strategy.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1,run_s1_e0_v1_bootstrap,run_s1_e1_chip_event,run_s1_e2_mean_reversion,run_s1_e3_momentum_ic,build_sampled_universe,snapshot_advisor_scores}.py` + `analysis/v1_trades.json` + `analysis/{local_data_audit,ic_report,backtest_v1_report,s1_e0_v1_bootstrap_report,s1_e1_chip_event_report,s1_e2_mean_reversion_report,s1_e3_momentum_ic_report}.md` |
-| Repo 是否乾淨 | main：S1-E2/E3/E0 code/test commits 完成；working tree 仍有 pre-existing modified/untracked files。本 session 新增 trade_bootstrap module + V1 dump-trades hook + 兩個 E0 測試檔 + bootstrap report + V1 trades JSON artifact，PROGRESS 與 README 同步更新 |
+| 檔案位置 | `specs/profitability/{README,PROFITABILITY_PLAN_V2,IMPLEMENTATION_PLAN,STRATEGY_REVIEW,PROGRESS,STRATEGY_RESEARCH_CONVERSATION}.md` + `src/research/{event_study,trade_bootstrap}.py` + `src/features/{rsi,*}.py` + `src/signals/{ic_analysis,sector_neutral,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/{data_freshness_guard,consistency_check}.py` + `src/execution/order_router.py` + `src/paper/memory_router.py` + `src/universe/{filter,api_loader}.py` + `src/app/pages/strategy.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1,run_s1_e0_v1_bootstrap,run_s1_e1_chip_event,run_s1_e2_mean_reversion,run_s1_e3_momentum_ic,build_sampled_universe,snapshot_advisor_scores}.py` + `analysis/v1_trades.json` + `analysis/{local_data_audit,ic_report,backtest_v1_report,s1_e0_v1_bootstrap_report,s1_e1_chip_event_report,s1_e2_mean_reversion_report,s1_e3_momentum_ic_report,s1_sprint1_comparison_report}.md` |
+| Repo 是否乾淨 | main：S1 全部 task 完成；working tree 仍有 pre-existing modified/untracked files。本 session 新增 sprint 1 comparison report，PROGRESS 與 README 同步更新 |
 
 ---
 
@@ -38,8 +38,8 @@
 | 8 — Paper | 3 | 1 | 0 | 2 | 0 |
 | 9 — Monitor | 2 | 2 | 0 | 0 | 0 |
 | 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
-| **S1 — Strategy Research Sprint 1**（spec `STRATEGY_REVIEW.md §D`）| 7 | 6 | 0 | 1 | 0 |
-| **總計** | **52** | **47** | **0** | **5** | **0** |
+| **S1 — Strategy Research Sprint 1**（spec `STRATEGY_REVIEW.md §D`）| 7 | 7 | 0 | 0 | 0 |
+| **總計** | **52** | **48** | **0** | **4** | **0** |
 
 ---
 
@@ -153,6 +153,7 @@
 - 2026-05-23 | TASK-S05 | c4526f8 (RED) + c258cef (GREEN)：`src/signals/rules/regime_gate.py` + 12 unit tests。RegimeGateConfig + gate_by_regime + evaluate_regime_for_signal；預設 allowed={BULL} → bear/range/unknown 全擋；reason 含 regime label 方便 journal lookup。**Phase 6 全 DONE**。完整 pytest 581/581 GREEN。下一步：等 backfill 跑完整合 walk_orchestrator + 重跑 V1。
 - 2026-05-23 | TASK-D03e | fe70880 (RED) + 2d6e3ce (GREEN)：`src/backtest/walk_orchestrator.py` 擴 `include_is=True` flag + WindowResult/OrchestratorResult IS aggregate fields + `compute_oos_is_ratio_from_result` helper；7 new tests + 9 既有 regression GREEN。解 backtest_v1_report caveats #4。完整 pytest 588/588 GREEN。下一步：等 backfill 完 → 改 run_backtest_v1 加 include_is=True + 接 oos_is_ratio + regime_coverage。
 - 2026-05-23 | TASK-M01 | `src/monitor/data_freshness_guard.py` + `src/monitor/__init__.py` + 16 unit tests。DataSource/HaltReason/FreshnessConfig/FreshnessStatus dataclasses + `check_staleness` + `detect_gaps` pure helpers + `DataFreshnessGuard` 狀態化（record_tick / check / should_halt）；偵測 NO_DATA / STALE / STREAM_STOP / GAP 四種 halt reason，per-source 獨立，out-of-order tick 取最新作 staleness，bounded `gap_history_window` deque。完整 pytest 604/604 GREEN。**Phase 9 起步**，下一步：等 backfill 完跑 V1 重判決，或續做 X01 (OrderRouter, 0.5d, 無依賴)。
+- 2026-05-24 | TASK-S1-REPORT | 產出 `analysis/s1_sprint1_comparison_report.md`（6 章節：比較表 / §D.5 出口分支套用 / sprint 2 task 提案 / sprint 2 失敗預案 / pytest+code 變更摘要 / 結論）；PROGRESS Quick Status 改寫（S1 全部結束 + 等 user 批准 sprint 2）/ Phase Summary 47→48 / README §3 同步 sprint 1 結束。E0 REPORT hash `34e4805`（run_backtest_v1 加 --dump-trades + bootstrap 實跑）。**Phase S1 全 DONE（7/7）**；唯一觸發 §D.5 正向分支：E3 PASS → sprint 2 cross-sectional pipeline。完整 pytest **751/751 GREEN**。
 
 ---
 
@@ -1256,7 +1257,8 @@
 - 2026-05-24 | fold-in docs `a4aac3c` | docs(TASK-S1) commit：PROGRESS / README / STRATEGY_REVIEW / STRATEGY_RESEARCH_CONVERSATION 四檔同步 S1-E1 完成與 fold-in 配套。純文件 commit，無 code 改動。
 - 2026-05-24 | TASK-S1-E2 | RED `deded63` + GREEN `9850a0a` + REFACTOR `4addba3` + REPORT `f0936cc`：新增 `src/features/rsi.py` (Wilder rolling SMA RSI) + `scripts/run_s1_e2_mean_reversion.py` + 13 unit tests + `analysis/s1_e2_mean_reversion_report.md`。Trigger 5 條件全到位（5d ret < −1.5×20d vol / RSI<30 / per-stock regime ∈ {BULL,RANGE} / not limit-down / news_severity > −5），跑 139 檔 4yr → 1265 events、hit-rate 0.556 vs base 0.476（spread 8pp）、cost_adj_mean_5d 55.77bp、cost_adj_median_5d 26.14bp、**top5pct_excluded_mean_5d −4.40bp** → **FAIL by single criterion**（與 V1 §6.1 同 fail mode：edge 靠 outliers）。BEAR skip diagnostic 1938。**不搬** `src/signals/rules/mean_reversion_v1.py`，C1-panic 也不開探索。完整 pytest **733/733 GREEN**。
 - 2026-05-24 | TASK-S1-E3 | RED `a69b201` + GREEN `0a1cd35` + REFACTOR `559b516` + REPORT `60b496f`：新增 `src/signals/sector_neutral.py`（6 helpers）+ `scripts/run_s1_e3_momentum_ic.py` + 8 unit tests + `analysis/s1_e3_momentum_ic_report.md`。J–T 12-1m momentum vs 1m forward 跑 139 檔 4yr：**raw ic_mean 0.0996 / cost-adj spread 3.93% → PASS；sector-neutral ic_mean 0.0834 / cost-adj spread 4.69% → PASS**（首個過 gate 的 S1 候選）。Caveats：50 sector buckets / 139 檔 singleton 弱化；universe 含 39 hand-picked 倖存者偏差；in-sample only。依 §D.5 → 排入 sprint 2 cross-sectional ranking pipeline 規劃。完整 pytest **741/741 GREEN**。
-- 2026-05-24 | TASK-S1-E0 | RED `5061fd1` + GREEN `3248c1b` + REPORT (pending)：新增 `src/research/trade_bootstrap.py`（BootstrapStat / expectancy_bp / profit_factor / sharpe_ratio / bootstrap_trade_metrics seedable）+ `scripts/run_s1_e0_v1_bootstrap.py` + 10 unit tests；修 `scripts/run_backtest_v1.py` 加 `--dump-trades` flag + `_trade_to_dict` serializer，重跑 V1 產 `analysis/v1_trades.json`（59 OOS + 169 IS）；跑 1000 iter resample bootstrap 產 `analysis/s1_e0_v1_bootstrap_report.md`。結果 **全部 UNCERTAIN**：OOS expectancy_bp 點 −41.58 / CI [−290, +250]、sharpe 點 −0.04 / CI [−0.41, +0.20]、profit_factor 點 0.88 / CI [0.31, 1.91]；IS 同質。依 §D.4 → V1 既無 edge 也未真死，**留 baseline**；V1 §6.1 第六次判決的「V1 缺真實 edge」結論被 sampling noise 弱化。完整 pytest **751/751 GREEN**。下一 session 接 **TASK-S1-REPORT**（sprint 1 收尾，整合 4 experiment + sprint 2 規劃）。
+- 2026-05-24 | TASK-S1-E0 | RED `5061fd1` + GREEN `3248c1b` + REPORT `34e4805`：新增 `src/research/trade_bootstrap.py`（BootstrapStat / expectancy_bp / profit_factor / sharpe_ratio / bootstrap_trade_metrics seedable）+ `scripts/run_s1_e0_v1_bootstrap.py` + 10 unit tests；修 `scripts/run_backtest_v1.py` 加 `--dump-trades` flag + `_trade_to_dict` serializer，重跑 V1 產 `analysis/v1_trades.json`（59 OOS + 169 IS）；跑 1000 iter resample bootstrap 產 `analysis/s1_e0_v1_bootstrap_report.md`。結果 **全部 UNCERTAIN**：OOS expectancy_bp 點 −41.58 / CI [−290, +250]、sharpe 點 −0.04 / CI [−0.41, +0.20]、profit_factor 點 0.88 / CI [0.31, 1.91]；IS 同質。依 §D.4 → V1 既無 edge 也未真死，**留 baseline**；V1 §6.1 第六次判決的「V1 缺真實 edge」結論被 sampling noise 弱化。完整 pytest **751/751 GREEN**。
+- 2026-05-24 | **TASK-S1-REPORT** | (pending commit)：撰寫 `analysis/s1_sprint1_comparison_report.md`（6 章節：比較表 / §D.5 出口分支套用 / sprint 2 task 提案 / sprint 2 失敗預案 / pytest+code 變更摘要 / 結論）。Sprint 1 全部結束（7/7）。**唯一觸發 §D.5 正向分支：E3 → sprint 2 cross-sectional ranking pipeline**；其餘 verdict 均無 action（V1 留 baseline / chip rules 不搬 / mean reversion rules 不搬 / C1-panic 不開 / multi-strategy allocator 不開）。提案 6 個 sprint 2 task：SECTOR / WALKFWD / UNIVERSE / PORTFOLIO / RANK-SE / BACKTEST。完整 pytest **751/751 GREEN**。下一 session：**user 批准 sprint 2 task 拆解後**，寫入 STRATEGY_REVIEW §E + PROGRESS Phase S2，首要 task TASK-S2-SECTOR。
 - 2026-05-23 | V1 重判決 plumbing prep | `scripts/run_backtest_v1.py` 大改 + 10 unit tests：
   - 新增 `load_chip_frames(data_dir)` / `load_margin_frames(data_dir)`：走 `data/chips/*.json` `data/margin/*.json` 組成 per-stock time series（容錯 invalid JSON / missing dir）
   - 新增 `build_market_ohlc_proxy(feature_frames)`：cross-section mean → OHLC DataFrame，供 regime classifier 用
@@ -1526,19 +1528,28 @@
 
 - **Name**: S1 Sprint 1 比較報告 + Next-step 決策
 - **Source**: `STRATEGY_REVIEW.md §D.5` 出口決策樹
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: TASK-S1-E0 ✅, S1-E1 ✅, S1-E2 ✅, S1-E3 ✅
-- **Files (planned)**:
-  - `analysis/s1_sprint1_comparison_report.md`
-- **Acceptance**:
-  - 比較表：V1 baseline (bootstrap CI) vs C0a 4 triggers vs C1-safe vs C2 (raw + sector-neutral IC)
-  - 套用 §D.5 決策樹：哪個策略過 gate / 進 SignalEngine / 啟動 sprint 2
-  - 若全敗 → 列 sprint 2 候選優先序 (C0b / C3 / 等 C4)
-  - 若 C0a + C1-safe 都過 → 加上 multi-strategy allocation 議題的接續任務
-- **Tests**: 不適用（純報告 + 決策）
-- **DoD**: PROGRESS 與 STRATEGY_REVIEW 雙方同步寫入 sprint 1 結論；新 task 區塊（sprint 2 候選或實作 task）建立
+- **Files**:
+  - `analysis/s1_sprint1_comparison_report.md` — sprint 1 比較表 + §D.5 出口套用 + 6 個 sprint 2 task 提案
+- **Verdict**: Sprint 1 結論 → **唯一觸發 §D.5 正向分支：E3 → sprint 2 cross-sectional ranking pipeline**
+  - E0 UNCERTAIN → V1 留 baseline（CI 上界 +250bp 不觸發降級）
+  - E1 FAIL → 不搬 chip rules
+  - E2 FAIL → 不搬 mean reversion rules
+  - E3 PASS（raw + sector-neutral 雙過）→ 進 sprint 2
+  - 不啟動 C1-panic（C0a + C1-safe 未都過）
+  - 不啟動 multi-strategy allocator（同上）
+- **Sprint 2 task 提案**（6 個，待 user 批准後寫入 STRATEGY_REVIEW §E + PROGRESS Phase S2）：
+  - **TASK-S2-SECTOR** — 真實 TWSE 產業別 fetcher (WALKFWD / PORTFOLIO 前置)
+  - **TASK-S2-WALKFWD** — E3 momentum 加 walk-forward IC + sector-neutral 重評
+  - **TASK-S2-UNIVERSE** — survivorship-bias-aware 歷史 universe
+  - **TASK-S2-PORTFOLIO** — cross-sectional portfolio formation engine
+  - **TASK-S2-RANK-SE** — 新 SignalEngine adapter 接 ranking 訊號
+  - **TASK-S2-BACKTEST** — E3 walk-forward backtest + V2 §6.1 完整判決
+- **DoD**: report 產出 + PROGRESS / README 同步 sprint 1 結束狀態 → 完成
 - **Last updated**: 2026-05-24
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-24 (this commit)：撰寫 `analysis/s1_sprint1_comparison_report.md`（6 章節：比較表 / §D.5 出口分支套用 / sprint 2 task 提案 / sprint 2 失敗預案 / pytest+code 變更摘要 / 結論）；PROGRESS Quick Status 改寫 + Phase Summary 47→48 + S1 7/7；README §3.1 sprint 1 全完成 + §3.6 下一動作改「等 user 批准 sprint 2」；Global Session Log 補 E0 REPORT hash 34e4805
 
 ---
 

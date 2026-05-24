@@ -86,11 +86,12 @@ specs/
 
 ### 3.1 目前 phase
 
-**🎯 V1 §6.1 第六次判決完成（5/10 PASS）→ S1 Research Plan 收斂 → S1 sprint 1 收尾（E1 FAIL / E2 FAIL / **E3 PASS** / **E0 UNCERTAIN** / 待 REPORT）**
+**🎯 S1 sprint 1 全部完成（7/7）→ 唯一過 gate 候選：E3 cross-sectional momentum → 待 user 批准 sprint 2 task 拆解**
 
-- **總進度**: **47/52** tasks DONE（base 41/45 + S1 phase 6/7：DOC/HELPER/E1(FAIL)/E2(FAIL)/E3(PASS)/E0(UNCERTAIN) ✅）；0 IN_PROGRESS / 0 BLOCKED / 5 NOT_STARTED（1 S1 sprint + 4 infra defer）
-- **Phase 完成度**: Phase 0-7/9 全 ✅；Phase 8（P01 ✅，P02/D04 等）；Phase 10（X01 ✅，X02/X03 等）；**Phase S1**（DOC/HELPER/E1/E2/E3/E0 ✅；REPORT 待做）
+- **總進度**: **48/52** tasks DONE（base 41/45 + S1 phase 7/7）；0 IN_PROGRESS / 0 BLOCKED / 4 NOT_STARTED（皆 infra defer：P02/X02/X03/D04）
+- **Phase 完成度**: Phase 0-7/9 全 ✅；Phase 8（P01 ✅，P02/D04 defer）；Phase 10（X01 ✅，X02/X03 defer）；**Phase S1 全部 DONE**
 - **Pytest**: 完整 **751/751 GREEN**（6 warnings：scipy precision + urllib3 LibreSSL env）
+- **Sprint 1 結論**: 見 `analysis/s1_sprint1_comparison_report.md`；E0 UNCERTAIN / E1 FAIL / E2 FAIL / **E3 PASS**；§D.5 唯一觸發分支 → sprint 2 cross-sectional pipeline
 
 ### 3.2 V1 第六次判決 verdict 摘要
 
@@ -143,9 +144,10 @@ specs/
    - `PROGRESS.md` Quick Status + S1 phase 對應 task block
    - `analysis/backtest_v1_report.md` V1 第六次判決細節（背景）
 2. **下一個動作**（依 PROGRESS Quick Status）：
-   - 當前 active task = **TASK-S1-REPORT**（sprint 1 收尾，整合 4 experiment + 用 §D.5 出口決策樹做 sprint 2 規劃）
-   - DOC / HELPER / E1(FAIL) / E2(FAIL) / E3(PASS) / **E0(UNCERTAIN)** 已 DONE
-   - E0 verdict 影響：V1 留 baseline（CI 跨 0 → 既無 edge 也未真死）；主推 E3 cross-sectional 進 sprint 2
+   - S1 sprint 1 **全部 DONE（7/7）**
+   - 待 user 批准 sprint 2 task 拆解（6 個提案：SECTOR / WALKFWD / UNIVERSE / PORTFOLIO / RANK-SE / BACKTEST），再寫入 `STRATEGY_REVIEW.md §E` + PROGRESS Phase S2
+   - 首要 task = **TASK-S2-SECTOR**（真實 TWSE 產業別 fetcher，為 WALKFWD / PORTFOLIO 前置）
+   - 詳見 `analysis/s1_sprint1_comparison_report.md` §3 sprint 2 規劃
 3. **不要直接做**: 完整 SignalEngine implementation（除非該策略已過 §D.3 gate）/ paper runner / multi-strategy allocator
 4. **複用 infra**: backtest engine / orchestrator / regime gate / risk gates / journal / report / cost_model 全部 **不必重做**
 
