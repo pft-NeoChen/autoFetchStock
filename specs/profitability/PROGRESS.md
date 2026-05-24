@@ -38,7 +38,7 @@
 | 8 — Paper | 3 | 1 | 0 | 2 | 0 |
 | 9 — Monitor | 2 | 2 | 0 | 0 | 0 |
 | 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
-| **總計** | **45** | **41** | **0** | **3** | **0** |
+| **總計** | **45** | **41** | **0** | **4** | **0** |
 
 ---
 
@@ -963,18 +963,36 @@
 
 ### TASK-UI01
 
-- **Name**: 策略績效 + 訊號頁
+- **Name**: 策略績效頁
 - **Source**: V2 §7
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-J03
-- **Files (planned)**:
-  - `src/app/pages/strategy.py`
-  - `src/app/callbacks_strategy.py`
-- **Acceptance**: 績效曲線 / 回撤 / 訊號清單（含未進場原因） / regime 指示
-- **Tests (RED list)**: smoke + callback 單元測試
-- **DoD**: 主程式可開啟頁面、資料正確
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`
+- **Depends**: TASK-J03 ✅
+- **Files**:
+  - `src/app/pages/__init__.py` ✅
+  - `src/app/pages/strategy.py` ✅
+  - `src/app/callbacks.py` ✅（route_page 加 `/strategy` lazy import）
+  - `src/app/layout.py` ✅（header nav 加「策略績效」連結）
+  - `tests/test_app/test_strategy_page.py` ✅（19 tests GREEN）
+- **Acceptance** (minimal first version)：
+  - 白話 verdict banner（依 trades / pnl 動態判定 4 種文案）✅
+  - 「這個頁面在做什麼？」explainer ✅
+  - 「我們測試了什麼？」grid 表（策略類型 / 進場 / 出場 / universe / 時間 / walk-forward）✅
+  - 「主要結果」3-column 表（中文名 / 格式化數值 / 白話解讀）✅
+  - 「接下來該怎麼做？」動態 action bullets ✅
+  - 進階詳情摺疊（manifest table + 內嵌完整 markdown 報告）✅
+  - empty state（無實驗）✅
+  - scroll 修正（自帶 `height: calc(100vh - 100px); overflowY: auto` 接 `.main-container` overflow:hidden）✅
+- **Tests (RED list)**: 19 項 全 GREEN
+  - format / labels 6：summary/manifest 中文 + 單位
+  - verdict 4 + recommendation 2：白話結論四象限 + 行動建議
+  - layout 7：6-section 結構 / empty / no max-height / overflow scroll / 反 jargon
+- **DoD**: 19/19 GREEN + 完整 pytest 701/701 GREEN；主程式 `/strategy` 可開
+- **Last updated**: 2026-05-24
+- **Session log**:
+  - 2026-05-24 95cd8d9 | minimal first version（verdict / metrics / manifest table + report link）
+  - 2026-05-24 06d5949 | UX 改 1：中文 labels / 單位 / 內嵌 markdown 報告
+  - 2026-05-24 54b4f73 | UX 改 2：user-centric 6 sections / 白話 verdict + recommendation / 反 jargon
+  - 2026-05-24 35b2e40 | scroll fix：自帶 scroll 容器（複製 .news-page pattern）
 
 ---
 
@@ -984,16 +1002,28 @@
 
 - **Name**: Memory router（純記憶體 paper）
 - **Source**: V2 §8.2
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-S03, TASK-R01, TASK-R02
-- **Files (planned)**:
-  - `src/paper/memory_router.py`
-  - `tests/test_paper/test_memory_router.py`
-- **Acceptance**: 即時資料 → 假設成交 → 損益記錄
-- **Tests (RED list)**: ≥ 6 項
-- **DoD**: 與 SignalEngine 整合測試
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`
+- **Depends**: TASK-S03 ✅, TASK-R01 ✅, TASK-R02 ✅
+- **Files**:
+  - `src/paper/__init__.py` ✅
+  - `src/paper/memory_router.py` ✅
+  - `tests/test_paper/__init__.py` ✅
+  - `tests/test_paper/test_memory_router.py` ✅（9 tests）
+- **Acceptance**:
+  - 實作 `OrderRouter` Protocol（runtime_checkable isinstance pass）✅
+  - Market order 立即成交於 injected `quote_provider(stock_id) -> float` ✅
+  - Buy: insufficient_cash REJECT；Sell: no_position / insufficient_shares REJECT ✅
+  - 部位 avg_cost 加權平均；partial close avg_cost 保留；realized_pnl 累積 ✅
+  - Limit order 暫不支援（reject 並標記，留 follow-up）✅
+  - cancel terminal state raise / unknown id raise UnknownOrderError ✅
+  - cost_model / slippage / settlement T+2 暫不接（與 backtest engine 對齊留 follow-up）
+- **Tests (RED list)**: 9 項 全 GREEN
+  - protocol conformance / market buy fills + position / market sell closes + pnl / partial close / insufficient cash REJECT / no position REJECT / cancel filled raises / query unknown raises / quote lookup failure REJECT
+- **DoD**: 9/9 GREEN + 完整 pytest 681/681 GREEN
+- **Last updated**: 2026-05-24
+- **Session log**:
+  - 2026-05-24 5913318 | feat：MemoryRouter 全實作
+  - 2026-05-24 9aac2d0 | chore：PROGRESS mark done
 
 ### TASK-P02
 
@@ -1063,6 +1093,12 @@
   - 完整 pytest 649/649 GREEN（從 648 加 1，分裂 range test）
   - **V1 重跑**: n_trades 43 → 47（仍差 3），total_return -0.91%、Sharpe -0.11、PF 1.50、max_dd 2.60%、beats_benchmarks ✅ + oos_alpha ✅ 仍 PASS、regime_coverage 7+4+0 不變
   - **結論**: R1 效果遞減（+4 trades）。繼續放寬 entry rule 已邊際；策略本質仍 break-even。建議：(R3) universe 解 survivorship / (D-investigate) 診斷 OOS-IS 反向
+- 2026-05-24 | PROGRESS task block reconcile + UX iterate |
+  - User 反應 Quick Status / Global Session Log / task block 三方不同步：UI01 / P01 / M02 task block 仍 `NOT_STARTED` 但日誌與 Phase Summary 都顯示已 DONE
+  - 修 3 個 task block (UI01 / P01 / M02) → DONE + 完整 Files / Acceptance / Tests / Session log SHA 回填
+  - 修 Phase Summary 總計 NOT_STARTED 3 → 4（分項加總對齊）
+  - UX session 並行 commit：UI01 三次重寫（中文 labels → user-centric 6 sections → scroll fix）+ scroll fix 解全域 `.main-container overflow:hidden` 鎖死問題
+  - 完整 pytest 701/701 GREEN
 - 2026-05-24 | Strategy retrospective + open-tasks triage |
   - 建立 `specs/profitability/STRATEGY_REVIEW.md`
   - A 段：S1（策略重設計）問題記錄 — 使用什麼策略 / 遇到什麼問題 / 目前如何處理 / 優化方式 / 替代候選 C1-C5
@@ -1221,18 +1257,27 @@
 
 ### TASK-M02
 
-- **Name**: Consistency Check
+- **Name**: Live ↔ Backtest Consistency Check
 - **Source**: V2 §9.2
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-P01, TASK-B04
-- **Files (planned)**:
-  - `src/monitor/consistency_check.py`
-  - `tests/test_monitor/test_consistency_check.py`
-- **Acceptance**: live 訊號 vs 回測 ±2σ；落外警示
-- **Tests (RED list)**: ≥ 5 項
-- **DoD**: GREEN
-- **Last updated**: 2026-05-22
-- **Session log**: _尚無_
+- **Status**: `DONE`
+- **Depends**: TASK-P01 ✅, TASK-B04 ✅
+- **Files**:
+  - `src/monitor/consistency_check.py` ✅
+  - `src/monitor/__init__.py` ✅（公開 API exports）
+  - `tests/test_monitor/test_consistency_check.py` ✅（7 tests）
+- **Acceptance**:
+  - `ConsistencyMetric` (trade_count / mean_slippage_bp / std_slippage_bp) ✅
+  - `ConsistencyResult` (passed / violations / recommended_action) ✅
+  - `compare_live_to_backtest(live, backtest, sigma=2.0, min_std=1.0)` — 2σ band 比 trade_count + mean slippage ✅
+  - 失敗時 `recommended_action="fallback_to_paper"` PASS 時 `"continue"`（V2 §9.2 對應 live→paper 自動退回行為）✅
+  - `min_std` 防 backtest_std=0 退化（zero-width band 全 reject）✅
+- **Tests (RED list)**: 7 項 全 GREEN
+  - within band PASS / trade_count outside σ FAIL / slippage outside FAIL / wider σ band tolerance / zero std safety floor / failed → fallback_to_paper / passed → continue
+- **DoD**: 7/7 GREEN + 完整 pytest 688/688 GREEN
+- **Last updated**: 2026-05-24
+- **Session log**:
+  - 2026-05-24 a7f0dd5 | feat：consistency_check + 7 tests + monitor __init__ exports
+  - 2026-05-24 20e6809 | chore：PROGRESS mark phase 9 全 DONE
 
 ---
 
