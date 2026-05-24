@@ -2539,6 +2539,9 @@ class CallbackManager:
                 return create_news_page_layout()
             if pathname == "/advisor":
                 return create_advisor_page_layout()
+            if pathname == "/strategy":
+                from src.app.pages.strategy import create_strategy_page_layout
+                return create_strategy_page_layout()
             return create_main_page_layout()
 
         # ── News data store refresh ──────────────────────────────────────────
