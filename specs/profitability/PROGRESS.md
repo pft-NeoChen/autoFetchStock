@@ -11,11 +11,11 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | **TASK-S2-SECTOR 完成 + 重大發現**：新增 `src/universe/sector_mapping.py` + 7 unit tests + `analysis/sector_map.json`（TSE 1079 + TPEX 888 = 1967 mappings，139 universe coverage **137/139 = 98.6%**，27 真實 industries vs sprint 1 heuristic 50 buckets）+ `analysis/s2_sector_mapping_report.md`。**用真實 mapping 重評 sprint 1 E3 in-sample IC**：ic_mean **0.0834 → 0.0333**（縮水 60%）、cost-adj spread **4.69% → 2.10%**（縮水 55%）— sprint 1 sector-neutral PASS 大部分是 singleton bucket artifact，alpha 多為 sector beta。0.0333 已落 §E.3 UNCERTAIN 區，walk-forward 後恐進 DEAD。Commits: RED `ac9fe10` / GREEN `dc4f28b` / REPORT (pending)。完整 pytest **758/758 GREEN**。 |
-| 當前 phase | **Phase S2 sprint 2** — 1/2 DONE。SECTOR ✅；下個 task = WALKFWD（含全新 walk-forward + real sector-neutral verdict） |
-| 當前 task | — (SECTOR DONE，等開動 WALKFWD) |
-| 下一個建議 task | **TASK-S2-WALKFWD** — sprint 2 縮版 validation 核心 task：用 `analysis/sector_map.json` real mapping 跑 11 windows walk-forward IC（raw + real sector-neutral），套 §E.3 gate 決定 sprint 2 出口（≥ 0.04 解鎖 4 follow-up；0.02-0.04 UNCERTAIN；< 0.02 E3 artifact 結束）。規格 `STRATEGY_REVIEW.md §E.2`。 |
-| 全域 blocked | 無；Sprint 2 縮版 validation 進行中 |
+| 上次 session | **TASK-S2-WALKFWD 完成 → Sprint 2 verdict: UNCERTAIN**：新增 `scripts/run_s2_walkfwd_momentum.py` + 4 unit tests + `analysis/s2_walkfwd_momentum_report.md`。沿用 V1 walk-forward 切分（IS 12mo / OOS 3mo / 15bd embargo）共 11 windows，跑真實 27 industries sector-neutral：**Raw OOS ic_mean 0.0887 / std 0.1418；Sector-neutral OOS ic_mean 0.0320 / std 0.1378**。Sector-neutral 比 raw 縮水 ~64% 進一步證實 alpha 多為 sector beta。0.0320 落 §E.3 UNCERTAIN 區（0.02-0.04 灰區），**不解鎖** PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST 4 個 follow-up task。t-stat ~0.77 統計上不顯著。Commits: RED `a2e4daf` / GREEN `1c43b9c` / REPORT (pending)。完整 pytest **762/762 GREEN**。 |
+| 當前 phase | **Phase S2 sprint 2 完成（2/2）** — validation 結果 UNCERTAIN，不解鎖 4 follow-up task；等 user 決定 sprint 3 方向 |
+| 當前 task | — (Sprint 2 全部 DONE) |
+| 下一個建議 task | **由 user 決定 sprint 3 方向**。三個主要候選：(a) 擴 universe + survivorship-bias-aware（解 39 hand-picked 偏差，再戰 E3 sector-neutral）；(b) C4 advisor IC（等 advisor 累積到 3-6 月後跑）；(c) 補 infra（P02/X02/D04 paper trading 前置）。**建議 (a)**：sprint 1 E3 PASS / sprint 2 UNCERTAIN 兩個結果都受 universe survivorship bias 影響，先擴大 universe 是 highest-info-value 動作。 |
+| 全域 blocked | 無；Sprint 2 結束，等 sprint 3 方向確認 |
 | Pytest 狀態 | 完整 pytest **751/751 GREEN**（6 warnings：scipy precision + urllib3 LibreSSL env） |
 | 檔案位置 | `specs/profitability/{README,PROFITABILITY_PLAN_V2,IMPLEMENTATION_PLAN,STRATEGY_REVIEW,PROGRESS,STRATEGY_RESEARCH_CONVERSATION}.md` + `src/research/{event_study,trade_bootstrap}.py` + `src/features/{rsi,*}.py` + `src/signals/{ic_analysis,sector_neutral,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/{data_freshness_guard,consistency_check}.py` + `src/execution/order_router.py` + `src/paper/memory_router.py` + `src/universe/{filter,api_loader}.py` + `src/app/pages/strategy.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1,run_s1_e0_v1_bootstrap,run_s1_e1_chip_event,run_s1_e2_mean_reversion,run_s1_e3_momentum_ic,build_sampled_universe,snapshot_advisor_scores}.py` + `analysis/v1_trades.json` + `analysis/{local_data_audit,ic_report,backtest_v1_report,s1_e0_v1_bootstrap_report,s1_e1_chip_event_report,s1_e2_mean_reversion_report,s1_e3_momentum_ic_report,s1_sprint1_comparison_report}.md` |
 | Repo 是否乾淨 | main：S1 全部 task 完成；working tree 仍有 pre-existing modified/untracked files。本 session 新增 sprint 1 comparison report，PROGRESS 與 README 同步更新 |
@@ -39,8 +39,8 @@
 | 9 — Monitor | 2 | 2 | 0 | 0 | 0 |
 | 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
 | **S1 — Strategy Research Sprint 1**（spec `STRATEGY_REVIEW.md §D`）| 7 | 7 | 0 | 0 | 0 |
-| **S2 — Sprint 2 validation**（spec `STRATEGY_REVIEW.md §E`，縮版 2 task）| 2 | 1 | 0 | 1 | 0 |
-| **總計** | **54** | **49** | **0** | **5** | **0** |
+| **S2 — Sprint 2 validation**（spec `STRATEGY_REVIEW.md §E`，縮版 2 task）| 2 | 2 | 0 | 0 | 0 |
+| **總計** | **54** | **50** | **0** | **4** | **0** |
 
 ---
 
@@ -1261,7 +1261,8 @@
 - 2026-05-24 | TASK-S1-E0 | RED `5061fd1` + GREEN `3248c1b` + REPORT `34e4805`：新增 `src/research/trade_bootstrap.py`（BootstrapStat / expectancy_bp / profit_factor / sharpe_ratio / bootstrap_trade_metrics seedable）+ `scripts/run_s1_e0_v1_bootstrap.py` + 10 unit tests；修 `scripts/run_backtest_v1.py` 加 `--dump-trades` flag + `_trade_to_dict` serializer，重跑 V1 產 `analysis/v1_trades.json`（59 OOS + 169 IS）；跑 1000 iter resample bootstrap 產 `analysis/s1_e0_v1_bootstrap_report.md`。結果 **全部 UNCERTAIN**：OOS expectancy_bp 點 −41.58 / CI [−290, +250]、sharpe 點 −0.04 / CI [−0.41, +0.20]、profit_factor 點 0.88 / CI [0.31, 1.91]；IS 同質。依 §D.4 → V1 既無 edge 也未真死，**留 baseline**；V1 §6.1 第六次判決的「V1 缺真實 edge」結論被 sampling noise 弱化。完整 pytest **751/751 GREEN**。
 - 2026-05-24 | TASK-S1-REPORT | `fd5a330`：撰寫 `analysis/s1_sprint1_comparison_report.md`（6 章節：比較表 / §D.5 出口分支套用 / sprint 2 task 提案 / sprint 2 失敗預案 / pytest+code 變更摘要 / 結論）。Sprint 1 全部結束（7/7）。**唯一觸發 §D.5 正向分支：E3 → sprint 2 cross-sectional ranking pipeline**；其餘 verdict 均無 action（V1 留 baseline / chip rules 不搬 / mean reversion rules 不搬 / C1-panic 不開 / multi-strategy allocator 不開）。提案 6 個 sprint 2 task。完整 pytest **751/751 GREEN**。
 - 2026-05-25 | Sprint 2 縮版 §E + Phase S2 寫入 | `e8684ea`：user 批准縮版 sprint 2（不一次規劃 6 task，先 SECTOR + WALKFWD validate alpha 再決定是否解鎖 4 個 follow-up）。STRATEGY_REVIEW 新增 §E（§E.1 為何縮版 / §E.2 兩 task 規格 / §E.3 出口 gate / §E.4 禁區）；PROGRESS 新增 S2 phase row 與 2 task block；README §3.1/§3.6 同步。純文件 commit，code 未動。
-- 2026-05-25 | TASK-S2-SECTOR | RED `ac9fe10` + GREEN `dc4f28b` + REPORT (pending)：新增 `src/universe/sector_mapping.py`（parse / fetch / load / get_sector，雙 endpoint TSE strMode=2 + TPEX strMode=4）+ 7 unit tests + `analysis/sector_map.json`（TSE 1079 + TPEX 888 = 1967 mappings）+ `analysis/s2_sector_mapping_report.md`。139 universe coverage **137/139 = 98.6%**（misses: 0050 ETF + 9110 TDR），27 真實 industries。**重大發現**：用真實 mapping 重評 sprint 1 E3 in-sample IC → ic_mean **0.0834 → 0.0333**（縮 60%）、cost-adj spread **4.69% → 2.10%**（縮 55%）。Sprint 1 sector-neutral PASS 大部分是 50-singleton-bucket artifact；alpha 大部分為 sector beta。In-sample 已落 §E.3 UNCERTAIN 區（0.02-0.04）。下一 session：TASK-S2-WALKFWD 正式 walk-forward gate verdict。完整 pytest **758/758 GREEN**。
+- 2026-05-25 | TASK-S2-SECTOR | RED `ac9fe10` + GREEN `dc4f28b` + REPORT `1f710c9`：新增 `src/universe/sector_mapping.py`（雙 endpoint TSE/TPEX）+ 7 unit tests + `analysis/sector_map.json`（1967 mappings）+ `analysis/s2_sector_mapping_report.md`。139 universe coverage **98.6%**，27 真實 industries。**重大發現**：用真實 mapping 重評 sprint 1 E3 in-sample IC → ic_mean 0.0834 → **0.0333**（縮 60%）。Sprint 1 sector-neutral PASS 大部分是 50-singleton-bucket artifact。完整 pytest **758/758 GREEN**。
+- 2026-05-25 | TASK-S2-WALKFWD | RED `a2e4daf` + GREEN `1c43b9c` + REPORT (pending)：新增 `scripts/run_s2_walkfwd_momentum.py` + 4 unit tests + `analysis/s2_walkfwd_momentum_report.md`。11 windows OOS（IS 12mo / OOS 3mo / 15bd embargo）：**Raw OOS ic_mean 0.0887、Sector-neutral OOS ic_mean 0.0320** → §E.3 **UNCERTAIN**（0.02-0.04 灰區）。Sector-neutral 縮水 ~64% 進一步證實 alpha 多為 sector beta；t-stat 0.77 統計不顯著。**不解鎖** PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST 4 個 follow-up。完整 pytest **762/762 GREEN**。Sprint 2 結束 2/2。下一步等 user 決定 sprint 3 方向（建議擴 universe survivorship-aware）。
 - 2026-05-23 | V1 重判決 plumbing prep | `scripts/run_backtest_v1.py` 大改 + 10 unit tests：
   - 新增 `load_chip_frames(data_dir)` / `load_margin_frames(data_dir)`：走 `data/chips/*.json` `data/margin/*.json` 組成 per-stock time series（容錯 invalid JSON / missing dir）
   - 新增 `build_market_ohlc_proxy(feature_frames)`：cross-section mean → OHLC DataFrame，供 regime classifier 用
@@ -1582,24 +1583,26 @@
 
 - **Name**: E3 momentum walk-forward IC + 真實 sector-neutral
 - **Source**: `STRATEGY_REVIEW.md §E.2`
-- **Status**: `NOT_STARTED`
-- **Depends**: TASK-S2-SECTOR
-- **Files (planned)**:
-  - `scripts/run_s2_walkfwd_momentum.py` — 沿用 `src/backtest/walk_forward` 切分 + per-window IC（raw + real sector-neutral）
-  - `tests/test_scripts/test_run_s2_walkfwd_momentum.py` — ≥ 3 tests
-  - `analysis/s2_walkfwd_momentum_report.md` — 11 windows OOS IC + 衰減比例 + §E.3 gate verdict
-- **Acceptance**:
-  - 沿用 V1 walk-forward 切分 (IS 12mo / OOS 3mo) 產 11 windows
-  - 每 window：IS 計 IC point；OOS 計 forward return → OOS IC
-  - raw + real sector-neutral 兩 variant 並列
-  - 各 metric 跨 windows mean + std
-- **Tests (RED list)**: ≥ 3 項
-  - walk-forward window 切分（reuse 既有 helper）
-  - per-window IC 計算（合成資料）
-  - smoke：3 windows minimal 配置產報告
-- **DoD**: 報告產出 + 套 §E.3 gate verdict（OOS sector-neutral ic_mean ≥ 0.04 → 解鎖 4 個 follow-up task；0.02-0.04 UNCERTAIN；< 0.02 E3 artifact 結束）
+- **Status**: `DONE`
+- **Depends**: TASK-S2-SECTOR ✅
+- **Files**:
+  - `scripts/run_s2_walkfwd_momentum.py` — `compute_window_ic` + `classify_walkfwd_verdict` + `run_walkfwd_momentum` orchestrator + `render_walkfwd_report`
+  - `tests/test_scripts/test_run_s2_walkfwd_momentum.py` — 4 tests
+  - `analysis/s2_walkfwd_momentum_report.md` — 11 windows OOS IC + verdict + per-window 細節
+- **Verdict**: **UNCERTAIN（不解鎖 sprint 3 follow-up）**
+  - 11 windows（IS 12mo / OOS 3mo / 15bd embargo）
+  - Raw OOS ic_mean **0.0887** / std 0.1418
+  - **Sector-neutral OOS ic_mean 0.0320** / std 0.1378 → §E.3 UNCERTAIN（0.02-0.04 灰區）
+  - Sector-neutral 比 raw 縮水 ~64% → 進一步證實 alpha 多為 sector beta
+  - t-stat ~ 0.0320 / (0.1378 / √11) ≈ 0.77，統計上不顯著
+  - Per-window 變異大：peak window 5 (2024-05~08) SN +0.262；trough window 7 (2024-11~2025-02) SN −0.289
+- **Implication**: 依 §E.3 UNCERTAIN 分支 → **不投資** PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST 4 個 follow-up（避免在 marginal alpha 上花週級 task）。Sprint 3 候選：擴 universe (survivorship-aware) / C4 advisor 累積 / C0b / C3。
+- **DoD**: report 產出 ✅ + §E.3 gate verdict ✅ + PROGRESS 記錄
 - **Last updated**: 2026-05-25
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-25 RED `a2e4daf`：4 tests（compute_window_ic / classify_walkfwd_verdict gate / empty / 4 stocks × 600 bd smoke）
+  - 2026-05-25 GREEN `1c43b9c`：實作 orchestrator，沿用 V1 walk-forward + ic_analysis.compute_ic + sector_neutralize；完整 pytest **762/762 GREEN**
+  - 2026-05-25 REPORT (pending commit)：跑 139 universe 4yr → 11 windows OOS：raw 0.0887 / SN 0.0320 → **UNCERTAIN**；sprint 2 結束，不解鎖 4 follow-up
 
 ---
 

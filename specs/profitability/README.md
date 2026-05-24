@@ -86,14 +86,14 @@ specs/
 
 ### 3.1 目前 phase
 
-**🎯 S2 sprint 2 進行中（1/2 DONE）→ TASK-S2-SECTOR 揭露 sprint 1 E3 sector-neutral PASS 部分是 heuristic artifact**
+**🎯 S2 sprint 2 完成（2/2）→ Verdict UNCERTAIN（不解鎖 4 follow-up）→ 等 user 決定 sprint 3 方向**
 
-- **總進度**: **49/54** tasks DONE（base 41/45 + S1 7/7 + S2 1/2）；0 IN_PROGRESS / 0 BLOCKED / 5 NOT_STARTED（1 S2 WALKFWD + 4 infra defer）
-- **Phase 完成度**: Phase 0-7/9 全 ✅；Phase 8（P01 ✅，P02/D04 defer）；Phase 10（X01 ✅，X02/X03 defer）；**Phase S1 全部 DONE**；**Phase S2 1/2 DONE**（SECTOR ✅；WALKFWD 待做）
-- **Pytest**: 完整 **758/758 GREEN**（6 warnings：scipy precision + urllib3 LibreSSL env）
-- **Sprint 1 結論**: 見 `analysis/s1_sprint1_comparison_report.md`；E0 UNCERTAIN / E1 FAIL / E2 FAIL / E3 PASS
-- **Sprint 2 SECTOR 結論**: 見 `analysis/s2_sector_mapping_report.md`；真實 mapping 27 industries 重評 sprint 1 E3 in-sample IC → 0.0834 → **0.0333**（縮 60%），落 §E.3 UNCERTAIN 區
-- **Sprint 2 縮版策略**: 見 `STRATEGY_REVIEW.md §E`；下一 task WALKFWD 跑正式 walk-forward verdict 套 §E.3 gate
+- **總進度**: **50/54** tasks DONE（base 41/45 + S1 7/7 + S2 2/2）；0 IN_PROGRESS / 0 BLOCKED / 4 NOT_STARTED（全為 infra defer：P02/X02/X03/D04）
+- **Phase 完成度**: Phase 0-7/9 全 ✅；Phase 8（P01 ✅，P02/D04 defer）；Phase 10（X01 ✅，X02/X03 defer）；**Phase S1 + S2 全部 DONE**
+- **Pytest**: 完整 **762/762 GREEN**（9 warnings：scipy precision + urllib3 LibreSSL env）
+- **Sprint 1 結論**: 見 `analysis/s1_sprint1_comparison_report.md`；E0 UNCERTAIN / E1 FAIL / E2 FAIL / E3 PASS（in-sample heuristic）
+- **Sprint 2 結論**: 見 `analysis/s2_walkfwd_momentum_report.md`；**11 windows walk-forward + 真實 27 industries sector-neutral OOS ic_mean = 0.0320**（落 §E.3 UNCERTAIN）；E3 alpha 大部分為 sector beta（縮水 64%）；t-stat 0.77 不顯著；**不解鎖** PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST 4 follow-up
+- **Sprint 3 候選**（待 user 決定）：(a) 擴 universe + survivorship-bias-aware（**建議優先**）、(b) C4 advisor IC（等 advisor 累積 3-6 月）、(c) 補 infra（P02/X02/D04）
 
 ### 3.2 V1 第六次判決 verdict 摘要
 
@@ -146,11 +146,13 @@ specs/
    - `PROGRESS.md` Quick Status + S1 phase 對應 task block
    - `analysis/backtest_v1_report.md` V1 第六次判決細節（背景）
 2. **下一個動作**（依 PROGRESS Quick Status）：
-   - S1 sprint 1 全部 DONE；S2 SECTOR ✅
-   - 當前 active task = **TASK-S2-WALKFWD** — 用 `analysis/sector_map.json` 真實 27 industries mapping 跑 11 windows walk-forward IC（raw + sector-neutral）
-   - §E.3 gate 決定 sprint 2 出口（≥ 0.04 → 解鎖 4 follow-up；0.02-0.04 → UNCERTAIN；< 0.02 → E3 in-sample artifact 結束）
-   - **預期 verdict**：SECTOR REPORT 已揭露 in-sample real sector-neutral 只剩 0.0333；walk-forward 通常進一步衰減 → 高機率 < 0.02 / sprint 2 結束
-   - 詳見 `analysis/s2_sector_mapping_report.md` + `STRATEGY_REVIEW.md §E`
+   - S1 + S2 sprint 全部 DONE；Sprint 2 verdict UNCERTAIN（sector-neutral OOS ic_mean 0.0320，未過 §E.3 0.04 解鎖門檻）
+   - **不解鎖** 4 個 follow-up task（PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST）— 避免在 marginal alpha 上投資週級 task
+   - **等 user 決定 sprint 3 方向**。三個候選（建議優先 (a)）：
+     - (a) 擴 universe + survivorship-bias-aware（解原 39 hand-picked 偏差，再戰 E3 sector-neutral）
+     - (b) C4 advisor IC（等 advisor 累積 3-6 月後跑 IC 分析）
+     - (c) 補 infra（P02 ShioajiSimRouter / X02 / D04 paper trading 前置）
+   - 詳見 `analysis/s2_walkfwd_momentum_report.md` + `STRATEGY_REVIEW.md §E.3`
 3. **不要直接做**: 完整 SignalEngine implementation（除非該策略已過 §D.3 gate）/ paper runner / multi-strategy allocator
 4. **複用 infra**: backtest engine / orchestrator / regime gate / risk gates / journal / report / cost_model 全部 **不必重做**
 
