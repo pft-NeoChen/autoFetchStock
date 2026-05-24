@@ -441,6 +441,7 @@ def _create_header() -> html.Header:
                             dcc.Link("即時看板", href="/", className="header-nav-link"),
                             dcc.Link("市場新聞", href="/news", className="header-nav-link"),
                             dcc.Link("AI 顧問", href="/advisor", className="header-nav-link header-nav-ai"),
+                            dcc.Link("策略績效", href="/strategy", className="header-nav-link header-nav-strategy"),
                         ],
                     ),
                     html.Div(
