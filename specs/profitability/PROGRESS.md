@@ -11,8 +11,8 @@
 |------|----|
 | 上次更新 | 2026-05-24 |
 | 上次 session | V1 §6.1 第六次判決（R3-sample 100 新檔）— 100 隨機 listed 2yr backfill 完成（10:41，100/100 ok，2500 月，47440 records，總 39+100=139 stocks）；V1 重跑：n_trades 47→**59** ✅、equal_weight 166%→110%、max_dd 2.60%→0.77%；**但 expectancy_bp +33→-41** 翻負；5/10 PASS 同（n_trades ↔ expectancy_bp 對調）；**核心 finding：原 39 檔 hand-picked 全贏家造成 expectancy 假陽性，broader universe 揭露 strategy 缺真實 edge**。R3-full backfill 35h 已無意義（sample 已證 strategy 在 average universe 不賺）。完整 pytest 658/658 GREEN |
-| 當前 phase | **S2 + UI01 + P01 DONE** — infrastructure 推進中；S1 (strategy redesign) 等 advisor 累積資料後最後再做 |
-| 當前 task | 下一: TASK-M02 consistency check (Phase 9) 或 TASK-P02 ShioajiSimRouter |
+| 當前 phase | **S2 + UI01 + P01 + M02 DONE** — Phase 9 全 DONE；infra 接近完整 |
+| 當前 task | 下一: TASK-P02 ShioajiSimRouter (依 P01+X01 ✅) — 需 mock Shioaji，1.5d |
 | 下一個建議 task | TASK-M02 consistency check (Phase 9，依 P01+B04 都 ✅)；或 TASK-P02 ShioajiSimRouter (依 P01+X01 都 ✅)；之後 D04 paper 60d 報告 → S1 strategy redesign |
 | 全域 blocked | 無；S1 (strategy redesign) 留至 advisor 累積 3-6 月後再做，infra (UI/paper/monitor) 先 |
 | Pytest 狀態 | 完整 pytest 649/649 GREEN（5 warnings env-level） |
@@ -35,9 +35,9 @@
 | 6 — Portfolio | 2 | 2 | 0 | 0 | 0 |
 | 7 — UI | 1 | 1 | 0 | 0 | 0 |
 | 8 — Paper | 3 | 1 | 0 | 2 | 0 |
-| 9 — Monitor | 2 | 1 | 0 | 1 | 0 |
+| 9 — Monitor | 2 | 2 | 0 | 0 | 0 |
 | 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
-| **總計** | **45** | **39** | **1** | **4** | **1** |
+| **總計** | **45** | **40** | **1** | **3** | **1** |
 
 ---
 
@@ -1060,6 +1060,15 @@
   - 完整 pytest 649/649 GREEN（從 648 加 1，分裂 range test）
   - **V1 重跑**: n_trades 43 → 47（仍差 3），total_return -0.91%、Sharpe -0.11、PF 1.50、max_dd 2.60%、beats_benchmarks ✅ + oos_alpha ✅ 仍 PASS、regime_coverage 7+4+0 不變
   - **結論**: R1 效果遞減（+4 trades）。繼續放寬 entry rule 已邊際；策略本質仍 break-even。建議：(R3) universe 解 survivorship / (D-investigate) 診斷 OOS-IS 反向
+- 2026-05-24 | TASK-M02 consistency check |
+  - `src/monitor/consistency_check.py` + 7 unit tests
+  - `ConsistencyMetric` (trade_count / mean_slippage_bp / std_slippage_bp) + `ConsistencyResult` (passed / violations / recommended_action)
+  - `compare_live_to_backtest(live, backtest, sigma=2.0, min_std=1.0)` — 2σ band 比 trade_count + mean slippage
+  - 失敗時 recommend `fallback_to_paper`，PASS 時 `continue`（V2 §9.2 對應 live→paper 自動退回行為）
+  - `min_std` 防 backtest_std=0 退化（zero-width band 全 reject）
+  - 更新 `src/monitor/__init__.py` 公開新 API
+  - Phase 9 (M01+M02) 全 DONE
+  - 完整 pytest 688/688 GREEN
 - 2026-05-24 | TASK-P01 memory paper router |
   - `src/paper/memory_router.py` + `src/paper/__init__.py` + `tests/test_paper/test_memory_router.py` (9 tests GREEN)
   - 實作 `OrderRouter` Protocol（runtime_checkable 確認 isinstance pass）
