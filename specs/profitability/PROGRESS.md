@@ -2,6 +2,7 @@
 
 > **State of the world.** 每次 session 開始**先讀此檔**，結束**必更新**。
 > 規格：`specs/profitability/PROFITABILITY_PLAN_V2.md`。流程：`specs/profitability/IMPLEMENTATION_PLAN.md`。
+> **策略 retrospective + 未完成 task triage**：`specs/profitability/STRATEGY_REVIEW.md`（2026-05-24 V1 §6.1 第六次判決後建立）。
 
 ---
 
@@ -25,11 +26,11 @@
 
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
-| 0 — Universe + Feature Store | 13 | 12 | 1 | 0 | 0 |
+| 0 — Universe + Feature Store | 13 | 13 | 0 | 0 | 0 |
 | — Adv. snapshot (S2) | 1 | 1 | 0 | 0 | 0 |
 | 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
-| 3 — Backtester | 10 | 10 | 0 | 0 | 1 |
+| 3 — Backtester | 10 | 10 | 0 | 0 | 0 |
 | 4 — Risk + Sizing | 2 | 2 | 0 | 0 | 0 |
 | 5 — Journal + Perf | 3 | 3 | 0 | 0 | 0 |
 | 6 — Portfolio | 2 | 2 | 0 | 0 | 0 |
@@ -37,7 +38,7 @@
 | 8 — Paper | 3 | 1 | 0 | 2 | 0 |
 | 9 — Monitor | 2 | 2 | 0 | 0 | 0 |
 | 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
-| **總計** | **45** | **40** | **1** | **3** | **1** |
+| **總計** | **45** | **41** | **0** | **3** | **0** |
 
 ---
 
@@ -226,7 +227,7 @@
 
 - **Name**: chip + margin 歷史回補 orchestrator（解開 V1 0 trades）
 - **Source**: V2 §0.1 / §0.5 + backtest_v1_report.md caveats (1)
-- **Status**: `IN_PROGRESS`（script + tests DONE；實跑待跑）
+- **Status**: `DONE`（script + 14 tests GREEN；實跑兩段完成 2024-05~2026-05 + 2022-05~2024-05；總 chips 971 / margin 970 / failed 0）
 - **Depends**: TASK-D01 ✅
 - **Files**:
   - `scripts/backfill_historical_chips.py` ✅
@@ -647,12 +648,14 @@
 
 - **Name**: 首次完整回測報告（Phase 3 出口）— **拆成 D03a / D03b / D03c**
 - **Source**: V2 §6.1
-- **Status**: `BLOCKED: split`（拆成 3 子 task）
+- **Status**: `DONE`（split 完成，5 sub-tasks 全 ✅；6 次 V1 §6.1 判決完成；2026-05-24 reconciled from `BLOCKED: split`）
 - **Depends**: TASK-B05 ✅, TASK-J04 ✅
 - **Sub-tasks**:
   - **TASK-D03a** ✅：Adapter（evaluate_long_entry/exit → BacktestEngine deciders）
-  - **TASK-D03b**：跨股 × walk-forward × BacktestEngine orchestrator → trades + equity + 寫 experiment_registry
-  - **TASK-D03c**：performance metrics + benchmark 對照 + markdown 報告 + V2 §6.1 量化門檻判定
+  - **TASK-D03b** ✅：跨股 × walk-forward × BacktestEngine orchestrator → trades + equity + 寫 experiment_registry
+  - **TASK-D03c** ✅：performance metrics + benchmark 對照 + markdown 報告 + V2 §6.1 量化門檻判定
+  - **TASK-D03d** ✅：Market regime classifier
+  - **TASK-D03e** ✅：Walk-forward IS extension + oos_is_ratio helper
 - **Reason for split**: D03 估 3-5 hr + 多輪 debug 風險高；split 後每段 ≤ 1 session，中途錯不毀整批
 - **Last updated**: 2026-05-23
 - **Session log**:
@@ -1060,6 +1063,12 @@
   - 完整 pytest 649/649 GREEN（從 648 加 1，分裂 range test）
   - **V1 重跑**: n_trades 43 → 47（仍差 3），total_return -0.91%、Sharpe -0.11、PF 1.50、max_dd 2.60%、beats_benchmarks ✅ + oos_alpha ✅ 仍 PASS、regime_coverage 7+4+0 不變
   - **結論**: R1 效果遞減（+4 trades）。繼續放寬 entry rule 已邊際；策略本質仍 break-even。建議：(R3) universe 解 survivorship / (D-investigate) 診斷 OOS-IS 反向
+- 2026-05-24 | Strategy retrospective + open-tasks triage |
+  - 建立 `specs/profitability/STRATEGY_REVIEW.md`
+  - A 段：S1（策略重設計）問題記錄 — 使用什麼策略 / 遇到什麼問題 / 目前如何處理 / 優化方式 / 替代候選 C1-C5
+  - B 段：未完成 task 三類 — IN_PROGRESS 占位 (D01c) / BLOCKED 占位 (D03) / 真 NOT_STARTED (P02/X02/X03/D04)
+  - C 段：行動建議優先序
+  - **占位修正**: D01c IN_PROGRESS → DONE；D03 BLOCKED → DONE（split 完成）；Phase summary 同步
 - 2026-05-24 | TASK-M02 consistency check |
   - `src/monitor/consistency_check.py` + 7 unit tests
   - `ConsistencyMetric` (trade_count / mean_slippage_bp / std_slippage_bp) + `ConsistencyResult` (passed / violations / recommended_action)
