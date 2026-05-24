@@ -19,9 +19,11 @@ pytestmark = pytest.mark.unit
 
 
 def test_infer_sector_groups_by_first_two_digits_of_stock_id() -> None:
-    assert infer_sector("2330") == infer_sector("2454")
+    # 2330 / 2317 share "23" prefix; 2454 lives in "24"; 1101 / 1102 in "11"
+    assert infer_sector("2330") == infer_sector("2317")
     assert infer_sector("1101") != infer_sector("2330")
     assert infer_sector("1102") == infer_sector("1101")
+    assert infer_sector("2454") != infer_sector("2330")
 
 
 def test_compute_12_1m_return_skips_month_1() -> None:
