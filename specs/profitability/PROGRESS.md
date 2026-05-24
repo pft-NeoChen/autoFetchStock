@@ -11,10 +11,10 @@
 |------|----|
 | 上次更新 | 2026-05-24 |
 | 上次 session | V1 §6.1 第六次判決（R3-sample 100 新檔）— 100 隨機 listed 2yr backfill 完成（10:41，100/100 ok，2500 月，47440 records，總 39+100=139 stocks）；V1 重跑：n_trades 47→**59** ✅、equal_weight 166%→110%、max_dd 2.60%→0.77%；**但 expectancy_bp +33→-41** 翻負；5/10 PASS 同（n_trades ↔ expectancy_bp 對調）；**核心 finding：原 39 檔 hand-picked 全贏家造成 expectancy 假陽性，broader universe 揭露 strategy 缺真實 edge**。R3-full backfill 35h 已無意義（sample 已證 strategy 在 average universe 不賺）。完整 pytest 658/658 GREEN |
-| 當前 phase | **V1 §6.1 第六次判決完成（❌ FAIL 5/10 PASS）** — R3-sample 結論：**strategy 在 broader universe 上缺真實 edge**（expectancy_bp +33→-41 翻負） |
-| 當前 task | 待 user 決定下一步策略 |
-| 下一個建議 task | **R3-full 不再建議**（sample 已證 strategy 缺真實 edge，全跑 35h 無意義）。三方向擇一：(S1) 重思策略邏輯 — mean-reversion / volatility breakout / momentum factor，重跑 IC + 新 entry rules；(S2) 長期蒐集 advisor LLM 評分（V2 §5），3-6 月後 IC 分析；(S3) 接 UI Phase 7 / Paper Phase 8 用當前策略做基礎建設演練（不期待賺錢） |
-| 全域 blocked | 策略本質問題 — autonomous 不該再 V1 變體微調。等 user 拍板：換 strategy class / 收集 advisor / 推 infrastructure |
+| 當前 phase | **S2 advisor snapshot cron DONE + S3 UI01 minimal DONE** — infrastructure 推進中；S1 (strategy redesign) 等 advisor 累積資料後最後再做 |
+| 當前 task | 下一: TASK-P01 memory paper router (S3 Phase 8 起頭) |
+| 下一個建議 task | TASK-P01 (Phase 8 memory paper router) — 接 SignalEngine、模擬成交、寫入 TradeJournal；用當前 V1 策略做 paper 演練，建立 trade-by-trade 真實回饋 loop。之後 P02 / M01-M02 / 然後 S1 strategy redesign|
+| 全域 blocked | 無；S1 (strategy redesign) 留至 advisor 累積 3-6 月後再做，infra (UI/paper/monitor) 先 |
 | Pytest 狀態 | 完整 pytest 649/649 GREEN（5 warnings env-level） |
 | 檔案位置 | `specs/profitability/` + `src/features/*.py` + `src/signals/{ic_analysis,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/data_freshness_guard.py` + `src/execution/order_router.py` + `src/universe/filter.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1}.py` + `analysis/{local_data_audit,ic_report,backtest_v1_report}.md` |
 | Repo 是否乾淨 | main：X01 RED+GREEN 待 commit；仍有 pre-existing analysis/.claude/.antigravitycli 未提交內容 |
@@ -26,17 +26,18 @@
 | Phase | Tasks | DONE | IN_PROGRESS | NOT_STARTED | BLOCKED |
 |-------|-------|------|-------------|-------------|---------|
 | 0 — Universe + Feature Store | 13 | 12 | 1 | 0 | 0 |
+| — Adv. snapshot (S2) | 1 | 1 | 0 | 0 | 0 |
 | 1 — IC 分析 | 2 | 2 | 0 | 0 | 0 |
 | 2 — SignalEngine | 3 | 3 | 0 | 0 | 0 |
 | 3 — Backtester | 10 | 10 | 0 | 0 | 1 |
 | 4 — Risk + Sizing | 2 | 2 | 0 | 0 | 0 |
 | 5 — Journal + Perf | 3 | 3 | 0 | 0 | 0 |
 | 6 — Portfolio | 2 | 2 | 0 | 0 | 0 |
-| 7 — UI | 1 | 0 | 0 | 1 | 0 |
+| 7 — UI | 1 | 1 | 0 | 0 | 0 |
 | 8 — Paper | 3 | 0 | 0 | 3 | 0 |
 | 9 — Monitor | 2 | 1 | 0 | 1 | 0 |
 | 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
-| **總計** | **44** | **36** | **1** | **6** | **1** |
+| **總計** | **45** | **38** | **1** | **5** | **1** |
 
 ---
 
@@ -1059,6 +1060,17 @@
   - 完整 pytest 649/649 GREEN（從 648 加 1，分裂 range test）
   - **V1 重跑**: n_trades 43 → 47（仍差 3），total_return -0.91%、Sharpe -0.11、PF 1.50、max_dd 2.60%、beats_benchmarks ✅ + oos_alpha ✅ 仍 PASS、regime_coverage 7+4+0 不變
   - **結論**: R1 效果遞減（+4 trades）。繼續放寬 entry rule 已邊際；策略本質仍 break-even。建議：(R3) universe 解 survivorship / (D-investigate) 診斷 OOS-IS 反向
+- 2026-05-24 | S2 + S3 起頭 (autonomous, post V1 第 6 次判決) |
+  - **S2 (advisor snapshot cron, 0.5d)** — `scripts/snapshot_advisor_scores.py` + 8 unit tests
+    - 走 heuristic 路徑（無 LLM API），smoke 跑 139 stocks / 0.1s
+    - 寫 `data/advisor_snapshots/<YYYYMMDD>.jsonl`，schema 保留 source 欄位日後 LLM 切片 IC
+    - 建議 cron: `0 16 * * 1-5 cd <repo> && .venv/bin/python -m scripts.snapshot_advisor_scores`
+  - **S3 (TASK-UI01 minimal)** — `src/app/pages/strategy.py` + `src/app/pages/__init__.py` + 6 unit tests
+    - `load_latest_experiment(registry_dir)` 從 `analysis/experiment_registry/*.json` 依 `recorded_at` 取最新
+    - `create_strategy_page_layout()` 顯示 verdict banner / summary table / manifest table / 報告連結 / 無記錄時 empty state
+    - `src/app/callbacks.py` route_page 加 `/strategy` 路徑（lazy import 防 circular）
+  - 完整 pytest 672/672 GREEN
+  - **下一步**: TASK-P01 memory paper router（依 S03/R01/R02 ✅）
 - 2026-05-24 | V1 §6.1 第六次判決（R3-sample 驗證）|
   - Backfill 完成（08:29→10:41，2h12m，100/100 ok，2500 月，47440 records），總 stocks 39→139
   - V1 重跑：11 walk-forward windows / OOS 59 trades / IS 169 trades
