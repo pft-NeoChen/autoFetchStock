@@ -11,11 +11,11 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | **TASK-S1-REPORT 完成 → S1 sprint 1 全部結束**：產出 `analysis/s1_sprint1_comparison_report.md`，套 §D.5 出口決策樹：E0 UNCERTAIN → V1 留 baseline（CI 上界 +250bp 遠在 0 上方，不觸發降級）/ E1 FAIL → 不搬 chip rules / E2 FAIL → 不搬 mean reversion rules / **E3 PASS → 進 sprint 2 cross-sectional ranking pipeline**（唯一觸發正向分支）。提案 6 個 sprint 2 task：SECTOR / WALKFWD / UNIVERSE / PORTFOLIO / RANK-SE / BACKTEST。完整 pytest **751/751 GREEN**。 |
-| 當前 phase | **Phase S1 sprint 1 完成（7/7）** → 待 user 確認後啟動 sprint 2（cross-sectional momentum pipeline）|
-| 當前 task | — (Sprint 1 全部 DONE) |
-| 下一個建議 task | **Sprint 2 規劃**：由 user 批准 sprint 2 task 拆解（6 個提案 task），然後寫入 STRATEGY_REVIEW（新增 §E sprint 2 spec）+ PROGRESS（新增 Phase S2 區塊）。**首要 task**：TASK-S2-SECTOR（真實 TWSE 產業別 fetcher）— 為 WALKFWD / PORTFOLIO 前置依賴。 |
-| 全域 blocked | 無；Sprint 2 規劃前 user 可選擇先做 infra defer task（P02/X02/X03/D04）但仍建議優先 sprint 2 SECTOR + WALKFWD |
+| 上次 session | **S1 sprint 1 全部結束（7/7）→ sprint 2 縮版規劃寫入 §E**：user 批准縮版 2 task validation 路徑（不一次規劃 6 task），STRATEGY_REVIEW 新增 §E（SECTOR + WALKFWD 規格 + sprint 2 出口 gate：OOS sector-neutral ic_mean ≥ 0.04 才解鎖 4 個 follow-up task）。PROGRESS 新增 Phase S2 區塊（2 task NOT_STARTED）。Sprint 1 commit hashes：DOC fold-in `a4aac3c` / E2 `f0936cc` / E3 `60b496f` / E0 `34e4805` / REPORT `fd5a330`。 |
+| 當前 phase | **Phase S2 sprint 2 啟動** — 縮版 2 task validation：先 SECTOR (~0.5d) → WALKFWD (~1-2d) → gate 決定是否解鎖 PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST |
+| 當前 task | — (準備開動 TASK-S2-SECTOR RED 階段) |
+| 下一個建議 task | **TASK-S2-SECTOR** — `src/universe/sector_mapping.py` + cache 寫入 `data/cache/sector_map.json`。從 TWSE ISIN endpoint 抓真實 28 類產業別，替換 `src/signals/sector_neutral.infer_sector` 4-digit prefix heuristic。規格 `STRATEGY_REVIEW.md §E.2`。 |
+| 全域 blocked | 無；Sprint 2 縮版 validation 進行中 |
 | Pytest 狀態 | 完整 pytest **751/751 GREEN**（6 warnings：scipy precision + urllib3 LibreSSL env） |
 | 檔案位置 | `specs/profitability/{README,PROFITABILITY_PLAN_V2,IMPLEMENTATION_PLAN,STRATEGY_REVIEW,PROGRESS,STRATEGY_RESEARCH_CONVERSATION}.md` + `src/research/{event_study,trade_bootstrap}.py` + `src/features/{rsi,*}.py` + `src/signals/{ic_analysis,sector_neutral,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/{data_freshness_guard,consistency_check}.py` + `src/execution/order_router.py` + `src/paper/memory_router.py` + `src/universe/{filter,api_loader}.py` + `src/app/pages/strategy.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1,run_s1_e0_v1_bootstrap,run_s1_e1_chip_event,run_s1_e2_mean_reversion,run_s1_e3_momentum_ic,build_sampled_universe,snapshot_advisor_scores}.py` + `analysis/v1_trades.json` + `analysis/{local_data_audit,ic_report,backtest_v1_report,s1_e0_v1_bootstrap_report,s1_e1_chip_event_report,s1_e2_mean_reversion_report,s1_e3_momentum_ic_report,s1_sprint1_comparison_report}.md` |
 | Repo 是否乾淨 | main：S1 全部 task 完成；working tree 仍有 pre-existing modified/untracked files。本 session 新增 sprint 1 comparison report，PROGRESS 與 README 同步更新 |
@@ -39,7 +39,8 @@
 | 9 — Monitor | 2 | 2 | 0 | 0 | 0 |
 | 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
 | **S1 — Strategy Research Sprint 1**（spec `STRATEGY_REVIEW.md §D`）| 7 | 7 | 0 | 0 | 0 |
-| **總計** | **52** | **48** | **0** | **4** | **0** |
+| **S2 — Sprint 2 validation**（spec `STRATEGY_REVIEW.md §E`，縮版 2 task）| 2 | 0 | 0 | 2 | 0 |
+| **總計** | **54** | **48** | **0** | **6** | **0** |
 
 ---
 
@@ -1549,7 +1550,54 @@
 - **DoD**: report 產出 + PROGRESS / README 同步 sprint 1 結束狀態 → 完成
 - **Last updated**: 2026-05-24
 - **Session log**:
-  - 2026-05-24 (this commit)：撰寫 `analysis/s1_sprint1_comparison_report.md`（6 章節：比較表 / §D.5 出口分支套用 / sprint 2 task 提案 / sprint 2 失敗預案 / pytest+code 變更摘要 / 結論）；PROGRESS Quick Status 改寫 + Phase Summary 47→48 + S1 7/7；README §3.1 sprint 1 全完成 + §3.6 下一動作改「等 user 批准 sprint 2」；Global Session Log 補 E0 REPORT hash 34e4805
+  - 2026-05-24 `fd5a330`：撰寫 `analysis/s1_sprint1_comparison_report.md`（6 章節：比較表 / §D.5 出口分支套用 / sprint 2 task 提案 / sprint 2 失敗預案 / pytest+code 變更摘要 / 結論）；PROGRESS Quick Status 改寫 + Phase Summary 47→48 + S1 7/7；README §3.1 sprint 1 全完成 + §3.6 下一動作改「等 user 批准 sprint 2」；Global Session Log 補 E0 REPORT hash 34e4805
+
+### TASK-S2-SECTOR
+
+- **Name**: 真實 TWSE 產業別 fetcher
+- **Source**: `STRATEGY_REVIEW.md §E.2`
+- **Status**: `NOT_STARTED`
+- **Depends**: — (WALKFWD / 未來 PORTFOLIO 依賴此 task)
+- **Files (planned)**:
+  - `src/universe/sector_mapping.py` — `fetch_twse_sectors` + `load_sector_mapping` + `get_sector`
+  - `tests/test_universe/test_sector_mapping.py` — ≥ 4 tests
+  - `analysis/sector_map.json` — 持久化 mapping（`data/` 被 gitignore，artifact 改放 `analysis/`）
+- **Acceptance**:
+  - 從 TWSE ISIN endpoint 抓真實 28 類產業別
+  - 139 universe 全部 lookup 到非 unknown sector
+  - HTTP 層 mock，單元測試不打網路
+  - 取代 `src/signals/sector_neutral.infer_sector`（保留 alias）
+- **Tests (RED list)**: ≥ 4 項
+  - parse 已知 HTML/JSON sample
+  - cache 寫入 + 讀回
+  - fallback：mapping miss → "unknown"
+  - 整合：sector_neutral.sector_neutralize 接 real mapping
+- **DoD**: mapping 持久化 + sector_neutral 接得起；不打網路 unit test 全綠
+- **Last updated**: 2026-05-25
+- **Session log**: _尚無_
+
+### TASK-S2-WALKFWD
+
+- **Name**: E3 momentum walk-forward IC + 真實 sector-neutral
+- **Source**: `STRATEGY_REVIEW.md §E.2`
+- **Status**: `NOT_STARTED`
+- **Depends**: TASK-S2-SECTOR
+- **Files (planned)**:
+  - `scripts/run_s2_walkfwd_momentum.py` — 沿用 `src/backtest/walk_forward` 切分 + per-window IC（raw + real sector-neutral）
+  - `tests/test_scripts/test_run_s2_walkfwd_momentum.py` — ≥ 3 tests
+  - `analysis/s2_walkfwd_momentum_report.md` — 11 windows OOS IC + 衰減比例 + §E.3 gate verdict
+- **Acceptance**:
+  - 沿用 V1 walk-forward 切分 (IS 12mo / OOS 3mo) 產 11 windows
+  - 每 window：IS 計 IC point；OOS 計 forward return → OOS IC
+  - raw + real sector-neutral 兩 variant 並列
+  - 各 metric 跨 windows mean + std
+- **Tests (RED list)**: ≥ 3 項
+  - walk-forward window 切分（reuse 既有 helper）
+  - per-window IC 計算（合成資料）
+  - smoke：3 windows minimal 配置產報告
+- **DoD**: 報告產出 + 套 §E.3 gate verdict（OOS sector-neutral ic_mean ≥ 0.04 → 解鎖 4 個 follow-up task；0.02-0.04 UNCERTAIN；< 0.02 E3 artifact 結束）
+- **Last updated**: 2026-05-25
+- **Session log**: _尚無_
 
 ---
 

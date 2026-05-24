@@ -86,12 +86,13 @@ specs/
 
 ### 3.1 目前 phase
 
-**🎯 S1 sprint 1 全部完成（7/7）→ 唯一過 gate 候選：E3 cross-sectional momentum → 待 user 批准 sprint 2 task 拆解**
+**🎯 S1 sprint 1 完成（7/7）→ user 批准縮版 sprint 2（SECTOR + WALKFWD 兩 task validate alpha）→ 待開動**
 
-- **總進度**: **48/52** tasks DONE（base 41/45 + S1 phase 7/7）；0 IN_PROGRESS / 0 BLOCKED / 4 NOT_STARTED（皆 infra defer：P02/X02/X03/D04）
-- **Phase 完成度**: Phase 0-7/9 全 ✅；Phase 8（P01 ✅，P02/D04 defer）；Phase 10（X01 ✅，X02/X03 defer）；**Phase S1 全部 DONE**
+- **總進度**: **48/54** tasks DONE（base 41/45 + S1 7/7；S2 新增 2 NOT_STARTED）；0 IN_PROGRESS / 0 BLOCKED / 6 NOT_STARTED（2 S2 + 4 infra defer：P02/X02/X03/D04）
+- **Phase 完成度**: Phase 0-7/9 全 ✅；Phase 8（P01 ✅，P02/D04 defer）；Phase 10（X01 ✅，X02/X03 defer）；**Phase S1 全部 DONE**；**Phase S2 啟動**（SECTOR/WALKFWD NOT_STARTED）
 - **Pytest**: 完整 **751/751 GREEN**（6 warnings：scipy precision + urllib3 LibreSSL env）
-- **Sprint 1 結論**: 見 `analysis/s1_sprint1_comparison_report.md`；E0 UNCERTAIN / E1 FAIL / E2 FAIL / **E3 PASS**；§D.5 唯一觸發分支 → sprint 2 cross-sectional pipeline
+- **Sprint 1 結論**: 見 `analysis/s1_sprint1_comparison_report.md`；E0 UNCERTAIN / E1 FAIL / E2 FAIL / **E3 PASS**
+- **Sprint 2 縮版策略**: 見 `STRATEGY_REVIEW.md §E`；先 SECTOR + WALKFWD validate E3 walk-forward alpha → gate 過才解鎖 PORTFOLIO / RANK-SE / UNIVERSE / BACKTEST 四 follow-up
 
 ### 3.2 V1 第六次判決 verdict 摘要
 
@@ -144,10 +145,11 @@ specs/
    - `PROGRESS.md` Quick Status + S1 phase 對應 task block
    - `analysis/backtest_v1_report.md` V1 第六次判決細節（背景）
 2. **下一個動作**（依 PROGRESS Quick Status）：
-   - S1 sprint 1 **全部 DONE（7/7）**
-   - 待 user 批准 sprint 2 task 拆解（6 個提案：SECTOR / WALKFWD / UNIVERSE / PORTFOLIO / RANK-SE / BACKTEST），再寫入 `STRATEGY_REVIEW.md §E` + PROGRESS Phase S2
-   - 首要 task = **TASK-S2-SECTOR**（真實 TWSE 產業別 fetcher，為 WALKFWD / PORTFOLIO 前置）
-   - 詳見 `analysis/s1_sprint1_comparison_report.md` §3 sprint 2 規劃
+   - S1 sprint 1 **全部 DONE（7/7）**；S2 縮版規格已寫入 `STRATEGY_REVIEW.md §E`
+   - 當前 active task = **TASK-S2-SECTOR**（RED 階段）— 真實 TWSE 產業別 fetcher，替換 4-digit prefix heuristic
+   - 完成 SECTOR 後接 **TASK-S2-WALKFWD**（E3 walk-forward + 真實 sector-neutral）
+   - §E.3 gate 決定是否解鎖 4 個 follow-up task（UNIVERSE / PORTFOLIO / RANK-SE / BACKTEST）
+   - 詳見 `analysis/s1_sprint1_comparison_report.md` §3 sprint 2 規劃 + `STRATEGY_REVIEW.md §E`
 3. **不要直接做**: 完整 SignalEngine implementation（除非該策略已過 §D.3 gate）/ paper runner / multi-strategy allocator
 4. **複用 infra**: backtest engine / orchestrator / regime gate / risk gates / journal / report / cost_model 全部 **不必重做**
 

@@ -440,8 +440,95 @@ E0 V1 bootstrap CI 上界 < 0
 
 ---
 
+## §E S2 Sprint 2 Plan（縮版兩 task validation）
+
+### E.1 為何縮版
+
+Sprint 1 唯一過 gate 的 E3（C2 cross-sectional momentum）有四項致命 caveats：
+1. 50 sector buckets / 139 檔 → 多數 singleton bucket → sector-neutral 等於 raw
+2. Universe 含 39 檔 hand-picked 倖存者偏差
+3. In-sample only（4yr 全段一次計算 IC + decile spread）
+4. Cost-adj 4.69%/月 年化 ~56%，與業界典型 8-15% 差距過大，高機率含 overlap × universe bias 雙重高估
+
+**先做 cheap 驗證**（不立刻投資 portfolio + ranking SignalEngine 基礎建設），驗證 E3 alpha 在 walk-forward + 真實 sector 下仍存在，再決定是否進 full pipeline。失敗則 sprint 2 早收，省下週級 task 投資。
+
+### E.2 兩 task 規格（gate-first）
+
+#### TASK-S2-SECTOR — 真實 TWSE 產業別 fetcher
+
+- **目標**: 用真實 TWSE 產業分類（28 類左右）替換 `infer_sector` 4-digit prefix heuristic
+- **資料源**: TWSE ISIN endpoint `https://isin.twse.com.tw/isin/C_public.jsp?strMode=2`（公開股票基本資料含產業別欄位）
+  - Fallback：若 endpoint 不可達，從 `data/cache/stock_list.json` 推 + 手動補一張 minimal mapping CSV
+- **API**:
+  ```python
+  # src/universe/sector_mapping.py
+  def fetch_twse_sectors(cache_path: Path) -> dict[str, str]: ...
+  # stock_id -> sector_code (e.g. "24" 半導體業 / "28" 銀行業 / etc.)
+
+  def load_sector_mapping(cache_path: Path) -> dict[str, str]: ...
+  # 讀本地快取；不存在 → fetch
+
+  def get_sector(stock_id: str, mapping: dict[str, str]) -> str: ...
+  # 取代 src/signals/sector_neutral.infer_sector
+  ```
+- **Tests (RED list)**: ≥ 4 項
+  - parse 已知 HTML/JSON 樣本（mock HTTP）
+  - cache 寫入與讀回
+  - fallback：mapping miss → "unknown"
+  - 整合：sector_neutral.sector_neutralize 接 real mapping 還是 OK
+- **DoD**: 139 universe 全部能 lookup 到非 unknown sector；mapping 寫入 `data/cache/sector_map.json`
+- **預估**: ~0.5d
+
+#### TASK-S2-WALKFWD — E3 momentum walk-forward IC + 真實 sector-neutral
+
+- **目標**: 在既有 139 universe 上用 walk-forward 切分（IS 12mo / OOS 3mo，同 V1）+ 真實 sector 重評 E3 alpha
+- **方法**:
+  - 沿用 `src/backtest/walk_forward` 切分產 11 windows（同 V1 spec）
+  - 每 window：用 IS 段算 IC 點估計，再在 OOS 段算 forward return → OOS IC
+  - 同時跑 raw + 真實 sector-neutral 兩 variant
+  - 各 metric 跨 11 windows 取 mean + std
+- **API**:
+  ```python
+  # scripts/run_s2_walkfwd_momentum.py
+  def run_walkfwd_momentum(*, data_dir, sector_mapping, output_path, ...) -> dict[str, dict]
+  ```
+- **報告**: `analysis/s2_walkfwd_momentum_report.md`
+  - 11 windows OOS IC 表（raw + sector-neutral）
+  - OOS mean ic_mean + std
+  - 相對 sprint 1 in-sample IC 的衰減比例
+  - 套 §E.3 gate
+- **Tests (RED list)**: ≥ 3 項
+  - walk-forward window 切分（沿用既有 helper 或薄 wrapper）
+  - per-window IC 計算
+  - smoke：3 windows minimal 配置產報告
+- **預估**: ~1-2d
+
+### E.3 Sprint 2 出口 gate
+
+跑完 TASK-S2-WALKFWD 後依 OOS 平均 ic_mean 分支：
+
+| OOS sector-neutral ic_mean | 動作 |
+|---|---|
+| **≥ 0.04**（達 V2 §1 horizon 20 門檻） | **解鎖** 剩餘 4 個 sprint 3 task（UNIVERSE / PORTFOLIO / RANK-SE / BACKTEST）；提案 spec 寫入 §F |
+| 0.02 - 0.04 | UNCERTAIN — 評估是否擴 universe 或補 advisor IC（C4）後再戰；不直接建 PORTFOLIO infra |
+| < 0.02 或翻負 | **E3 列 in-sample artifact**，sprint 2 結束；進 sprint 3 評估 C4 advisor / C0b / C3 / 補 infra |
+
+### E.4 不該做的事（強化 §D.6）
+
+- ❌ 在 SECTOR + WALKFWD 過 gate 前建 PORTFOLIO / RANK-SE / SignalEngine adapter（避免 in-sample artifact 上花週級 task）
+- ❌ 大規模 universe 擴充（survivorship-aware）— 等 WALKFWD 結果決定是否值得做
+- ❌ 改 IC threshold / gate（保 V2 §1 spec）
+- ❌ E3 grid search（同 §D.6 V1 grid search 禁區）
+
+### E.5 修改歷史（§E 自身）
+
+- 2026-05-24：建立 — sprint 1 結束（E3 PASS but caveats）後縮版 sprint 2 規劃。先 2 task validate alpha，再決定是否投資 full pipeline。
+
+---
+
 ## 修改歷史
 
 - 2026-05-24：建立 — V1 §6.1 第六次判決後 retrospective。
 - 2026-05-24：補 A.0「策略類別與經典脈絡」（CAN SLIM / SEPA / Darvas Box / Turtle / 籌碼派 lineage）+ C1-C5 學名與藍本 references。澄清 S1 是 task 代號非策略名稱。
 - 2026-05-24：新增 §D「S1 Research Plan」— 收斂 `STRATEGY_RESEARCH_CONVERSATION.md` 六輪討論結論，定義 7 個 S1 task / event-study helper API / gate threshold / 各 experiment 規格 / 出口決策樹。作為新 session 的 single source of truth。
+- 2026-05-24：S1 sprint 1 完成（7/7），新增 §E「S2 Sprint 2 Plan（縮版兩 task validation）」— SECTOR + WALKFWD 兩 task 先驗證 E3 alpha 在 walk-forward + 真實 sector 下是否仍存在，過 gate 才解鎖 PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST 四個 follow-up。
