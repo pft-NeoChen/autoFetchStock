@@ -184,6 +184,15 @@ def test_strategy_page_root_has_no_max_height(tmp_path: Path) -> None:
     assert "max-height" not in style
 
 
+def test_strategy_page_root_enables_overflow_scroll(tmp_path: Path) -> None:
+    """`.main-container` 設 overflow:hidden + height:100vh，內頁須自帶 scroll。"""
+    _write_experiment(tmp_path, "exp1", trade_count=10, recorded_at=100.0)
+    page = create_strategy_page_layout(tmp_path, report_path=tmp_path / "no.md")
+    style = page.style or {}
+    assert style.get("overflowY") == "auto"
+    assert "100vh" in style.get("height", "")
+
+
 def test_strategy_page_does_not_leak_spec_jargon(tmp_path: Path) -> None:
     """Page 不該出現內部 spec reference（V2 §X / experiment_id raw / .md path）。"""
     _write_experiment(tmp_path, "exp1", trade_count=10, recorded_at=100.0)

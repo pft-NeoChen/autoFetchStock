@@ -521,15 +521,23 @@ def create_strategy_page_layout(
             _details_section(experiment, report_path),
         ])
 
+    # `.main-container` 在全域 CSS 設 `height: 100vh; overflow: hidden`，
+    # 內頁需自帶 scroll 容器（複製 `.news-page` 既有 pattern）。
     return html.Div(
         id="strategy-page",
         className="strategy-page",
-        # 不在內層 div 設 maxHeight → 讓 body 接管 scroll，避免被裁切。
         style={
+            "height": "calc(100vh - 100px)",
+            "overflowY": "auto",
+            "overflowX": "hidden",
             "padding": "24px 32px",
-            "maxWidth": "1100px",
-            "margin": "0 auto",
+            "boxSizing": "border-box",
             "color": "#e8e8e8",
         },
-        children=children,
+        children=[
+            html.Div(
+                style={"maxWidth": "1100px", "margin": "0 auto"},
+                children=children,
+            ),
+        ],
     )
