@@ -36,6 +36,8 @@ __all__ = [
 
 
 TWSE_ISIN_URL = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
+TPEX_ISIN_URL = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"
+DEFAULT_SOURCES: tuple[str, ...] = (TWSE_ISIN_URL, TPEX_ISIN_URL)
 DEFAULT_TIMEOUT = 30.0
 UNKNOWN_SECTOR = "unknown"
 
@@ -53,38 +55,53 @@ _STOCK_CELL_PATTERN = re.compile(r"^\s*(\d{4,6})\s*[　\s]+(.+?)\s*$")
 def parse_twse_sectors_html(html: str) -> dict[str, str]:
     """Parse the TWSE C_public.jsp HTML into ``{stock_id: industry}``.
 
-    The page exposes a table whose rows contain a leading placeholder cell,
-    a combined "code+name" cell, ISIN, listing date, market, industry,
-    CFI code, and remarks. Header / non-stock rows are skipped automatically.
+    Each table row contains: ``stock_id + name``, ISIN, listing date, market,
+    **industry**, CFI code, remarks. Some HTML variants insert a leading
+    placeholder cell, so the parser locates the stock cell by its
+    ``code　name`` pattern and reads the industry from offset +4. Header /
+    section / non-stock rows are skipped automatically.
     """
     mapping: dict[str, str] = {}
     for row_html in _ROW_PATTERN.findall(html):
         cells = [_strip_tags(c).strip() for c in _CELL_PATTERN.findall(row_html)]
-        if len(cells) < 6:
-            continue
-        stock_cell = cells[1]
-        match = _STOCK_CELL_PATTERN.match(stock_cell)
-        if not match:
-            continue
-        stock_id = match.group(1)
-        industry = cells[5]
-        if not industry:
-            continue
-        mapping[stock_id] = industry
+        for i, cell in enumerate(cells):
+            match = _STOCK_CELL_PATTERN.match(cell)
+            if not match:
+                continue
+            industry_idx = i + 4
+            if industry_idx >= len(cells):
+                break
+            industry = cells[industry_idx]
+            if industry:
+                mapping[match.group(1)] = industry
+            break
     return mapping
 
 
 # ── HTTP + cache ───────────────────────────────────────────────────────────
 
 
-def fetch_twse_sectors(cache_path: Path) -> dict[str, str]:
-    """Fetch the TWSE page, parse it, and write the mapping to ``cache_path``."""
-    logger.info("fetching TWSE sector mapping from %s", TWSE_ISIN_URL)
-    response = requests.get(TWSE_ISIN_URL, timeout=DEFAULT_TIMEOUT)
-    response.raise_for_status()
-    mapping = parse_twse_sectors_html(response.text)
+def fetch_twse_sectors(
+    cache_path: Path,
+    *,
+    sources: tuple[str, ...] = DEFAULT_SOURCES,
+) -> dict[str, str]:
+    """Fetch each source, parse it, merge, and write the mapping to ``cache_path``.
+
+    Default sources cover both TSE (上市, ``strMode=2``) and TPEX (上櫃, ``strMode=4``)
+    so the resulting mapping covers the full Taiwan equity universe. Tests can
+    override ``sources`` to a single URL.
+    """
+    mapping: dict[str, str] = {}
+    for url in sources:
+        logger.info("fetching TWSE sector mapping from %s", url)
+        response = requests.get(url, timeout=DEFAULT_TIMEOUT)
+        response.raise_for_status()
+        page = parse_twse_sectors_html(response.text)
+        logger.info("  parsed %d entries from %s", len(page), url)
+        mapping.update(page)
     _persist(cache_path, mapping)
-    logger.info("fetched %d sector mappings", len(mapping))
+    logger.info("fetched %d sector mappings total", len(mapping))
     return mapping
 
 
@@ -92,15 +109,16 @@ def load_sector_mapping(
     cache_path: Path,
     *,
     refresh: bool = False,
+    sources: tuple[str, ...] = DEFAULT_SOURCES,
 ) -> dict[str, str]:
     """Return the sector mapping, fetching it when missing or ``refresh`` set."""
     if refresh or not cache_path.exists():
-        return fetch_twse_sectors(cache_path)
+        return fetch_twse_sectors(cache_path, sources=sources)
     try:
         return json.loads(cache_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("cache %s unreadable (%s); refetching", cache_path, exc)
-        return fetch_twse_sectors(cache_path)
+        return fetch_twse_sectors(cache_path, sources=sources)
 
 
 def get_sector(stock_id: str, mapping: dict[str, str]) -> str:

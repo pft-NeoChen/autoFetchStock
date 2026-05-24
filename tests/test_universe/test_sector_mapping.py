@@ -25,6 +25,7 @@ import pandas as pd
 import pytest
 
 from src.universe.sector_mapping import (
+    TWSE_ISIN_URL,
     fetch_twse_sectors,
     get_sector,
     load_sector_mapping,
@@ -86,7 +87,7 @@ def test_fetch_twse_sectors_http(tmp_path: Path):
     cache_path = tmp_path / "sector_map.json"
 
     with patch("requests.get", return_value=mock_response) as mock_get:
-        result = fetch_twse_sectors(cache_path)
+        result = fetch_twse_sectors(cache_path, sources=(TWSE_ISIN_URL,))
 
     mock_get.assert_called_once()
     assert result["2330"] == "半導體業"
@@ -146,7 +147,9 @@ def test_load_sector_mapping_force_refresh(tmp_path: Path):
     mock_response.text = _SAMPLE_HTML
 
     with patch("requests.get", return_value=mock_response) as mock_get:
-        result = load_sector_mapping(cache_path, refresh=True)
+        result = load_sector_mapping(
+            cache_path, refresh=True, sources=(TWSE_ISIN_URL,)
+        )
 
     mock_get.assert_called_once()
     # 舊 key 不再存在，新資料已取代

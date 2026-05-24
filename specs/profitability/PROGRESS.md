@@ -11,10 +11,10 @@
 | 欄位 | 值 |
 |------|----|
 | 上次更新 | 2026-05-24 |
-| 上次 session | **S1 sprint 1 全部結束（7/7）→ sprint 2 縮版規劃寫入 §E**：user 批准縮版 2 task validation 路徑（不一次規劃 6 task），STRATEGY_REVIEW 新增 §E（SECTOR + WALKFWD 規格 + sprint 2 出口 gate：OOS sector-neutral ic_mean ≥ 0.04 才解鎖 4 個 follow-up task）。PROGRESS 新增 Phase S2 區塊（2 task NOT_STARTED）。Sprint 1 commit hashes：DOC fold-in `a4aac3c` / E2 `f0936cc` / E3 `60b496f` / E0 `34e4805` / REPORT `fd5a330`。 |
-| 當前 phase | **Phase S2 sprint 2 啟動** — 縮版 2 task validation：先 SECTOR (~0.5d) → WALKFWD (~1-2d) → gate 決定是否解鎖 PORTFOLIO/RANK-SE/UNIVERSE/BACKTEST |
-| 當前 task | — (準備開動 TASK-S2-SECTOR RED 階段) |
-| 下一個建議 task | **TASK-S2-SECTOR** — `src/universe/sector_mapping.py` + cache 寫入 `data/cache/sector_map.json`。從 TWSE ISIN endpoint 抓真實 28 類產業別，替換 `src/signals/sector_neutral.infer_sector` 4-digit prefix heuristic。規格 `STRATEGY_REVIEW.md §E.2`。 |
+| 上次 session | **TASK-S2-SECTOR 完成 + 重大發現**：新增 `src/universe/sector_mapping.py` + 7 unit tests + `analysis/sector_map.json`（TSE 1079 + TPEX 888 = 1967 mappings，139 universe coverage **137/139 = 98.6%**，27 真實 industries vs sprint 1 heuristic 50 buckets）+ `analysis/s2_sector_mapping_report.md`。**用真實 mapping 重評 sprint 1 E3 in-sample IC**：ic_mean **0.0834 → 0.0333**（縮水 60%）、cost-adj spread **4.69% → 2.10%**（縮水 55%）— sprint 1 sector-neutral PASS 大部分是 singleton bucket artifact，alpha 多為 sector beta。0.0333 已落 §E.3 UNCERTAIN 區，walk-forward 後恐進 DEAD。Commits: RED `ac9fe10` / GREEN `dc4f28b` / REPORT (pending)。完整 pytest **758/758 GREEN**。 |
+| 當前 phase | **Phase S2 sprint 2** — 1/2 DONE。SECTOR ✅；下個 task = WALKFWD（含全新 walk-forward + real sector-neutral verdict） |
+| 當前 task | — (SECTOR DONE，等開動 WALKFWD) |
+| 下一個建議 task | **TASK-S2-WALKFWD** — sprint 2 縮版 validation 核心 task：用 `analysis/sector_map.json` real mapping 跑 11 windows walk-forward IC（raw + real sector-neutral），套 §E.3 gate 決定 sprint 2 出口（≥ 0.04 解鎖 4 follow-up；0.02-0.04 UNCERTAIN；< 0.02 E3 artifact 結束）。規格 `STRATEGY_REVIEW.md §E.2`。 |
 | 全域 blocked | 無；Sprint 2 縮版 validation 進行中 |
 | Pytest 狀態 | 完整 pytest **751/751 GREEN**（6 warnings：scipy precision + urllib3 LibreSSL env） |
 | 檔案位置 | `specs/profitability/{README,PROFITABILITY_PLAN_V2,IMPLEMENTATION_PLAN,STRATEGY_REVIEW,PROGRESS,STRATEGY_RESEARCH_CONVERSATION}.md` + `src/research/{event_study,trade_bootstrap}.py` + `src/features/{rsi,*}.py` + `src/signals/{ic_analysis,sector_neutral,engine}.py` + `src/signals/rules/{long_entry,exits,regime_gate}.py` + `src/backtest/*.py` + `src/journal/*.py` + `src/portfolio/{risk_manager,position_sizer,correlation_filter}.py` + `src/monitor/{data_freshness_guard,consistency_check}.py` + `src/execution/order_router.py` + `src/paper/memory_router.py` + `src/universe/{filter,api_loader}.py` + `src/app/pages/strategy.py` + `scripts/{audit_local_data,backfill_historical_daily,backfill_historical_chips,run_ic_analysis,run_backtest_v1,run_s1_e0_v1_bootstrap,run_s1_e1_chip_event,run_s1_e2_mean_reversion,run_s1_e3_momentum_ic,build_sampled_universe,snapshot_advisor_scores}.py` + `analysis/v1_trades.json` + `analysis/{local_data_audit,ic_report,backtest_v1_report,s1_e0_v1_bootstrap_report,s1_e1_chip_event_report,s1_e2_mean_reversion_report,s1_e3_momentum_ic_report,s1_sprint1_comparison_report}.md` |
@@ -39,8 +39,8 @@
 | 9 — Monitor | 2 | 2 | 0 | 0 | 0 |
 | 10 — OrderExecutor | 3 | 1 | 0 | 2 | 0 |
 | **S1 — Strategy Research Sprint 1**（spec `STRATEGY_REVIEW.md §D`）| 7 | 7 | 0 | 0 | 0 |
-| **S2 — Sprint 2 validation**（spec `STRATEGY_REVIEW.md §E`，縮版 2 task）| 2 | 0 | 0 | 2 | 0 |
-| **總計** | **54** | **48** | **0** | **6** | **0** |
+| **S2 — Sprint 2 validation**（spec `STRATEGY_REVIEW.md §E`，縮版 2 task）| 2 | 1 | 0 | 1 | 0 |
+| **總計** | **54** | **49** | **0** | **5** | **0** |
 
 ---
 
@@ -1259,7 +1259,9 @@
 - 2026-05-24 | TASK-S1-E2 | RED `deded63` + GREEN `9850a0a` + REFACTOR `4addba3` + REPORT `f0936cc`：新增 `src/features/rsi.py` (Wilder rolling SMA RSI) + `scripts/run_s1_e2_mean_reversion.py` + 13 unit tests + `analysis/s1_e2_mean_reversion_report.md`。Trigger 5 條件全到位（5d ret < −1.5×20d vol / RSI<30 / per-stock regime ∈ {BULL,RANGE} / not limit-down / news_severity > −5），跑 139 檔 4yr → 1265 events、hit-rate 0.556 vs base 0.476（spread 8pp）、cost_adj_mean_5d 55.77bp、cost_adj_median_5d 26.14bp、**top5pct_excluded_mean_5d −4.40bp** → **FAIL by single criterion**（與 V1 §6.1 同 fail mode：edge 靠 outliers）。BEAR skip diagnostic 1938。**不搬** `src/signals/rules/mean_reversion_v1.py`，C1-panic 也不開探索。完整 pytest **733/733 GREEN**。
 - 2026-05-24 | TASK-S1-E3 | RED `a69b201` + GREEN `0a1cd35` + REFACTOR `559b516` + REPORT `60b496f`：新增 `src/signals/sector_neutral.py`（6 helpers）+ `scripts/run_s1_e3_momentum_ic.py` + 8 unit tests + `analysis/s1_e3_momentum_ic_report.md`。J–T 12-1m momentum vs 1m forward 跑 139 檔 4yr：**raw ic_mean 0.0996 / cost-adj spread 3.93% → PASS；sector-neutral ic_mean 0.0834 / cost-adj spread 4.69% → PASS**（首個過 gate 的 S1 候選）。Caveats：50 sector buckets / 139 檔 singleton 弱化；universe 含 39 hand-picked 倖存者偏差；in-sample only。依 §D.5 → 排入 sprint 2 cross-sectional ranking pipeline 規劃。完整 pytest **741/741 GREEN**。
 - 2026-05-24 | TASK-S1-E0 | RED `5061fd1` + GREEN `3248c1b` + REPORT `34e4805`：新增 `src/research/trade_bootstrap.py`（BootstrapStat / expectancy_bp / profit_factor / sharpe_ratio / bootstrap_trade_metrics seedable）+ `scripts/run_s1_e0_v1_bootstrap.py` + 10 unit tests；修 `scripts/run_backtest_v1.py` 加 `--dump-trades` flag + `_trade_to_dict` serializer，重跑 V1 產 `analysis/v1_trades.json`（59 OOS + 169 IS）；跑 1000 iter resample bootstrap 產 `analysis/s1_e0_v1_bootstrap_report.md`。結果 **全部 UNCERTAIN**：OOS expectancy_bp 點 −41.58 / CI [−290, +250]、sharpe 點 −0.04 / CI [−0.41, +0.20]、profit_factor 點 0.88 / CI [0.31, 1.91]；IS 同質。依 §D.4 → V1 既無 edge 也未真死，**留 baseline**；V1 §6.1 第六次判決的「V1 缺真實 edge」結論被 sampling noise 弱化。完整 pytest **751/751 GREEN**。
-- 2026-05-24 | **TASK-S1-REPORT** | (pending commit)：撰寫 `analysis/s1_sprint1_comparison_report.md`（6 章節：比較表 / §D.5 出口分支套用 / sprint 2 task 提案 / sprint 2 失敗預案 / pytest+code 變更摘要 / 結論）。Sprint 1 全部結束（7/7）。**唯一觸發 §D.5 正向分支：E3 → sprint 2 cross-sectional ranking pipeline**；其餘 verdict 均無 action（V1 留 baseline / chip rules 不搬 / mean reversion rules 不搬 / C1-panic 不開 / multi-strategy allocator 不開）。提案 6 個 sprint 2 task：SECTOR / WALKFWD / UNIVERSE / PORTFOLIO / RANK-SE / BACKTEST。完整 pytest **751/751 GREEN**。下一 session：**user 批准 sprint 2 task 拆解後**，寫入 STRATEGY_REVIEW §E + PROGRESS Phase S2，首要 task TASK-S2-SECTOR。
+- 2026-05-24 | TASK-S1-REPORT | `fd5a330`：撰寫 `analysis/s1_sprint1_comparison_report.md`（6 章節：比較表 / §D.5 出口分支套用 / sprint 2 task 提案 / sprint 2 失敗預案 / pytest+code 變更摘要 / 結論）。Sprint 1 全部結束（7/7）。**唯一觸發 §D.5 正向分支：E3 → sprint 2 cross-sectional ranking pipeline**；其餘 verdict 均無 action（V1 留 baseline / chip rules 不搬 / mean reversion rules 不搬 / C1-panic 不開 / multi-strategy allocator 不開）。提案 6 個 sprint 2 task。完整 pytest **751/751 GREEN**。
+- 2026-05-25 | Sprint 2 縮版 §E + Phase S2 寫入 | `e8684ea`：user 批准縮版 sprint 2（不一次規劃 6 task，先 SECTOR + WALKFWD validate alpha 再決定是否解鎖 4 個 follow-up）。STRATEGY_REVIEW 新增 §E（§E.1 為何縮版 / §E.2 兩 task 規格 / §E.3 出口 gate / §E.4 禁區）；PROGRESS 新增 S2 phase row 與 2 task block；README §3.1/§3.6 同步。純文件 commit，code 未動。
+- 2026-05-25 | TASK-S2-SECTOR | RED `ac9fe10` + GREEN `dc4f28b` + REPORT (pending)：新增 `src/universe/sector_mapping.py`（parse / fetch / load / get_sector，雙 endpoint TSE strMode=2 + TPEX strMode=4）+ 7 unit tests + `analysis/sector_map.json`（TSE 1079 + TPEX 888 = 1967 mappings）+ `analysis/s2_sector_mapping_report.md`。139 universe coverage **137/139 = 98.6%**（misses: 0050 ETF + 9110 TDR），27 真實 industries。**重大發現**：用真實 mapping 重評 sprint 1 E3 in-sample IC → ic_mean **0.0834 → 0.0333**（縮 60%）、cost-adj spread **4.69% → 2.10%**（縮 55%）。Sprint 1 sector-neutral PASS 大部分是 50-singleton-bucket artifact；alpha 大部分為 sector beta。In-sample 已落 §E.3 UNCERTAIN 區（0.02-0.04）。下一 session：TASK-S2-WALKFWD 正式 walk-forward gate verdict。完整 pytest **758/758 GREEN**。
 - 2026-05-23 | V1 重判決 plumbing prep | `scripts/run_backtest_v1.py` 大改 + 10 unit tests：
   - 新增 `load_chip_frames(data_dir)` / `load_margin_frames(data_dir)`：走 `data/chips/*.json` `data/margin/*.json` 組成 per-stock time series（容錯 invalid JSON / missing dir）
   - 新增 `build_market_ohlc_proxy(feature_frames)`：cross-section mean → OHLC DataFrame，供 regime classifier 用
@@ -1556,25 +1558,25 @@
 
 - **Name**: 真實 TWSE 產業別 fetcher
 - **Source**: `STRATEGY_REVIEW.md §E.2`
-- **Status**: `NOT_STARTED`
+- **Status**: `DONE`
 - **Depends**: — (WALKFWD / 未來 PORTFOLIO 依賴此 task)
-- **Files (planned)**:
-  - `src/universe/sector_mapping.py` — `fetch_twse_sectors` + `load_sector_mapping` + `get_sector`
-  - `tests/test_universe/test_sector_mapping.py` — ≥ 4 tests
-  - `analysis/sector_map.json` — 持久化 mapping（`data/` 被 gitignore，artifact 改放 `analysis/`）
-- **Acceptance**:
-  - 從 TWSE ISIN endpoint 抓真實 28 類產業別
-  - 139 universe 全部 lookup 到非 unknown sector
-  - HTTP 層 mock，單元測試不打網路
-  - 取代 `src/signals/sector_neutral.infer_sector`（保留 alias）
-- **Tests (RED list)**: ≥ 4 項
-  - parse 已知 HTML/JSON sample
-  - cache 寫入 + 讀回
-  - fallback：mapping miss → "unknown"
-  - 整合：sector_neutral.sector_neutralize 接 real mapping
-- **DoD**: mapping 持久化 + sector_neutral 接得起；不打網路 unit test 全綠
+- **Files**:
+  - `src/universe/sector_mapping.py` — `parse_twse_sectors_html` (position-agnostic regex) + `fetch_twse_sectors(cache_path, sources=)` (TSE strMode=2 + TPEX strMode=4 雙抓) + `load_sector_mapping` cache-first + `get_sector` w/ "unknown" fallback
+  - `tests/test_universe/test_sector_mapping.py` — 7 tests
+  - `analysis/sector_map.json` — TSE 1079 + TPEX 888 = 1967 mappings 持久化
+  - `analysis/s2_sector_mapping_report.md` — coverage + sprint 1 E3 重評 + 對 sprint 2 影響
+- **Coverage**: 139 universe **137/139 = 98.6%**，27 真實 industries（vs sprint 1 50 singleton buckets）
+- **重大發現**（sprint 1 E3 in-sample 重評）:
+  - Raw ic_mean 0.0996 / cost-adj 3.93%
+  - Sprint 1 heuristic (50 buckets) ic_mean 0.0834 / cost-adj 4.69%（singleton 無效中性化）
+  - **Real (27 industries) ic_mean 0.0333 / cost-adj 2.10%** — 縮水 60% / 55%
+  - Sprint 1 「alpha 非純 sector beta」結論破功；in-sample 已落 §E.3 UNCERTAIN 區
+- **DoD**: mapping 持久化 ✅ + sector_neutral 整合 ✅ + 不打網路 unit test 全綠 ✅
 - **Last updated**: 2026-05-25
-- **Session log**: _尚無_
+- **Session log**:
+  - 2026-05-25 RED `ac9fe10`：7 tests（parse / HTTP / cache hit / cache miss / refresh / unknown / sector_neutralize 整合）；linter 重寫 test fixture 為 8-cell layout
+  - 2026-05-25 GREEN `dc4f28b`：實作 `src/universe/sector_mapping.py`；first revision 用 hard-coded index 5 對應 8-cell layout，跑真實 TWSE 才發現 real HTML 只有 7 cells（offset +0/+4 not +1/+5）；改 position-agnostic：找 stock cell 後相對偏移 +4 取 industry；加 TPEX strMode=4 雙抓（單獨 TSE 只覆蓋 64%）；2 個 test 用 `sources=(TWSE_ISIN_URL,)` 限定單一 URL 保 deterministic；完整 pytest **758/758 GREEN**
+  - 2026-05-25 REPORT (pending commit)：跑真實 TWSE + TPEX 產 `analysis/sector_map.json`；寫 `analysis/s2_sector_mapping_report.md`（含 sprint 1 E3 重評）；發現 in-sample IC 從 0.0834 → 0.0333（縮 60%），sprint 1 sector-neutral PASS 大部分是 heuristic artifact
 
 ### TASK-S2-WALKFWD
 
